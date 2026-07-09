@@ -63,7 +63,7 @@ files. Prefer SDK-provided types over redefining shapes.
   (`INPUT_*`) go through `@actions/core` `getInput`; ambient environment
   (`GITHUB_EVENT_PATH`, `GITHUB_WORKSPACE`, …) goes through the `env-var`
   package (`envVar.from(env).get("NAME").required().asString()`), with the
-  env record injectable for tests — same idiom as vault-cortex.
+  env record injectable for tests.
 - Comments explain non-obvious domain context; never restate what a
   self-documenting name already says. Regex constants get doc comments.
 - Relative imports use explicit `.js` extensions (ESM runtime requirement).
