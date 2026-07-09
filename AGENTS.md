@@ -32,7 +32,9 @@ src/
 Pure leaves (`diff/`, `review/`) → I/O clients (`github/`, `openrouter/`,
 `context/`) → composition (`orchestrate.ts`). Only `main.ts` touches real
 `process.env` and constructs SDK clients. A pure module importing an I/O
-module is a backwards dependency and a bug.
+module is a backwards dependency and a bug — enforced by a
+`@typescript-eslint/no-restricted-imports` block in `eslint.config.ts`
+(type-only imports are allowed; they're erased at compile time).
 
 Use the official SDKs — don't hand-roll what `@actions/core`,
 `@actions/github` (octokit), `@openrouter/sdk`, or `parse-diff` already do.
