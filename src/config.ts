@@ -21,16 +21,6 @@ const optionalPositiveInteger = z
 
 const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
 
-const booleanString = z.string().transform((value, ctx) => {
-  if (value === "true") return true
-  if (value === "false") return false
-  ctx.addIssue({
-    code: "custom",
-    message: `"${value}" must be "true" or "false"`,
-  })
-  return z.NEVER
-})
-
 const configSchema = z.object({
   githubToken: z.string().min(1, "github_token is required"),
   openrouterApiKey: z.string().min(1, "openrouter_api_key is required"),
@@ -43,19 +33,29 @@ const configSchema = z.object({
   conventionsFile: z.string().min(1, "conventions_file must not be empty"),
   phases: z.string().min(1, "phases must not be empty"),
   contextBudgetTokens: requiredPositiveInteger,
-  traceRelatedFiles: booleanString,
-  costSummary: booleanString,
+  traceRelatedFiles: z.boolean(),
+  costSummary: z.boolean(),
   prNumberOverride: optionalPositiveInteger,
 })
 
 export type ActionConfig = z.infer<typeof configSchema>
 
 /**
- * Raw action inputs as returned by @actions/core getInput — always strings.
- * Collected in main.ts so this module stays pure and testable with plain
- * objects; all validation and coercion happens in parseConfig.
+ * Raw action inputs as collected in main.ts: strings from @actions/core
+ * getInput, except booleans, which arrive pre-parsed via getBooleanInput
+ * (it enforces the YAML 1.2 core-schema list — true|True|TRUE and the
+ * false equivalents — and throws on anything else, so string→boolean
+ * parsing isn't reinvented here). Collected in main.ts so this module
+ * stays pure and testable with plain objects; the remaining validation
+ * and coercion happens in parseConfig.
  */
-export type RawInputs = Record<keyof ActionConfig, string>
+export type RawInputs = Omit<
+  Record<keyof ActionConfig, string>,
+  "traceRelatedFiles" | "costSummary"
+> & {
+  traceRelatedFiles: boolean
+  costSummary: boolean
+}
 
 export const parseConfig = (rawInputs: RawInputs): ActionConfig => {
   const result = configSchema.safeParse(rawInputs)

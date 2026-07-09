@@ -11,8 +11,8 @@ const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   conventionsFile: "AGENTS.md",
   phases: "combined",
   contextBudgetTokens: "80000",
-  traceRelatedFiles: "true",
-  costSummary: "true",
+  traceRelatedFiles: true,
+  costSummary: true,
   prNumberOverride: "",
   ...overrides,
 })
@@ -37,8 +37,10 @@ describe("parseConfig", () => {
     })
   })
 
-  it("parses cost_summary false", () => {
-    const config = parseConfig(makeRawInputs({ costSummary: "false" }))
+  it("passes a false cost_summary through unchanged", () => {
+    // Booleans arrive pre-parsed from getBooleanInput — the schema must not
+    // coerce them (a truthiness bug here would flip false back to true)
+    const config = parseConfig(makeRawInputs({ costSummary: false }))
 
     expect(config.costSummary).toBe(false)
   })
@@ -67,16 +69,10 @@ describe("parseConfig", () => {
     ).toThrow('contextBudgetTokens: "" is not a positive integer')
   })
 
-  it("parses trace_related_files false", () => {
-    const config = parseConfig(makeRawInputs({ traceRelatedFiles: "false" }))
+  it("passes a false trace_related_files through unchanged", () => {
+    const config = parseConfig(makeRawInputs({ traceRelatedFiles: false }))
 
     expect(config.traceRelatedFiles).toBe(false)
-  })
-
-  it("rejects a trace_related_files value that is not true or false", () => {
-    expect(() =>
-      parseConfig(makeRawInputs({ traceRelatedFiles: "yes" })),
-    ).toThrow('traceRelatedFiles: "yes" must be "true" or "false"')
   })
 
   it("rejects an empty github token", () => {
