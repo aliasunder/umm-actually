@@ -26,10 +26,13 @@ const rangesOverlap = (first: Finding, second: Finding): boolean => {
   )
 }
 
-const isDuplicate = (candidate: Finding, kept: Finding): boolean =>
-  candidate.file === kept.file &&
-  candidate.category === kept.category &&
-  rangesOverlap(candidate, kept)
+const isDuplicate = (candidate: Finding, kept: Finding): boolean => {
+  return (
+    candidate.file === kept.file &&
+    candidate.category === kept.category &&
+    rangesOverlap(candidate, kept)
+  )
+}
 
 /**
  * Threshold-filter, dedupe, sort, and (only when a cap was provided) cap.
