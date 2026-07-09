@@ -68,7 +68,9 @@ export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string =>
 const truncateToTokenCap = (text: string, tokenCap: number): string => {
   const characterCap = tokenCap * CHARS_PER_TOKEN
   if (text.length <= characterCap) return text
-  return `${text.slice(0, characterCap)}\n\n[conventions truncated at ~${tokenCap} tokens]`
+  // toWellFormed: a cut mid-surrogate-pair would leave a lone surrogate,
+  // which some HTTP stacks and providers reject in the request body
+  return `${text.slice(0, characterCap).toWellFormed()}\n\n[conventions truncated at ~${tokenCap} tokens]`
 }
 
 /**
@@ -123,14 +125,19 @@ export const buildUserPrompt = ({
   /** Per-run random tag suffix — see generateDelimiterNonce. */
   delimiterNonce: string
 }): string => {
+  const metadataTag = `pr_metadata-${delimiterNonce}`
   const conventionsTag = `conventions-${delimiterNonce}`
   const diffTag = `diff-${delimiterNonce}`
   const priorFindingsTag = `prior_findings-${delimiterNonce}`
 
+  // Title, description, and branch names are PR-author-controlled — wrapped
+  // like every other untrusted section so they can't sit in instruction position
   const metadataSection = [
+    `<${metadataTag}>`,
     `PR title: ${prContext.title}`,
     `Branch: ${prContext.headRef} → ${prContext.baseRef}`,
     `PR description:\n${prContext.body ?? "(none)"}`,
+    `</${metadataTag}>`,
   ].join("\n")
 
   const conventionsSection =

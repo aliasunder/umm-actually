@@ -27,10 +27,19 @@ const SNAP_DISTANCE = 3
 const findingTag = (finding: Finding): string =>
   `**[${finding.severity}/${finding.category}]** ${finding.title}`
 
-const suggestionBlock = (finding: Finding): string =>
-  finding.suggestion === null
-    ? ""
-    : `\n\n\`\`\`diff\n${finding.suggestion}\n\`\`\``
+const suggestionBlock = (finding: Finding): string => {
+  if (finding.suggestion === null) return ""
+  // CommonMark: a fence longer than any backtick run inside the content
+  // cannot be closed early — sizes the fence to LLM-generated suggestions
+  // that themselves contain fenced blocks
+  const backtickRuns = finding.suggestion.match(/`+/g) ?? []
+  const longestBacktickRun = backtickRuns.reduce(
+    (longestRun, run) => Math.max(longestRun, run.length),
+    0,
+  )
+  const fence = "`".repeat(Math.max(3, longestBacktickRun + 1))
+  return `\n\n${fence}diff\n${finding.suggestion}\n${fence}`
+}
 
 const renderCommentBody = (
   finding: Finding,
@@ -60,11 +69,17 @@ const nearestCommentableLine = (
 
   const candidateLines = [...commentable.rightLines]
   if (candidateLines.length === 0) return undefined
-  return candidateLines.reduce((nearest, candidate) =>
+  const nearestLine = candidateLines.reduce((nearest, candidate) =>
     Math.abs(candidate - targetLine) < Math.abs(nearest - targetLine)
       ? candidate
       : nearest,
   )
+  // Hunk proximity alone isn't enough: a nearby zero-newLines hunk (pure
+  // deletion) has no rightLines, so the nearest candidate can come from a
+  // distant hunk — bound the snap itself to SNAP_DISTANCE
+  return Math.abs(nearestLine - targetLine) <= SNAP_DISTANCE
+    ? nearestLine
+    : undefined
 }
 
 /**
@@ -168,7 +183,7 @@ export const mapFindingsToReview = ({
 const renderBodyFinding = (finding: Finding): string =>
   `- ${findingTag(finding)} — \`${finding.file}:${finding.line}\` _(confidence: ${finding.confidence})_
   ${finding.description}
-  **Failure scenario:** ${finding.failure_scenario}`
+  **Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}`
 
 /** The review's top-level body: beyond-diff findings, cap note, attribution. */
 export const buildReviewBody = ({

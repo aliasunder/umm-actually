@@ -75,16 +75,25 @@ const serializeLine = (record: Record<string, unknown>): string => {
   }
 }
 
-/** Resolves function-valued child props at emit time — lets a child logger
+/** Lazy props exist for context not yet available at child creation — the
+ *  exact situation where a getter can throw. The logger must never crash the
+ *  caller, so record the failure instead of propagating it. */
+const resolveLazyValue = (value: unknown): unknown => {
+  if (typeof value !== "function") return value
+  try {
+    return value()
+  } catch (lazyPropError) {
+    return `[lazy prop failed: ${String(lazyPropError)}]`
+  }
+}
+
+/** Resolves function-valued props at emit time — lets a child logger
  *  carry context that doesn't exist yet at child creation. */
 const resolveLazyProps = (
   props: Record<string, unknown>,
 ): Record<string, unknown> => {
   const resolvedEntries = Object.entries(props).map(
-    ([key, value]): [string, unknown] => [
-      key,
-      typeof value === "function" ? value() : value,
-    ],
+    ([key, value]): [string, unknown] => [key, resolveLazyValue(value)],
   )
   return Object.fromEntries(resolvedEntries)
 }
@@ -110,7 +119,9 @@ export const createLogger = (
     // Capture source location for info/warn/error (skip debug to avoid overhead)
     const source = level !== "debug" ? getCallerSource() : undefined
 
-    const mergedData = { ...resolveLazyProps(baseProps), ...data }
+    // Resolve base props and per-call data through the same path — a lazy
+    // function in data would otherwise be silently dropped by JSON.stringify
+    const mergedData = resolveLazyProps({ ...baseProps, ...data })
     const line =
       serializeLine({
         timestamp: DateTime.now().toISO(),

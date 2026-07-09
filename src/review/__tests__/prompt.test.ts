@@ -111,6 +111,34 @@ describe("buildUserPrompt", () => {
     )
   })
 
+  it("wraps PR title and description in the nonce-tagged metadata block", () => {
+    const userPrompt = buildUserPrompt(makeUserPromptParts())
+
+    expect(userPrompt).toContain(
+      [
+        "<pr_metadata-abc123def456>",
+        "PR title: feat: trim names before greeting",
+        "Branch: feat/trim-names → main",
+        "PR description:\nTrims whitespace from names.",
+        "</pr_metadata-abc123def456>",
+      ].join("\n"),
+    )
+  })
+
+  it("keeps truncated conventions well-formed when the cap splits a surrogate pair", () => {
+    // 31,999 chars then an astral emoji: the 32,000-char cap cuts between
+    // its two UTF-16 code units
+    const conventionsSplitAtEmoji = `${"x".repeat(31_999)}😀${"y".repeat(100)}`
+
+    const userPrompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      conventions: conventionsSplitAtEmoji,
+    })
+
+    expect(userPrompt.isWellFormed()).toBe(true)
+    expect(userPrompt).toContain("[conventions truncated at ~8000 tokens]")
+  })
+
   it("truncates oversized conventions with an explicit notice", () => {
     const oversizedConventions = "x".repeat(40_000)
 
@@ -137,9 +165,20 @@ describe("buildUserPrompt", () => {
   })
 
   it("omits the prior_findings section when there are none", () => {
-    expect(buildUserPrompt(makeUserPromptParts())).not.toContain(
-      "<prior_findings",
-    )
+    const userPrompt = buildUserPrompt(makeUserPromptParts())
+
+    // Positive anchor first — an empty prompt would also pass the negative check
+    expect(userPrompt).toContain("<diff-abc123def456")
+    expect(userPrompt).not.toContain("<prior_findings")
+  })
+
+  it("renders (none) when the PR has no description", () => {
+    const userPrompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      prContext: { ...prContext, body: null },
+    })
+
+    expect(userPrompt).toContain("PR description:\n(none)")
   })
 
   it("includes prior findings with a do-not-re-report instruction when present", () => {

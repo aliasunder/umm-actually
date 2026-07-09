@@ -61,6 +61,12 @@ describe("parseConfig", () => {
     )
   })
 
+  it("rejects an empty context_budget_tokens", () => {
+    expect(() =>
+      parseConfig(makeRawInputs({ contextBudgetTokens: "" })),
+    ).toThrow('contextBudgetTokens: "" is not a positive integer')
+  })
+
   it("parses trace_related_files false", () => {
     const config = parseConfig(makeRawInputs({ traceRelatedFiles: "false" }))
 
@@ -79,10 +85,18 @@ describe("parseConfig", () => {
     )
   })
 
-  it("rejects an unknown severity threshold", () => {
-    expect(() =>
-      parseConfig(makeRawInputs({ severityThreshold: "extreme" })),
-    ).toThrow(/severityThreshold/)
+  it("passes severity_threshold through as a string for domain validation", () => {
+    // Value validation lives in review/finding.ts resolveSeverityThreshold —
+    // config checks shape only, same split as phases
+    const config = parseConfig(makeRawInputs({ severityThreshold: "extreme" }))
+
+    expect(config.severityThreshold).toBe("extreme")
+  })
+
+  it("rejects an empty severity_threshold", () => {
+    expect(() => parseConfig(makeRawInputs({ severityThreshold: "" }))).toThrow(
+      "severityThreshold: severity_threshold must not be empty",
+    )
   })
 
   it("parses a provided pr_number override into a number", () => {

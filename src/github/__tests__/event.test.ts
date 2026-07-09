@@ -40,6 +40,41 @@ describe("resolvePullRequestEvent", () => {
     })
   })
 
+  it("resolves a pull_request_target event to a complete context", () => {
+    const resolved = resolvePullRequestEvent(
+      {
+        eventName: "pull_request_target",
+        payload: pullRequestPayload,
+        prNumberOverride: undefined,
+      },
+      createTestLogger(),
+    )
+
+    expect(resolved).toEqual({
+      kind: "complete",
+      context: {
+        prNumber: 7,
+        title: "feat: trim names before greeting",
+        body: "Trims whitespace from names and validates registry keys.",
+        headSha: "abc123def456abc123def456abc123def456abc1",
+        headRef: "feat/trim-names",
+        baseRef: "main",
+      },
+    })
+  })
+
+  it("rejects a malformed issue_comment payload", () => {
+    const resolved = resolvePullRequestEvent(
+      { eventName: "issue_comment", payload: {}, prNumberOverride: undefined },
+      createTestLogger(),
+    )
+
+    expect(resolved).toEqual({
+      kind: "not_a_pr",
+      reason: "malformed issue_comment payload",
+    })
+  })
+
   it("resolves an issue_comment event on a PR to needs_fetch with the PR number", () => {
     const resolved = resolvePullRequestEvent(
       {

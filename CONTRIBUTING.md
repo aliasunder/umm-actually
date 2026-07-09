@@ -62,10 +62,11 @@ points:
 
 ## Releases
 
-Releases are cut by the maintainer. Each release publishes the action's Docker
-image and updates [`CHANGELOG.md`](./CHANGELOG.md) from Conventional Commit
-messages — which is why PR titles matter: on a squash merge the title becomes
-the changelog entry.
+Releases are cut by the maintainer. Each release will publish the action's
+Docker image and update [`CHANGELOG.md`](./CHANGELOG.md) from Conventional
+Commit messages via a release workflow (not yet built) — which is why PR
+titles matter already: on a squash merge the title becomes the changelog
+entry.
 
 ## License
 

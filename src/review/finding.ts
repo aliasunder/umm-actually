@@ -13,6 +13,26 @@ export type FindingCategory = (typeof FINDING_CATEGORIES)[number]
 export const FINDING_SEVERITIES = ["critical", "high", "medium", "low"] as const
 export type FindingSeverity = (typeof FINDING_SEVERITIES)[number]
 
+/**
+ * Validates the severity_threshold action input against the severity
+ * vocabulary this module owns — the domain validates the value, config
+ * validates shape only (same split as resolvePhases). Called at startup so
+ * a bad threshold crashes before any OpenRouter call.
+ */
+export const resolveSeverityThreshold = (
+  severityThresholdInput: string,
+): FindingSeverity => {
+  const matchedSeverity = FINDING_SEVERITIES.find(
+    (severity) => severity === severityThresholdInput,
+  )
+  if (matchedSeverity === undefined) {
+    throw new Error(
+      `unknown severity_threshold "${severityThresholdInput}" — valid: ${FINDING_SEVERITIES.join(" | ")}`,
+    )
+  }
+  return matchedSeverity
+}
+
 export const FINDING_CONFIDENCES = ["high", "medium", "low"] as const
 export type FindingConfidence = (typeof FINDING_CONFIDENCES)[number]
 

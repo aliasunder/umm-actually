@@ -1,8 +1,5 @@
 import { z } from "zod"
 
-export const SEVERITY_LEVELS = ["low", "medium", "high", "critical"] as const
-export type SeverityLevel = (typeof SEVERITY_LEVELS)[number]
-
 const parsePositiveInteger = (value: string, ctx: z.RefinementCtx): number => {
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -40,7 +37,9 @@ const configSchema = z.object({
   model: z.string().min(1, "model must not be empty"),
   fallbackModel: z.string(),
   maxFindings: optionalPositiveInteger,
-  severityThreshold: z.enum(SEVERITY_LEVELS),
+  // Shape-only, like phases: the value is validated by its domain owner
+  // (review/finding.ts resolveSeverityThreshold) at startup
+  severityThreshold: z.string().min(1, "severity_threshold must not be empty"),
   conventionsFile: z.string().min(1, "conventions_file must not be empty"),
   phases: z.string().min(1, "phases must not be empty"),
   contextBudgetTokens: requiredPositiveInteger,

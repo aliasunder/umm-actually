@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { reviewResponseJsonSchema, reviewResponseSchema } from "../finding.js"
+import {
+  resolveSeverityThreshold,
+  reviewResponseJsonSchema,
+  reviewResponseSchema,
+} from "../finding.js"
 import { makeFinding } from "./make-finding.js"
 
 const fixtureResponse: unknown = JSON.parse(
@@ -108,5 +112,20 @@ describe("reviewResponseJsonSchema", () => {
         },
       },
     })
+  })
+})
+
+describe("resolveSeverityThreshold", () => {
+  it("resolves every valid severity value", () => {
+    expect(resolveSeverityThreshold("critical")).toBe("critical")
+    expect(resolveSeverityThreshold("high")).toBe("high")
+    expect(resolveSeverityThreshold("medium")).toBe("medium")
+    expect(resolveSeverityThreshold("low")).toBe("low")
+  })
+
+  it("throws on an unknown severity_threshold, listing the valid values", () => {
+    expect(() => resolveSeverityThreshold("extreme")).toThrow(
+      'unknown severity_threshold "extreme" — valid: critical | high | medium | low',
+    )
   })
 })

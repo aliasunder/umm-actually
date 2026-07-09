@@ -31,10 +31,18 @@ describe("annotateDiff", () => {
     const renamedFile = parsedFiles.filter(
       (file) => file.to === "src/new-name.ts",
     )
-    const annotated = annotateDiff(renamedFile)
 
-    expect(annotated).toContain('       -   return "old"')
-    expect(annotated).not.toContain("12 -")
+    expect(annotateDiff(renamedFile)).toBe(
+      [
+        "=== src/new-name.ts (renamed from src/old-name.ts) ===",
+        "@@ -10,4 +10,4 @@ export const keep = (): string => {",
+        "    10   ",
+        "    11   export const renamedThing = (): string => {",
+        '       -   return "old"',
+        '    12 +   return "new"',
+        "    13   }",
+      ].join("\n"),
+    )
   })
 
   it("labels renamed files with their previous path", () => {
@@ -74,6 +82,10 @@ describe("annotateDiff", () => {
   })
 
   it("prints exactly the line numbers that commentable-lines computes, for every file", () => {
+    // Anchors the loop below — a fixture or parse failure must fail here, not
+    // silently skip every iteration
+    expect(parsedFiles).toHaveLength(6)
+
     const commentableByPath = computeCommentableLines(parsedFiles)
 
     for (const file of parsedFiles) {

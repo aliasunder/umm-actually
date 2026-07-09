@@ -3,10 +3,10 @@ import { createLogger } from "../logger.js"
 
 type WrittenLine = Record<string, unknown>
 
-const captureStdout = (): { lines: () => WrittenLine[] } => {
-  const writeSpy = vi
-    .spyOn(process.stdout, "write")
-    .mockImplementation(() => true)
+const captureStream = (
+  stream: typeof process.stdout | typeof process.stderr,
+): { lines: () => WrittenLine[] } => {
+  const writeSpy = vi.spyOn(stream, "write").mockImplementation(() => true)
   onTestFinished(() => writeSpy.mockRestore())
   return {
     lines: () =>
@@ -19,21 +19,11 @@ const captureStdout = (): { lines: () => WrittenLine[] } => {
   }
 }
 
-const captureStderr = (): { lines: () => WrittenLine[] } => {
-  const writeSpy = vi
-    .spyOn(process.stderr, "write")
-    .mockImplementation(() => true)
-  onTestFinished(() => writeSpy.mockRestore())
-  return {
-    lines: () =>
-      writeSpy.mock.calls.map((call): WrittenLine => {
-        const written = call[0]
-        if (typeof written !== "string")
-          throw new Error("expected string write")
-        return JSON.parse(written)
-      }),
-  }
-}
+const captureStdout = (): { lines: () => WrittenLine[] } =>
+  captureStream(process.stdout)
+
+const captureStderr = (): { lines: () => WrittenLine[] } =>
+  captureStream(process.stderr)
 
 describe("createLogger", () => {
   it("writes a structured JSON line with timestamp, level, name, message, and data", () => {
@@ -71,8 +61,49 @@ describe("createLogger", () => {
     const testLogger = createLogger("test-app", { env: {} })
 
     testLogger.debug("noisy")
+    testLogger.info("kept")
 
-    expect(stdout.lines()).toHaveLength(0)
+    const lines = stdout.lines()
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({ level: "info", message: "kept" })
+  })
+
+  it("routes warn to stdout at the default threshold", () => {
+    const stdout = captureStdout()
+    const stderr = captureStderr()
+    const testLogger = createLogger("test-app", { env: {} })
+
+    testLogger.warn("heads up")
+
+    expect(stderr.lines()).toHaveLength(0)
+    expect(stdout.lines()).toHaveLength(1)
+    expect(stdout.lines()[0]).toMatchObject({
+      level: "warn",
+      message: "heads up",
+    })
+  })
+
+  it("omits the source field on debug lines", () => {
+    const stdout = captureStdout()
+    const testLogger = createLogger("test-app", { env: { LOG_LEVEL: "debug" } })
+
+    testLogger.debug("verbose trace")
+
+    expect(stdout.lines()).toHaveLength(1)
+    expect(stdout.lines()[0]?.source).toBeUndefined()
+  })
+
+  it("reads LOG_LEVEL case-insensitively", () => {
+    const stdout = captureStdout()
+    const testLogger = createLogger("test-app", { env: { LOG_LEVEL: "DEBUG" } })
+
+    testLogger.debug("verbose trace")
+
+    expect(stdout.lines()).toHaveLength(1)
+    expect(stdout.lines()[0]).toMatchObject({
+      level: "debug",
+      message: "verbose trace",
+    })
   })
 
   it("emits debug when the injected env sets LOG_LEVEL=debug", () => {
@@ -173,6 +204,33 @@ describe("createLogger", () => {
       clientIp: "198.51.100.7",
       requestId: "9",
     })
+  })
+
+  it("records a placeholder instead of crashing when a lazy prop throws", () => {
+    const stdout = captureStdout()
+    const childLogger = createLogger("test-app").child({
+      requestId: () => {
+        throw new Error("context not ready")
+      },
+    })
+
+    childLogger.info("still emits")
+
+    const lines = stdout.lines()
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({
+      message: "still emits",
+      requestId: "[lazy prop failed: Error: context not ready]",
+    })
+  })
+
+  it("resolves function-valued per-call data the same way as child props", () => {
+    const stdout = captureStdout()
+    const testLogger = createLogger("test-app")
+
+    testLogger.info("msg", { lazy: () => "resolved value" })
+
+    expect(stdout.lines()[0]).toMatchObject({ lazy: "resolved value" })
   })
 
   it("resolves function-valued child props at emit time, not child creation", () => {

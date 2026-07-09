@@ -73,6 +73,19 @@ describe("selectFindings", () => {
     expect(result.selected).toEqual([invertedRangeFinding])
   })
 
+  it("does not deduplicate same-category overlapping findings in different files", () => {
+    const firstFileFinding = makeFinding({ file: "src/a.ts", line: 145 })
+    const secondFileFinding = makeFinding({ file: "src/b.ts", line: 145 })
+
+    const result = selectFindings({
+      findings: [firstFileFinding, secondFileFinding],
+      severityThreshold: "low",
+      maxFindings: undefined,
+    })
+
+    expect(result.selected).toEqual([firstFileFinding, secondFileFinding])
+  })
+
   it("does not deduplicate overlapping findings of different categories", () => {
     const correctnessFinding = makeFinding({
       category: "correctness",
