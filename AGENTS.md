@@ -20,7 +20,7 @@ src/
   config.ts                # action inputs → validated ActionConfig
   logger.ts                # thin Logger over @actions/core
   github/                  # GitHub I/O: event payload → PrContext, octokit wrappers
-  openrouter/              # OpenRouter I/O: openai SDK wrapper, structured-output ladder
+  openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, structured-output ladder
   diff/                    # pure transforms over parse-diff output
   context/                 # workspace reads: conventions file, changed files, related files
   review/                  # pure review logic: finding schema, phases, prompt, selection, comment mapping
@@ -35,7 +35,7 @@ Pure leaves (`diff/`, `review/`) → I/O clients (`github/`, `openrouter/`,
 module is a backwards dependency and a bug.
 
 Use the official SDKs — don't hand-roll what `@actions/core`,
-`@actions/github` (octokit), the `openai` SDK, or `parse-diff` already do.
+`@actions/github` (octokit), `@openrouter/sdk`, or `parse-diff` already do.
 Zod validates the things that are genuinely ours: LLM structured output and
 action config.
 

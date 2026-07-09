@@ -32,7 +32,7 @@
   "dependencies": {
     "@actions/core": "3.0.1",
     "@actions/github": "9.1.1",
-    "openai": "6.45.0",
+    "@openrouter/sdk": "0.13.34",
     "parse-diff": "0.12.0",
     "zod": "4.4.3"
   },

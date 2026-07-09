@@ -36,8 +36,8 @@ points:
   guards and Zod narrowing instead
 - Pure modules (`diff/`, `review/`) never import I/O modules; only `main.ts`
   touches `process.env` and constructs SDK clients
-- Use the official SDKs (`@actions/core`, `@actions/github`, `openai`,
-  `parse-diff`) — don't hand-roll what they already do
+- Use the official SDKs (`@actions/core`, `@actions/github`,
+  `@openrouter/sdk`, `parse-diff`) — don't hand-roll what they already do
 - Relative imports carry explicit `.js` extensions (ESM runtime requirement)
 - Tests are behavioral specs: one focused `it()` per behavior, exact
   assertions, `const` per test
