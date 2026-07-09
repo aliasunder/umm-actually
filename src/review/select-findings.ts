@@ -1,5 +1,5 @@
 import type { Finding, FindingSeverity } from "./finding.js"
-import { severityRank } from "./finding.js"
+import { SEVERITY_RANK } from "./finding.js"
 
 export type SelectionResult = {
   selected: Finding[]
@@ -48,37 +48,34 @@ export const selectFindings = ({
 }): SelectionResult => {
   const aboveThreshold = findings.filter(
     (finding) =>
-      severityRank[finding.severity] >= severityRank[severityThreshold],
+      SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[severityThreshold],
   )
   const droppedBelowThreshold = findings.length - aboveThreshold.length
 
-  // Process by severity (desc) so the kept finding in any duplicate pair is
-  // always the more severe one.
-  const bySeverity = [...aboveThreshold].sort(
-    (first, second) =>
-      severityRank[second.severity] - severityRank[first.severity],
-  )
-  const deduplicated = bySeverity.reduce<Finding[]>((kept, candidate) => {
+  // Sort with the full comparator before deduping — dedupe preserves order,
+  // so the kept finding in any duplicate pair is always the more severe one
+  // (ties broken deterministically by file, then line) and the result needs
+  // no second sort.
+  const sorted = [...aboveThreshold].sort((first, second) => {
+    const severityDifference =
+      SEVERITY_RANK[second.severity] - SEVERITY_RANK[first.severity]
+    if (severityDifference !== 0) return severityDifference
+    if (first.file !== second.file) return first.file.localeCompare(second.file)
+    return first.line - second.line
+  })
+  const deduplicated = sorted.reduce<Finding[]>((kept, candidate) => {
     const duplicateOfKept = kept.some((existing) =>
       isDuplicate(candidate, existing),
     )
     return duplicateOfKept ? kept : [...kept, candidate]
   }, [])
 
-  const sorted = [...deduplicated].sort((first, second) => {
-    const severityDifference =
-      severityRank[second.severity] - severityRank[first.severity]
-    if (severityDifference !== 0) return severityDifference
-    if (first.file !== second.file) return first.file.localeCompare(second.file)
-    return first.line - second.line
-  })
-
-  if (maxFindings === undefined || sorted.length <= maxFindings) {
-    return { selected: sorted, droppedBelowThreshold, droppedByCap: [] }
+  if (maxFindings === undefined || deduplicated.length <= maxFindings) {
+    return { selected: deduplicated, droppedBelowThreshold, droppedByCap: [] }
   }
   return {
-    selected: sorted.slice(0, maxFindings),
+    selected: deduplicated.slice(0, maxFindings),
     droppedBelowThreshold,
-    droppedByCap: sorted.slice(maxFindings),
+    droppedByCap: deduplicated.slice(maxFindings),
   }
 }

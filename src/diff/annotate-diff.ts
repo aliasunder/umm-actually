@@ -8,12 +8,23 @@ import { newFilePath } from "./commentable-lines.js"
  */
 const changeText = (change: Change): string => change.content.slice(1)
 
+/**
+ * parse-diff emits "\ No newline at end of file" as a copy of the previous
+ * change — same type, same line number, marker text as content. Rendered, it
+ * would appear as a phantom content line duplicating a real line number.
+ */
+const isNoNewlineMarker = (change: Change): boolean =>
+  change.content.startsWith("\\")
+
+/** Width of the line-number column; deleted rows pad with spaces to match. */
+const LINE_NUMBER_WIDTH = 6
+
 const renderChange = (change: Change): string => {
   if (change.type === "add")
-    return `${String(change.ln).padStart(6)} + ${changeText(change)}`
+    return `${String(change.ln).padStart(LINE_NUMBER_WIDTH)} + ${changeText(change)}`
   if (change.type === "normal")
-    return `${String(change.ln2).padStart(6)}   ${changeText(change)}`
-  return `       - ${changeText(change)}`
+    return `${String(change.ln2).padStart(LINE_NUMBER_WIDTH)}   ${changeText(change)}`
+  return `${" ".repeat(LINE_NUMBER_WIDTH)} - ${changeText(change)}`
 }
 
 const fileStatus = (file: File): string => {
@@ -40,7 +51,9 @@ export const annotateDiff = (files: File[]): string => {
       return `${header}\n(no line changes — binary or metadata-only)`
 
     const chunkBlocks = file.chunks.map((chunk) => {
-      const renderedChanges = chunk.changes.map(renderChange)
+      const renderedChanges = chunk.changes
+        .filter((change) => !isNoNewlineMarker(change))
+        .map(renderChange)
       return [chunk.content, ...renderedChanges].join("\n")
     })
     return [header, ...chunkBlocks].join("\n")

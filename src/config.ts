@@ -3,9 +3,7 @@ import { z } from "zod"
 export const SEVERITY_LEVELS = ["low", "medium", "high", "critical"] as const
 export type SeverityLevel = (typeof SEVERITY_LEVELS)[number]
 
-/** Empty string means "not provided"; anything else must parse as a positive integer. */
-const optionalPositiveInteger = z.string().transform((value, ctx) => {
-  if (value === "") return undefined
+const parsePositiveInteger = (value: string, ctx: z.RefinementCtx): number => {
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed <= 0) {
     ctx.addIssue({
@@ -15,19 +13,16 @@ const optionalPositiveInteger = z.string().transform((value, ctx) => {
     return z.NEVER
   }
   return parsed
-})
+}
 
-const requiredPositiveInteger = z.string().transform((value, ctx) => {
-  const parsed = Number(value)
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    ctx.addIssue({
-      code: "custom",
-      message: `"${value}" is not a positive integer`,
-    })
-    return z.NEVER
-  }
-  return parsed
-})
+/** Empty string means "not provided"; anything else must parse as a positive integer. */
+const optionalPositiveInteger = z
+  .string()
+  .transform((value, ctx) =>
+    value === "" ? undefined : parsePositiveInteger(value, ctx),
+  )
+
+const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
 
 const booleanString = z.string().transform((value, ctx) => {
   if (value === "true") return true

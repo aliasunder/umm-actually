@@ -52,3 +52,13 @@ index 5555555..6666666 100644
 diff --git a/assets/logo.png b/assets/logo.png
 index 7777777..8888888 100644
 Binary files a/assets/logo.png and b/assets/logo.png differ
+diff --git a/src/no-trailing-newline.ts b/src/no-trailing-newline.ts
+index 9999999..aaaaaaa 100644
+--- a/src/no-trailing-newline.ts
++++ b/src/no-trailing-newline.ts
+@@ -1,2 +1,2 @@
+ const configVersion = 1
+-export const configName = "old"
+\ No newline at end of file
++export const configName = "new"
+\ No newline at end of file

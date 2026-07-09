@@ -47,6 +47,22 @@ describe("annotateDiff", () => {
     )
   })
 
+  it("filters no-newline markers so they don't render as phantom content lines", () => {
+    const noNewlineFile = parsedFiles.filter(
+      (file) => file.to === "src/no-trailing-newline.ts",
+    )
+
+    expect(annotateDiff(noNewlineFile)).toBe(
+      [
+        "=== src/no-trailing-newline.ts ===",
+        "@@ -1,2 +1,2 @@",
+        "     1   const configVersion = 1",
+        '       - export const configName = "old"',
+        '     2 + export const configName = "new"',
+      ].join("\n"),
+    )
+  })
+
   it("renders binary files as a no-line-changes section", () => {
     const binaryFile = parsedFiles.filter(
       (file) => file.to === "assets/logo.png",

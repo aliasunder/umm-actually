@@ -116,6 +116,26 @@ describe("createLogger", () => {
     })
   })
 
+  it("degrades to core fields when the data cannot be serialized", () => {
+    const stdout = captureStdout()
+    const testLogger = createLogger("test-app")
+    // Mutable on purpose — a circular reference requires self-assignment
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+
+    testLogger.info("kept message", { circular })
+
+    const lines = stdout.lines()
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({
+      level: "info",
+      name: "test-app",
+      message: "kept message",
+    })
+    expect(lines[0]?.circular).toBeUndefined()
+    expect(typeof lines[0]?.serialization_error).toBe("string")
+  })
+
   it("captures the caller's source location as filename:line", () => {
     const stdout = captureStdout()
     const testLogger = createLogger("test-app")

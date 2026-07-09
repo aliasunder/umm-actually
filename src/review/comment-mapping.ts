@@ -75,19 +75,67 @@ const multiLineEnd = (
   finding: Finding,
   commentable: CommentableFile,
 ): number | undefined => {
-  if (finding.end_line === null || finding.end_line === finding.line)
-    return undefined
-  if (finding.end_line < finding.line) return undefined
-  if (!commentable.rightLines.has(finding.end_line)) return undefined
+  // Local capture keeps the null-narrowing visible inside the .some() closure
+  const endLine = finding.end_line
+  if (endLine === null || endLine === finding.line) return undefined
+  if (endLine < finding.line) return undefined
+  if (!commentable.rightLines.has(endLine)) return undefined
   const sharedHunk = commentable.hunkRanges.some(
     (range) =>
       finding.line >= range.start &&
       finding.line <= range.end &&
-      finding.end_line !== null &&
-      finding.end_line >= range.start &&
-      finding.end_line <= range.end,
+      endLine >= range.start &&
+      endLine <= range.end,
   )
-  return sharedHunk ? finding.end_line : undefined
+  return sharedHunk ? endLine : undefined
+}
+
+/**
+ * Routes one finding: inline comment when its line is verifiably anchorable
+ * (exact or snapped), review-body finding otherwise.
+ */
+const classifyFinding = (
+  finding: Finding,
+  commentableByPath: Map<string, CommentableFile>,
+): { comment?: ReviewComment; bodyFinding?: Finding } => {
+  const commentable = commentableByPath.get(finding.file)
+  if (commentable === undefined) return { bodyFinding: finding }
+
+  if (commentable.rightLines.has(finding.line)) {
+    const endLine = multiLineEnd(finding, commentable)
+    // GitHub's API: `line` is the LAST line of a multi-line range, `start_line` the first
+    const comment: ReviewComment =
+      endLine === undefined
+        ? {
+            path: finding.file,
+            line: finding.line,
+            side: "RIGHT",
+            body: renderCommentBody(finding),
+          }
+        : {
+            path: finding.file,
+            line: endLine,
+            side: "RIGHT",
+            start_line: finding.line,
+            start_side: "RIGHT",
+            body: renderCommentBody(finding),
+          }
+    return { comment }
+  }
+
+  const snappedLine = nearestCommentableLine(finding.line, commentable)
+  if (snappedLine !== undefined) {
+    return {
+      comment: {
+        path: finding.file,
+        line: snappedLine,
+        side: "RIGHT",
+        body: renderCommentBody(finding, finding.line),
+      },
+    }
+  }
+
+  return { bodyFinding: finding }
 }
 
 /**
@@ -104,47 +152,8 @@ export const mapFindingsToReview = ({
   findings: Finding[]
   commentableByPath: Map<string, CommentableFile>
 }): MappedReview => {
-  const mapped = findings.map(
-    (finding): { comment?: ReviewComment; bodyFinding?: Finding } => {
-      const commentable = commentableByPath.get(finding.file)
-      if (commentable === undefined) return { bodyFinding: finding }
-
-      if (commentable.rightLines.has(finding.line)) {
-        const endLine = multiLineEnd(finding, commentable)
-        // GitHub's API: `line` is the LAST line of a multi-line range, `start_line` the first
-        const comment: ReviewComment =
-          endLine === undefined
-            ? {
-                path: finding.file,
-                line: finding.line,
-                side: "RIGHT",
-                body: renderCommentBody(finding),
-              }
-            : {
-                path: finding.file,
-                line: endLine,
-                side: "RIGHT",
-                start_line: finding.line,
-                start_side: "RIGHT",
-                body: renderCommentBody(finding),
-              }
-        return { comment }
-      }
-
-      const snappedLine = nearestCommentableLine(finding.line, commentable)
-      if (snappedLine !== undefined) {
-        return {
-          comment: {
-            path: finding.file,
-            line: snappedLine,
-            side: "RIGHT",
-            body: renderCommentBody(finding, finding.line),
-          },
-        }
-      }
-
-      return { bodyFinding: finding }
-    },
+  const mapped = findings.map((finding) =>
+    classifyFinding(finding, commentableByPath),
   )
 
   const comments = mapped.flatMap((entry) =>

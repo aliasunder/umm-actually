@@ -17,7 +17,7 @@ export const FINDING_CONFIDENCES = ["high", "medium", "low"] as const
 export type FindingConfidence = (typeof FINDING_CONFIDENCES)[number]
 
 /** Higher rank = more severe; used for sorting and threshold comparison. */
-export const severityRank: Record<FindingSeverity, number> = {
+export const SEVERITY_RANK: Record<FindingSeverity, number> = {
   critical: 3,
   high: 2,
   medium: 1,

@@ -38,6 +38,7 @@ describe("computeCommentableLines", () => {
       "src/added-file.ts",
       "src/greeter.ts",
       "src/new-name.ts",
+      "src/no-trailing-newline.ts",
     ])
   })
 

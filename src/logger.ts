@@ -58,6 +58,23 @@ const getCallerSource = (): string => {
   return `${file}:${frame.getLineNumber()}`
 }
 
+/** The logger must never crash the caller — JSON.stringify throws on
+ *  circular references (common in octokit RequestError data) and BigInt,
+ *  so degrade to the core fields and record why. */
+const serializeLine = (record: Record<string, unknown>): string => {
+  try {
+    return JSON.stringify(record)
+  } catch (serializationError) {
+    return JSON.stringify({
+      timestamp: record.timestamp,
+      level: record.level,
+      name: record.name,
+      message: record.message,
+      serialization_error: String(serializationError),
+    })
+  }
+}
+
 /** Resolves function-valued child props at emit time — lets a child logger
  *  carry context that doesn't exist yet at child creation. */
 const resolveLazyProps = (
@@ -95,7 +112,7 @@ export const createLogger = (
 
     const mergedData = { ...resolveLazyProps(baseProps), ...data }
     const line =
-      JSON.stringify({
+      serializeLine({
         timestamp: DateTime.now().toISO(),
         level,
         name,

@@ -19,12 +19,12 @@ src/
   main.ts                  # entrypoint — constructs real deps, sets outputs, exit code
   config.ts                # action inputs → validated ActionConfig
   logger.ts                # structured JSON logger — levels, child contexts, lazy props
-  github/                  # GitHub I/O: event payload → PrContext, octokit wrappers
-  openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, structured-output ladder
+  github/                  # GitHub I/O: event payload → PrContext (octokit wrappers planned — next PR)
+  openrouter/              # (planned — next PR) OpenRouter I/O: @openrouter/sdk wrapper, structured-output ladder
   diff/                    # pure transforms over parse-diff output
-  context/                 # workspace reads: conventions file, changed files, related files
+  context/                 # (planned — next PR) workspace reads: conventions file, changed files, related files
   review/                  # pure review logic: finding schema, phases, prompt, selection, comment mapping
-  orchestrate.ts           # the pipeline — fully testable with stub clients
+  orchestrate.ts           # (planned — next PR) the pipeline — fully testable with stub clients
 ```
 
 ## Module layering
