@@ -43,7 +43,7 @@ surface first: `@actions/core` ships `getBooleanInput` (strict YAML 1.2
 booleans), which replaced a hand-rolled boolean-string Zod transform here.
 Values an SDK util already parses arrive in `RawInputs` pre-parsed from the
 collection boundary (main.ts) — "validation lives in config.ts" is about
-where *our* rules live, not a reason to reimplement the platform's. Zod
+where _our_ rules live, not a reason to reimplement the platform's. Zod
 validates the things that are genuinely ours: LLM structured output and
 action config.
 
