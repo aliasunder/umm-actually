@@ -16,7 +16,12 @@ export type MappedReview = {
   bodyFindings: Finding[]
 }
 
-/** How far outside a hunk a finding's line may fall and still snap to it. */
+/**
+ * How far outside a hunk a finding's line may fall and still snap to it.
+ * 3 lines absorbs the common LLM anchoring drift (off-by-one from fence
+ * lines or hunk headers) without capturing findings that genuinely belong
+ * to distant, unchanged code — those go to the review body instead.
+ */
 const SNAP_DISTANCE = 3
 
 const findingTag = (finding: Finding): string =>

@@ -62,6 +62,42 @@ describe("mapFindingsToReview", () => {
     })
   })
 
+  it("treats end_line equal to line as a single-line comment", () => {
+    const finding = makeFinding({ line: 145, end_line: 145 })
+
+    const mapped = mapFindingsToReview({
+      findings: [finding],
+      commentableByPath: makeCommentableByPath(),
+    })
+
+    expect(mapped.comments[0]).toMatchObject({ line: 145, side: "RIGHT" })
+    expect(mapped.comments[0]?.start_line).toBeUndefined()
+  })
+
+  it("degrades to a single-line comment when end_line precedes line", () => {
+    const finding = makeFinding({ line: 145, end_line: 143 })
+
+    const mapped = mapFindingsToReview({
+      findings: [finding],
+      commentableByPath: makeCommentableByPath(),
+    })
+
+    expect(mapped.comments[0]).toMatchObject({ line: 145, side: "RIGHT" })
+    expect(mapped.comments[0]?.start_line).toBeUndefined()
+  })
+
+  it("degrades to a single-line comment when end_line is not a commentable line", () => {
+    const finding = makeFinding({ line: 145, end_line: 200 })
+
+    const mapped = mapFindingsToReview({
+      findings: [finding],
+      commentableByPath: makeCommentableByPath(),
+    })
+
+    expect(mapped.comments[0]).toMatchObject({ line: 145, side: "RIGHT" })
+    expect(mapped.comments[0]?.start_line).toBeUndefined()
+  })
+
   it("degrades to a single-line comment when end_line falls in a different hunk", () => {
     const finding = makeFinding({ line: 5, end_line: 142 })
 

@@ -13,7 +13,7 @@ inputs:
     description: OpenRouter API key
     required: true
   model:
-    description: "OpenRouter model slug (no provider prefix), e.g. anthropic/claude-sonnet-4-6"
+    description: "OpenRouter model slug exactly as listed on openrouter.ai/models, e.g. anthropic/claude-sonnet-4-6"
     required: false
     default: anthropic/claude-sonnet-4-6
   fallback_model:
