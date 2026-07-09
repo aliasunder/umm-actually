@@ -12,6 +12,7 @@ const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   phases: "combined",
   contextBudgetTokens: "80000",
   traceRelatedFiles: "true",
+  costSummary: "true",
   prNumberOverride: "",
   ...overrides,
 })
@@ -31,8 +32,15 @@ describe("parseConfig", () => {
       phases: "combined",
       contextBudgetTokens: 80000,
       traceRelatedFiles: true,
+      costSummary: true,
       prNumberOverride: undefined,
     })
+  })
+
+  it("parses cost_summary false", () => {
+    const config = parseConfig(makeRawInputs({ costSummary: "false" }))
+
+    expect(config.costSummary).toBe(false)
   })
 
   it("parses a provided max_findings into a number", () => {

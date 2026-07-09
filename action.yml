@@ -44,6 +44,10 @@ inputs:
     description: Include files that reference changed files in the prompt so the model can trace regressions into callers
     required: false
     default: "true"
+  cost_summary:
+    description: Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow step summary
+    required: false
+    default: "true"
   pr_number:
     description: PR number override — required only when the triggering event does not identify a PR directly
     required: false

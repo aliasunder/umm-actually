@@ -50,6 +50,7 @@ const configSchema = z.object({
   phases: z.string().min(1, "phases must not be empty"),
   contextBudgetTokens: requiredPositiveInteger,
   traceRelatedFiles: booleanString,
+  costSummary: booleanString,
   prNumberOverride: optionalPositiveInteger,
 })
 
