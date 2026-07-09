@@ -1,0 +1,29 @@
+{
+  "analysis": "src/greeter.ts: checked correctness (template literal migration, trim semantics), conventions (naming), tests (no test file in diff — coverage gap noted), subtle bugs (register guard only rejects empty string, not whitespace). Traced register() callers: none provided. src/added-file.ts: trivial constant function, no findings.",
+  "findings": [
+    {
+      "file": "src/greeter.ts",
+      "line": 145,
+      "end_line": null,
+      "category": "correctness",
+      "severity": "medium",
+      "confidence": "high",
+      "title": "Whitespace-only keys pass the empty-key guard",
+      "description": "The new guard rejects only the exact empty string. A key of \" \" passes and registers an entry that lookups by trimmed key will never find.",
+      "suggestion": "-  if (key === \"\") throw new Error(\"key must not be empty\")\n+  if (key.trim() === \"\") throw new Error(\"key must not be empty\")",
+      "failure_scenario": "register(\" \", \"value\") succeeds; a later lookup for the trimmed key returns undefined and the entry is orphaned."
+    },
+    {
+      "file": "src/greeter.ts",
+      "line": 3,
+      "end_line": 4,
+      "category": "tests",
+      "severity": "low",
+      "confidence": "medium",
+      "title": "Trim behavior change has no test",
+      "description": "greet() now trims its input — a behavioral change with no corresponding test update in this PR.",
+      "suggestion": null,
+      "failure_scenario": "A later refactor that drops the trim would ship silently; no test fails."
+    }
+  ]
+}

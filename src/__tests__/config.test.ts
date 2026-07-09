@@ -1,0 +1,91 @@
+import { describe, expect, it } from "vitest"
+import { parseConfig, type RawInputs } from "../config.js"
+
+const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
+  githubToken: "ghs_testtoken",
+  openrouterApiKey: "sk-or-testkey",
+  model: "anthropic/claude-sonnet-4-6",
+  fallbackModel: "",
+  maxFindings: "",
+  severityThreshold: "low",
+  conventionsFile: "AGENTS.md",
+  phases: "combined",
+  contextBudgetTokens: "80000",
+  traceRelatedFiles: "true",
+  prNumberOverride: "",
+  ...overrides,
+})
+
+describe("parseConfig", () => {
+  it("parses a full set of valid inputs into typed config", () => {
+    const config = parseConfig(makeRawInputs())
+
+    expect(config).toEqual({
+      githubToken: "ghs_testtoken",
+      openrouterApiKey: "sk-or-testkey",
+      model: "anthropic/claude-sonnet-4-6",
+      fallbackModel: "",
+      maxFindings: undefined,
+      severityThreshold: "low",
+      conventionsFile: "AGENTS.md",
+      phases: "combined",
+      contextBudgetTokens: 80000,
+      traceRelatedFiles: true,
+      prNumberOverride: undefined,
+    })
+  })
+
+  it("parses a provided max_findings into a number", () => {
+    const config = parseConfig(makeRawInputs({ maxFindings: "5" }))
+
+    expect(config.maxFindings).toBe(5)
+  })
+
+  it("rejects a zero max_findings", () => {
+    expect(() => parseConfig(makeRawInputs({ maxFindings: "0" }))).toThrow(
+      'maxFindings: "0" is not a positive integer',
+    )
+  })
+
+  it("rejects a non-numeric max_findings", () => {
+    expect(() => parseConfig(makeRawInputs({ maxFindings: "many" }))).toThrow(
+      'maxFindings: "many" is not a positive integer',
+    )
+  })
+
+  it("parses trace_related_files false", () => {
+    const config = parseConfig(makeRawInputs({ traceRelatedFiles: "false" }))
+
+    expect(config.traceRelatedFiles).toBe(false)
+  })
+
+  it("rejects a trace_related_files value that is not true or false", () => {
+    expect(() =>
+      parseConfig(makeRawInputs({ traceRelatedFiles: "yes" })),
+    ).toThrow('traceRelatedFiles: "yes" must be "true" or "false"')
+  })
+
+  it("rejects an empty github token", () => {
+    expect(() => parseConfig(makeRawInputs({ githubToken: "" }))).toThrow(
+      "githubToken: github_token is required",
+    )
+  })
+
+  it("rejects an unknown severity threshold", () => {
+    expect(() =>
+      parseConfig(makeRawInputs({ severityThreshold: "extreme" })),
+    ).toThrow(/severityThreshold/)
+  })
+
+  it("parses a provided pr_number override into a number", () => {
+    const config = parseConfig(makeRawInputs({ prNumberOverride: "12" }))
+
+    expect(config.prNumberOverride).toBe(12)
+  })
+
+  it("aggregates multiple input errors into one message", () => {
+    expect(() =>
+      parseConfig(makeRawInputs({ githubToken: "", maxFindings: "-1" })),
+    ).toThrow(/githubToken: github_token is required.*maxFindings/)
+  })
+})

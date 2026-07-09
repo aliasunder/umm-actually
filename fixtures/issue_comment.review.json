@@ -1,0 +1,19 @@
+{
+  "action": "created",
+  "issue": {
+    "number": 7,
+    "title": "feat: trim names before greeting",
+    "pull_request": {
+      "url": "https://api.github.com/repos/aliasunder/example-repo/pulls/7"
+    }
+  },
+  "comment": {
+    "body": "@umm review",
+    "user": { "login": "aliasunder" }
+  },
+  "repository": {
+    "name": "example-repo",
+    "full_name": "aliasunder/example-repo",
+    "owner": { "login": "aliasunder" }
+  }
+}
