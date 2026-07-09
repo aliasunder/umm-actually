@@ -59,6 +59,11 @@ files. Prefer SDK-provided types over redefining shapes.
 - Named params for functions with more than two args or adjacent same-typed
   args.
 - Data-layer and I/O functions take `(params, logger)` — logger is required.
+- `process.env` is never read via raw property access. Action inputs
+  (`INPUT_*`) go through `@actions/core` `getInput`; ambient environment
+  (`GITHUB_EVENT_PATH`, `GITHUB_WORKSPACE`, …) goes through the `env-var`
+  package (`envVar.from(env).get("NAME").required().asString()`), with the
+  env record injectable for tests — same idiom as vault-cortex.
 - Comments explain non-obvious domain context; never restate what a
   self-documenting name already says. Regex constants get doc comments.
 - Relative imports use explicit `.js` extensions (ESM runtime requirement).
