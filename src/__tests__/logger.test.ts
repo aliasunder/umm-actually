@@ -67,11 +67,53 @@ describe("createLogger", () => {
 
   it("suppresses debug below the default info threshold", () => {
     const stdout = captureStdout()
-    const testLogger = createLogger("test-app")
+    // Empty env record: the default must come from the logger, not ambient LOG_LEVEL
+    const testLogger = createLogger("test-app", { env: {} })
 
     testLogger.debug("noisy")
 
     expect(stdout.lines()).toHaveLength(0)
+  })
+
+  it("emits debug when the injected env sets LOG_LEVEL=debug", () => {
+    const stdout = captureStdout()
+    const testLogger = createLogger("test-app", { env: { LOG_LEVEL: "debug" } })
+
+    testLogger.debug("verbose trace")
+
+    expect(stdout.lines()).toHaveLength(1)
+    expect(stdout.lines()[0]).toMatchObject({
+      level: "debug",
+      message: "verbose trace",
+    })
+  })
+
+  it("falls back to the info threshold when LOG_LEVEL is unrecognized", () => {
+    const stdout = captureStdout()
+    const testLogger = createLogger("test-app", {
+      env: { LOG_LEVEL: "verbose" },
+    })
+
+    testLogger.debug("noisy")
+    testLogger.info("kept")
+
+    expect(stdout.lines()).toHaveLength(1)
+    expect(stdout.lines()[0]).toMatchObject({ level: "info", message: "kept" })
+  })
+
+  it("child loggers inherit the injected env record", () => {
+    const stdout = captureStdout()
+    const childLogger = createLogger("test-app", {
+      env: { LOG_LEVEL: "debug" },
+    }).child({ requestId: "7" })
+
+    childLogger.debug("child trace")
+
+    expect(stdout.lines()).toHaveLength(1)
+    expect(stdout.lines()[0]).toMatchObject({
+      level: "debug",
+      requestId: "7",
+    })
   })
 
   it("captures the caller's source location as filename:line", () => {

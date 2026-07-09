@@ -48,6 +48,7 @@ export default defineConfig(
             },
             {
               group: ["node:fs", "node:fs/**", "@actions/**", "@openrouter/**"],
+              allowTypeImports: true,
               message: "no I/O or SDK usage in pure modules",
             },
           ],

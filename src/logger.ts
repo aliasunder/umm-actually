@@ -1,4 +1,5 @@
-import { env } from "node:process"
+import { env as processEnv } from "node:process"
+import envVar from "env-var"
 import { DateTime } from "luxon"
 
 type LogLevel = "debug" | "info" | "warn" | "error"
@@ -23,8 +24,19 @@ const LEVELS: Record<LogLevel, number> = {
 const isLogLevel = (value: string): value is LogLevel =>
   Object.hasOwn(LEVELS, value)
 
-const envLevel = (env.LOG_LEVEL ?? "info").toLowerCase()
-const threshold = isLogLevel(envLevel) ? LEVELS[envLevel] : LEVELS.info
+/** An unrecognized LOG_LEVEL degrades to "info" rather than throwing — a
+ *  typo in workflow env must not break the action. */
+const resolveThreshold = (
+  envRecord: Record<string, string | undefined>,
+): number => {
+  const configuredLevel = envVar
+    .from(envRecord)
+    .get("LOG_LEVEL")
+    .default("info")
+    .asString()
+    .toLowerCase()
+  return isLogLevel(configuredLevel) ? LEVELS[configuredLevel] : LEVELS.info
+}
 
 /** Extracts "filename.ts:line" from the call stack — the frame that called the log method. */
 const getCallerSource = (): string => {
@@ -64,9 +76,12 @@ export const createLogger = (
   name: string,
   options?: {
     props?: Record<string, unknown>
+    /** Injectable for tests; defaults to process.env. */
+    env?: Record<string, string | undefined>
   },
 ): Logger => {
   const baseProps = options?.props ?? {}
+  const threshold = resolveThreshold(options?.env ?? processEnv)
 
   const emit = (
     level: LogLevel,
@@ -101,6 +116,7 @@ export const createLogger = (
     child: (props) =>
       createLogger(name, {
         props: { ...baseProps, ...props },
+        ...(options?.env === undefined ? {} : { env: options.env }),
       }),
   }
 }
