@@ -7,10 +7,16 @@ export type SelectionResult = {
   droppedByCap: Finding[]
 }
 
-const lineRange = (finding: Finding): { start: number; end: number } => ({
-  start: finding.line,
-  end: finding.end_line ?? finding.line,
-})
+// The model can emit an inverted range (end_line before line); order the ends
+// so an inverted range can't slip past the overlap check and post a duplicate.
+// comment-mapping independently degrades the same case to a single-line comment.
+const lineRange = (finding: Finding): { start: number; end: number } => {
+  const endLine = finding.end_line ?? finding.line
+  return {
+    start: Math.min(finding.line, endLine),
+    end: Math.max(finding.line, endLine),
+  }
+}
 
 const rangesOverlap = (first: Finding, second: Finding): boolean => {
   const firstRange = lineRange(first)

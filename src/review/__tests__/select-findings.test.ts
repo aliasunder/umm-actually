@@ -52,6 +52,27 @@ describe("selectFindings", () => {
     expect(result.selected).toEqual([rangeFinding])
   })
 
+  it("deduplicates against an inverted range (end_line before line)", () => {
+    const invertedRangeFinding = makeFinding({
+      line: 150,
+      end_line: 140,
+      severity: "high",
+    })
+    const containedFinding = makeFinding({
+      line: 145,
+      end_line: null,
+      severity: "medium",
+    })
+
+    const result = selectFindings({
+      findings: [invertedRangeFinding, containedFinding],
+      severityThreshold: "low",
+      maxFindings: undefined,
+    })
+
+    expect(result.selected).toEqual([invertedRangeFinding])
+  })
+
   it("does not deduplicate overlapping findings of different categories", () => {
     const correctnessFinding = makeFinding({
       category: "correctness",

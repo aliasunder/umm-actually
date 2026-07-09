@@ -2,13 +2,15 @@
 FROM node:24-slim AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+# --ignore-scripts: the prepare script runs husky, a devDependency absent here
+RUN npm ci --omit=dev --ignore-scripts
 
 # Build stage: dev dependencies + TypeScript compile
 FROM node:24-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# --ignore-scripts: skip husky's git-hook install — no .git in the image
+RUN npm ci --ignore-scripts
 COPY tsconfig.json ./
 COPY src ./src
 RUN npx tsc
