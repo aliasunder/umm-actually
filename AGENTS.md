@@ -38,7 +38,13 @@ module is a backwards dependency and a bug — enforced by a
 
 Use the official SDKs — don't hand-roll what `@actions/core`,
 `@actions/github` (octokit), `@openrouter/sdk`, or `parse-diff` already do.
-Zod validates the things that are genuinely ours: LLM structured output and
+Before writing any parsing or validation helper, check the SDK's utility
+surface first: `@actions/core` ships `getBooleanInput` (strict YAML 1.2
+booleans), which replaced a hand-rolled boolean-string Zod transform here.
+Values an SDK util already parses arrive in `RawInputs` pre-parsed from the
+collection boundary (main.ts) — "validation lives in config.ts" is about
+where *our* rules live, not a reason to reimplement the platform's. Zod
+validates the things that are genuinely ours: LLM structured output and
 action config.
 
 Types are colocated with the code that uses them — no standalone types
@@ -58,6 +64,10 @@ files. Prefer SDK-provided types over redefining shapes.
 - Explicit names over abbreviations, everywhere — params, callbacks, locals.
 - Early returns over nested `if/else`. Extract multi-clause conditionals into
   named booleans. Name booleans for the affirmative state.
+- Block bodies `{}` for any multiline function response — expression bodies
+  only for one-liners. A multi-clause boolean spanning lines gets
+  `{ return (...) }`; guard chains get explicit early returns, never a
+  chained `||`/ternary expression body.
 - Named params for functions with more than two args or adjacent same-typed
   args.
 - Data-layer and I/O functions take `(params, logger)` — logger is required.
