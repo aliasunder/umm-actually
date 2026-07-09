@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto"
 import type { PrContext } from "../github/event.js"
 import type { Finding } from "./finding.js"
 import type { ReviewPhase } from "./phases.js"
@@ -70,13 +71,32 @@ const truncateToTokenCap = (text: string, tokenCap: number): string => {
   return `${text.slice(0, characterCap)}\n\n[conventions truncated at ~${tokenCap} tokens]`
 }
 
-const renderFileBlock = (file: PromptFile): string => {
+/**
+ * Per-run random suffix for untrusted-content wrapper tags
+ * (`<file-a1b2c3d4e5f6 …>`). PR content can contain a literal closing tag,
+ * but it cannot predict this run's suffix — so it cannot forge a delimiter
+ * and place instruction-shaped text outside the untrusted wrapper.
+ * Generated once per run by the caller and passed to buildUserPrompt.
+ */
+export const generateDelimiterNonce = (): string =>
+  randomBytes(6).toString("hex")
+
+/** A double quote would terminate the surrounding attribute — nothing else is
+ *  structural inside a quoted attribute value. */
+const escapeAttributeValue = (value: string): string =>
+  value.replaceAll('"', "&quot;")
+
+const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
+  const fileTag = `file-${delimiterNonce}`
+  const pathAttribute = escapeAttributeValue(file.path)
   if (file.includedAs === "diff-only") {
-    return `<file path="${file.path}" note="full content omitted: too large — see diff">\n</file>`
+    return `<${fileTag} path="${pathAttribute}" note="full content omitted: too large — see diff">\n</${fileTag}>`
   }
   const reasonAttribute =
-    file.reason === undefined ? "" : ` reason="${file.reason}"`
-  return `<file path="${file.path}"${reasonAttribute}>\n${file.content}\n</file>`
+    file.reason === undefined
+      ? ""
+      : ` reason="${escapeAttributeValue(file.reason)}"`
+  return `<${fileTag} path="${pathAttribute}"${reasonAttribute}>\n${file.content}\n</${fileTag}>`
 }
 
 /**
@@ -92,6 +112,7 @@ export const buildUserPrompt = ({
   relatedFiles,
   annotatedDiff,
   priorFindings,
+  delimiterNonce,
 }: {
   prContext: PrContext
   conventions: string | null
@@ -99,7 +120,13 @@ export const buildUserPrompt = ({
   relatedFiles: PromptFile[]
   annotatedDiff: string
   priorFindings: Finding[]
+  /** Per-run random tag suffix — see generateDelimiterNonce. */
+  delimiterNonce: string
 }): string => {
+  const conventionsTag = `conventions-${delimiterNonce}`
+  const diffTag = `diff-${delimiterNonce}`
+  const priorFindingsTag = `prior_findings-${delimiterNonce}`
+
   const metadataSection = [
     `PR title: ${prContext.title}`,
     `Branch: ${prContext.headRef} → ${prContext.baseRef}`,
@@ -108,23 +135,27 @@ export const buildUserPrompt = ({
 
   const conventionsSection =
     conventions === null
-      ? "<conventions>\n(no conventions file found in this repository)\n</conventions>"
-      : `<conventions>\n${truncateToTokenCap(conventions, CONVENTIONS_TOKEN_CAP)}\n</conventions>`
+      ? `<${conventionsTag}>\n(no conventions file found in this repository)\n</${conventionsTag}>`
+      : `<${conventionsTag}>\n${truncateToTokenCap(conventions, CONVENTIONS_TOKEN_CAP)}\n</${conventionsTag}>`
 
-  const changedFilesSection = changedFiles.map(renderFileBlock).join("\n\n")
-  const relatedFilesSection = relatedFiles.map(renderFileBlock).join("\n\n")
+  const changedFilesSection = changedFiles
+    .map((changedFile) => renderFileBlock(changedFile, delimiterNonce))
+    .join("\n\n")
+  const relatedFilesSection = relatedFiles
+    .map((relatedFile) => renderFileBlock(relatedFile, delimiterNonce))
+    .join("\n\n")
 
   const priorFindingsSection =
     priorFindings.length === 0
       ? ""
-      : `<prior_findings note="already reported by earlier phases — do not re-report">\n${JSON.stringify(priorFindings, null, 2)}\n</prior_findings>`
+      : `<${priorFindingsTag} note="already reported by earlier phases — do not re-report">\n${JSON.stringify(priorFindings, null, 2)}\n</${priorFindingsTag}>`
 
   const sections = [
     metadataSection,
     conventionsSection,
     changedFilesSection,
     relatedFilesSection,
-    `<diff note="line numbers shown are new-file line numbers">\n${annotatedDiff}\n</diff>`,
+    `<${diffTag} note="line numbers shown are new-file line numbers">\n${annotatedDiff}\n</${diffTag}>`,
     priorFindingsSection,
   ]
 

@@ -32,6 +32,11 @@ recommended token is a GitHub App installation token scoped to
 `pull-requests: write` + `contents: read`. A successful injection can produce
 misleading review comments, not repository changes.
 
+Untrusted content is wrapped in delimiter tags carrying a per-run random
+suffix (e.g. `<file-a1b2c3d4e5f6>`), so a PR containing a literal closing tag
+cannot break out of the wrapper into instruction position — injected text
+always stays visibly inside the untrusted-content block.
+
 ## Reporting a vulnerability
 
 Please report security issues through
