@@ -18,7 +18,7 @@ fixtures/                  # test fixtures (event payloads, sample diff, LLM res
 src/
   main.ts                  # entrypoint — constructs real deps, sets outputs, exit code
   config.ts                # action inputs → validated ActionConfig
-  logger.ts                # thin Logger over @actions/core
+  logger.ts                # structured JSON logger — levels, child contexts, lazy props
   github/                  # GitHub I/O: event payload → PrContext, octokit wrappers
   openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, structured-output ladder
   diff/                    # pure transforms over parse-diff output
