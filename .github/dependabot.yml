@@ -1,0 +1,9 @@
+# Keeps the digest-pinned base image in the Dockerfile current — pinning
+# closes the mutable-tag supply-chain hole; Dependabot restores the patch
+# stream the pin would otherwise lose.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

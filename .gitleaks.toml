@@ -1,0 +1,5 @@
+# Gitleaks configuration — extends the built-in default ruleset.
+# Add documented, non-secret placeholders to the allowlist below if a default
+# rule ever flags one (none needed today).
+[extend]
+useDefault = true
