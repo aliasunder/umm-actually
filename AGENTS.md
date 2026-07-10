@@ -16,7 +16,7 @@ action.yml                 # action metadata — inputs/outputs, runs.using: doc
 Dockerfile                 # multi-stage: build (tsc) → slim runtime
 fixtures/                  # test fixtures (event payloads, sample diff, LLM responses)
 src/
-  main.ts                  # entrypoint — constructs real deps, sets outputs, exit code
+  main.ts                  # entrypoint — collects/validates inputs; pipeline + outputs land next PR
   config.ts                # action inputs → validated ActionConfig
   logger.ts                # structured JSON logger — levels, child contexts, lazy props
   github/                  # GitHub I/O: event payload → PrContext (octokit wrappers planned — next PR)
@@ -72,10 +72,13 @@ files. Prefer SDK-provided types over redefining shapes.
   args.
 - Data-layer and I/O functions take `(params, logger)` — logger is required.
 - `process.env` is never read via raw property access. Action inputs
-  (`INPUT_*`) go through `@actions/core` `getInput`; ambient environment
-  (`GITHUB_EVENT_PATH`, `GITHUB_WORKSPACE`, …) goes through the `env-var`
-  package (`envVar.from(env).get("NAME").required().asString()`), with the
-  env record injectable for tests.
+  (`INPUT_*`) go through `@actions/core` `getInput`/`getBooleanInput`; the
+  event name and payload come from `@actions/github` `context` (it reads
+  `GITHUB_EVENT_NAME`/`GITHUB_EVENT_PATH` and parses the JSON — don't
+  hand-read those); remaining ambient environment (`GITHUB_WORKSPACE`, …)
+  goes through the `env-var` package
+  (`envVar.from(env).get("NAME").required().asString()`), with the env
+  record injectable for tests.
 - Comments explain non-obvious domain context; never restate what a
   self-documenting name already says. Regex constants get doc comments.
 - Relative imports use explicit `.js` extensions (ESM runtime requirement).
