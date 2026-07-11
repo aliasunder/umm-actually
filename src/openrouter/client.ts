@@ -331,11 +331,8 @@ export const createOpenRouterClient = (
         model: ladderModel,
       })
 
-      for (
-        let attemptNumber = 1;
-        attemptNumber <= MAX_ATTEMPTS_PER_MODEL;
-        attemptNumber++
-      ) {
+      let attemptNumber = 1
+      while (attemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
         const attemptResult = await attemptOnce({
           chatRequest,
           model: ladderModel,
@@ -370,6 +367,7 @@ export const createOpenRouterClient = (
           )
         }
         if (!attemptResult.retryable) break
+        attemptNumber++
       }
     }
 
