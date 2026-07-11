@@ -1,13 +1,13 @@
 import { posix } from "node:path"
 
 /**
- * Matches static imports (`from "x"`), dynamic `import("x")`, and CommonJS
- * `require("x")`, capturing the quoted specifier. Deliberately grep-style:
- * a false positive inside a comment or string only costs a harmless extra
- * candidate lookup, never a wrong review.
+ * Matches static imports (`from "x"` and side-effect `import "x"`), dynamic
+ * `import("x")`, and CommonJS `require("x")`, capturing the quoted specifier.
+ * Deliberately grep-style: a false positive inside a comment or string only
+ * costs a harmless extra candidate lookup, never a wrong review.
  */
 const IMPORT_SPECIFIER_PATTERN =
-  /(?:from\s+|import\s*\(\s*|require\s*\(\s*)["']([^"']+)["']/g
+  /(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)["']([^"']+)["']/g
 
 export const extractImportSpecifiers = (source: string): string[] => {
   return [...source.matchAll(IMPORT_SPECIFIER_PATTERN)].flatMap(
@@ -24,7 +24,7 @@ const SOURCE_EXTENSION_REMAPS: Record<string, string[]> = {
 }
 
 const EXTENSIONLESS_SUFFIXES = [".ts", ".tsx", ".js", ".jsx"]
-const INDEX_BASENAMES = ["index.ts", "index.js"]
+const INDEX_BASENAMES = ["index.ts", "index.tsx", "index.js", "index.jsx"]
 
 /**
  * Expands a relative import specifier into every workspace-relative posix

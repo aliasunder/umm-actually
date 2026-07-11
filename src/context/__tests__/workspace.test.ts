@@ -169,7 +169,7 @@ describe("readChangedFiles", () => {
     })
   })
 
-  it("includes an unreadable file as diff-only with a warning", async () => {
+  it("includes a missing file as diff-only with an info log, not a warning", async () => {
     const { contextReader, logger } = makeReader()
 
     const result = await contextReader.readChangedFiles({
@@ -181,13 +181,43 @@ describe("readChangedFiles", () => {
       { path: "src/missing.ts", content: "", includedAs: "diff-only" },
     ])
     expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "changed file unreadable — including as diff-only",
-      data: {
-        path: "src/missing.ts",
-        error: expect.stringContaining("ENOENT"),
-      },
+      level: "info",
+      message: "changed file missing from checkout — including as diff-only",
+      data: { path: "src/missing.ts" },
     })
+    expect(
+      logger.messages.filter((message) => message.level === "warn"),
+    ).toEqual([])
+  })
+
+  it("includes an unreadable file as diff-only with a warning", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "src/locked.ts": "export const locked = 1\n",
+    })
+    await chmod(path.join(root, "src/locked.ts"), 0o000)
+    const logger = createTestLogger()
+    const contextReader = createContextReader({ workspaceRoot: root }, logger)
+
+    try {
+      const result = await contextReader.readChangedFiles({
+        changedPaths: ["src/locked.ts"],
+        budgetTokens: 10_000,
+      })
+
+      expect(result.files).toEqual([
+        { path: "src/locked.ts", content: "", includedAs: "diff-only" },
+      ])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "changed file unreadable — including as diff-only",
+        data: {
+          path: "src/locked.ts",
+          error: expect.stringContaining("EACCES"),
+        },
+      })
+    } finally {
+      await cleanup()
+    }
   })
 
   it("includes a binary file as diff-only without a warning", async () => {
@@ -468,6 +498,32 @@ describe("findRelatedFiles", () => {
           error: expect.stringContaining("EACCES"),
         },
       })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("excludes an importer carrying a NUL byte, matching the changed-file binary rule", async () => {
+    const importTarget = `import { target } from "./target.js"\nexport const found = target\n`
+    const { root, cleanup } = await makeTempWorkspace({
+      "target.ts": `export const target = "target"\n`,
+      "clean.ts": importTarget,
+      "binary.ts": `${importTarget}export const marker = "\x00"\n`,
+    })
+    const contextReader = createContextReader(
+      { workspaceRoot: root },
+      createTestLogger(),
+    )
+
+    try {
+      const relatedFiles = await contextReader.findRelatedFiles({
+        changedPaths: ["target.ts"],
+        budgetTokens: 100_000,
+      })
+
+      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
+        "clean.ts",
+      ])
     } finally {
       await cleanup()
     }

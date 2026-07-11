@@ -146,7 +146,9 @@ export const createContextReader = (
   /** null on any unreadable changed file. A symlink that resolves outside
    *  the safe zone is degraded to diff-only rather than fatal — one hostile
    *  or broken file must not kill the whole review — but gets its own
-   *  warning so the exclusion is auditable. */
+   *  warning so the exclusion is auditable. A missing file logs at info,
+   *  not warn: PRs routinely delete files, and the deleted path still
+   *  appears in changedPaths. */
   const readChangedFileOrNull = async (
     absolutePath: string,
     changedPath: string,
@@ -160,6 +162,15 @@ export const createContextReader = (
       )
       return null
     } catch (readError) {
+      if (isMissingFileError(readError)) {
+        logger.info(
+          "changed file missing from checkout — including as diff-only",
+          {
+            path: changedPath,
+          },
+        )
+        return null
+      }
       logger.warn("changed file unreadable — including as diff-only", {
         path: changedPath,
         error: String(readError),
@@ -280,6 +291,9 @@ export const createContextReader = (
       if (changedPathSet.has(scannedPath)) continue
       const content = await readScannedFileOrNull(scannedPath)
       if (content === null) continue
+      // A NUL byte marks binary content — the same exclusion readChangedFiles
+      // applies; a source-extension file can still carry one in a string literal
+      if (content.includes("\x00")) continue
 
       const importedChangedPaths = [
         ...new Set(

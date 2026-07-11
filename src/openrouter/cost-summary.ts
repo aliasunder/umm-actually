@@ -6,7 +6,8 @@ const formatCost = (costUsd: number | null): string =>
 const formatTokens = (tokens: number | null): string =>
   tokens === null ? "n/a" : String(tokens)
 
-/** Markdown table for the workflow job summary — one row per billed attempt. */
+/** Markdown table for the workflow job summary — one row per attempt,
+ *  failed ones included (any attempt that reached the provider was billed). */
 export const renderCostSummary = ({
   attempts,
   modelUsed,

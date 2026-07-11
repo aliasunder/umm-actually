@@ -25,6 +25,12 @@ describe("extractImportSpecifiers", () => {
     ])
   })
 
+  it("extracts a side-effect import specifier", () => {
+    const specifiers = extractImportSpecifiers(`import "./register.js"`)
+
+    expect(specifiers).toEqual(["./register.js"])
+  })
+
   it("returns an empty list for a source with no imports", () => {
     const specifiers = extractImportSpecifiers(`export const answer = 42`)
 
@@ -81,7 +87,9 @@ describe("resolveImportSpecifier", () => {
         "src/lib.js",
         "src/lib.jsx",
         "src/lib/index.ts",
+        "src/lib/index.tsx",
         "src/lib/index.js",
+        "src/lib/index.jsx",
       ],
     },
     {
