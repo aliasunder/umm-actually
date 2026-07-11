@@ -5,7 +5,8 @@ import type { PrContext } from "./event.js"
 
 /**
  * Minimal structural type for injection — the real getOctokit() instance is
- * structurally compatible; test stubs are plain objects. `data: unknown` is
+ * structurally compatible (compiler-enforced by an expectTypeOf test in
+ * client.test.ts); test stubs are plain objects. `data: unknown` is
  * deliberate: it forces Zod parsing and makes the diff media type (which
  * returns a string, not JSON) legal without a cast. Method syntax keeps the
  * real octokit assignable under strictFunctionTypes.
@@ -31,7 +32,6 @@ export type OctokitLike = {
     }
   }
 }
-
 export type DiffFetchResult =
   { kind: "ok"; diff: string } | { kind: "too_large" }
 

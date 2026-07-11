@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
-import { describe, expect, it } from "vitest"
+import type { getOctokit } from "@actions/github"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import { createTestLogger } from "../../__tests__/test-logger.js"
 import type { ReviewComment } from "../../review/comment-mapping.js"
 import { createGithubClient, type OctokitLike } from "../client.js"
@@ -77,6 +78,15 @@ const inlineComment: ReviewComment = {
   side: "RIGHT",
   body: "Whitespace-only keys pass the empty-key guard",
 }
+
+describe("OctokitLike", () => {
+  it("stays assignable from the real getOctokit() instance", () => {
+    // Compile-time assertion: fails `tsc` (and this suite) if an
+    // @actions/github upgrade drifts the real octokit's shape away from
+    // the structural type our client accepts.
+    expectTypeOf<ReturnType<typeof getOctokit>>().toExtend<OctokitLike>()
+  })
+})
 
 describe("fetchPullRequest", () => {
   it("maps the pulls.get response onto a PrContext", async () => {
