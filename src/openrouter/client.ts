@@ -124,7 +124,6 @@ const toResult = async <T>(
   }
 }
 
-/** Wrapped in `{ parsed }` because JSON `null` is a valid parse result. */
 const parseJsonOrNull = (text: string): { parsed: unknown } | null => {
   try {
     const parsed: unknown = JSON.parse(text)
