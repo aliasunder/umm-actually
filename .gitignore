@@ -1,5 +1,9 @@
 node_modules/
 dist/
+# Fixture decoys carry real ignored-directory names so the related-files
+# scan's pruning is tested against the genuine article — re-include them
+!fixtures/workspace/node_modules/
+!fixtures/workspace/dist/
 .env
 *.log
 .DS_Store

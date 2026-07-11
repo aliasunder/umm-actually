@@ -1,0 +1,257 @@
+import { readFile, readdir, stat } from "node:fs/promises"
+import path, { posix } from "node:path"
+import type { Logger } from "../logger.js"
+import { estimateTokens, type PromptFile } from "../review/prompt.js"
+import {
+  extractImportSpecifiers,
+  resolveImportSpecifier,
+} from "./import-resolution.js"
+
+export type BudgetedFiles = { files: PromptFile[]; remainingTokens: number }
+
+export type ContextReader = {
+  /** null when the file is missing — the prompt renders a "(no conventions…)" block. */
+  readConventions: (params: {
+    conventionsFile: string
+  }) => Promise<string | null>
+  readChangedFiles: (params: {
+    changedPaths: string[]
+    budgetTokens: number
+  }) => Promise<BudgetedFiles>
+  findRelatedFiles: (params: {
+    changedPaths: string[]
+    budgetTokens: number
+  }) => Promise<PromptFile[]>
+}
+
+const SCANNABLE_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+])
+
+/** Dependency, VCS, and build-output trees — never review context. */
+const PRUNED_DIRECTORIES = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  "out",
+  "coverage",
+])
+
+/** Scan bounds: a related-files miss on a pathological repo beats an unbounded walk. */
+export const MAX_SCAN_FILES = 5_000
+export const MAX_SCAN_BYTES = 262_144
+export const RELATED_FILES_MAX = 8
+
+type ImporterCandidate = {
+  path: string
+  importedChangedPaths: string[]
+  content: string
+}
+
+const isTestFile = (filePath: string): boolean =>
+  filePath.includes("__tests__/") || /\.test\.[^./]+$/.test(filePath)
+
+/**
+ * Import-count desc, then non-test files before test files (test files feed
+ * the test-quality dimension but carry less caller context), then path asc
+ * for determinism.
+ */
+const byRelevance = (a: ImporterCandidate, b: ImporterCandidate): number => {
+  if (a.importedChangedPaths.length !== b.importedChangedPaths.length) {
+    return b.importedChangedPaths.length - a.importedChangedPaths.length
+  }
+  const aIsTest = isTestFile(a.path)
+  if (aIsTest !== isTestFile(b.path)) return aIsTest ? 1 : -1
+  return a.path < b.path ? -1 : 1
+}
+
+const isMissingFileError = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  error.code === "ENOENT"
+
+const readFileOrNull = async (absolutePath: string): Promise<string | null> => {
+  try {
+    return await readFile(absolutePath, "utf8")
+  } catch {
+    return null
+  }
+}
+
+export const createContextReader = (
+  { workspaceRoot }: { workspaceRoot: string },
+  logger: Logger,
+): ContextReader => {
+  const resolvedRoot = path.resolve(workspaceRoot)
+
+  /** Changed-file paths come from the diff and are PR-author-influenced —
+   *  a traversal outside the workspace is an attack, not a lookup miss. */
+  const resolveUnderRoot = (relativePath: string): string => {
+    const resolvedPath = path.resolve(resolvedRoot, relativePath)
+    if (!resolvedPath.startsWith(resolvedRoot + path.sep)) {
+      throw new Error(`path escapes the workspace: ${relativePath}`)
+    }
+    return resolvedPath
+  }
+
+  const readConventions = async ({
+    conventionsFile,
+  }: {
+    conventionsFile: string
+  }): Promise<string | null> => {
+    const absolutePath = resolveUnderRoot(conventionsFile)
+    try {
+      return await readFile(absolutePath, "utf8")
+    } catch (readError) {
+      if (isMissingFileError(readError)) {
+        logger.info("no conventions file found", { path: conventionsFile })
+        return null
+      }
+      throw readError
+    }
+  }
+
+  const readChangedFiles = async ({
+    changedPaths,
+    budgetTokens,
+  }: {
+    changedPaths: string[]
+    budgetTokens: number
+  }): Promise<BudgetedFiles> => {
+    const files: PromptFile[] = []
+    // Sequential state by design: diff order is priority order, and each
+    // file's inclusion depends on the budget left by the files before it.
+    let remainingTokens = budgetTokens
+
+    for (const changedPath of changedPaths) {
+      const absolutePath = resolveUnderRoot(changedPath)
+      const content = await readFileOrNull(absolutePath)
+      if (content === null) {
+        logger.warn("changed file unreadable — including as diff-only", {
+          path: changedPath,
+        })
+        files.push({ path: changedPath, content: "", includedAs: "diff-only" })
+        continue
+      }
+      // A NUL byte marks binary content — meaningless in a text prompt
+      if (content.includes("\x00")) {
+        files.push({ path: changedPath, content: "", includedAs: "diff-only" })
+        continue
+      }
+      const contentTokens = estimateTokens(content)
+      if (contentTokens > remainingTokens) {
+        files.push({ path: changedPath, content: "", includedAs: "diff-only" })
+        continue
+      }
+      remainingTokens -= contentTokens
+      files.push({ path: changedPath, content, includedAs: "full" })
+    }
+
+    return { files, remainingTokens }
+  }
+
+  const scanWorkspaceSourceFiles = async (): Promise<string[]> => {
+    const sourceFilePaths: string[] = []
+    const directoryQueue = [""]
+
+    for (let queueIndex = 0; queueIndex < directoryQueue.length; queueIndex++) {
+      const currentDirectory = directoryQueue[queueIndex]
+      if (currentDirectory === undefined) continue
+
+      const entries = await readdir(path.join(resolvedRoot, currentDirectory), {
+        withFileTypes: true,
+      })
+      // readdir order is platform-dependent — sort so scan-cap cutoffs are deterministic
+      const sortedEntries = [...entries].sort((a, b) =>
+        a.name < b.name ? -1 : 1,
+      )
+
+      for (const entry of sortedEntries) {
+        const entryPath = posix.join(currentDirectory, entry.name)
+        if (entry.isDirectory()) {
+          const isPruned =
+            PRUNED_DIRECTORIES.has(entry.name) || entry.name.startsWith(".")
+          if (!isPruned) directoryQueue.push(entryPath)
+          continue
+        }
+        if (!entry.isFile()) continue
+        if (!SCANNABLE_EXTENSIONS.has(posix.extname(entry.name))) continue
+
+        if (sourceFilePaths.length >= MAX_SCAN_FILES) {
+          logger.warn(
+            "workspace scan capped — related-file detection may be incomplete",
+            { maxScanFiles: MAX_SCAN_FILES },
+          )
+          return sourceFilePaths
+        }
+        const fileStats = await stat(path.join(resolvedRoot, entryPath))
+        if (fileStats.size > MAX_SCAN_BYTES) continue
+        sourceFilePaths.push(entryPath)
+      }
+    }
+
+    return sourceFilePaths
+  }
+
+  const findRelatedFiles = async ({
+    changedPaths,
+    budgetTokens,
+  }: {
+    changedPaths: string[]
+    budgetTokens: number
+  }): Promise<PromptFile[]> => {
+    const changedPathSet = new Set(changedPaths)
+    const scannedPaths = await scanWorkspaceSourceFiles()
+
+    const importers: ImporterCandidate[] = []
+    for (const scannedPath of scannedPaths) {
+      if (changedPathSet.has(scannedPath)) continue
+      const content = await readFileOrNull(path.join(resolvedRoot, scannedPath))
+      if (content === null) continue
+
+      const importedChangedPaths = [
+        ...new Set(
+          extractImportSpecifiers(content)
+            .flatMap((specifier) =>
+              resolveImportSpecifier({ importerPath: scannedPath, specifier }),
+            )
+            .filter((candidatePath) => changedPathSet.has(candidatePath)),
+        ),
+      ].sort()
+      if (importedChangedPaths.length === 0) continue
+      importers.push({ path: scannedPath, importedChangedPaths, content })
+    }
+
+    const rankedImporters = [...importers].sort(byRelevance)
+
+    const relatedFiles: PromptFile[] = []
+    // Sequential state by design: rank order is priority order, and an
+    // over-budget candidate is skipped so smaller candidates still fit.
+    let remainingTokens = budgetTokens
+    for (const importer of rankedImporters) {
+      if (relatedFiles.length >= RELATED_FILES_MAX) break
+      const contentTokens = estimateTokens(importer.content)
+      if (contentTokens > remainingTokens) continue
+      remainingTokens -= contentTokens
+      relatedFiles.push({
+        path: importer.path,
+        content: importer.content,
+        includedAs: "full",
+        reason: `imports ${importer.importedChangedPaths.join(", ")}`,
+      })
+    }
+
+    return relatedFiles
+  }
+
+  return { readConventions, readChangedFiles, findRelatedFiles }
+}
