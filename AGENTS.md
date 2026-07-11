@@ -16,7 +16,7 @@ action.yml                 # action metadata — inputs/outputs, runs.using: doc
 Dockerfile                 # multi-stage: build (tsc) → slim runtime
 fixtures/                  # test fixtures (event payloads, sample diff, LLM responses)
 src/
-  main.ts                  # entrypoint — collects/validates inputs; pipeline + outputs land next PR
+  main.ts                  # entrypoint — collects/validates inputs, wires clients into orchestrate, sets outputs
   config.ts                # action inputs → validated ActionConfig
   logger.ts                # structured JSON logger — levels, child contexts, lazy props
   github/                  # GitHub I/O: event payload → PrContext, octokit wrappers (diff fetch, review posting)
@@ -24,7 +24,7 @@ src/
   diff/                    # pure transforms over parse-diff output
   context/                 # workspace I/O: conventions file, changed files, related-files reverse-import scan
   review/                  # pure review logic: finding schema, phases, prompt, selection, comment mapping
-  orchestrate.ts           # (planned — next PR) the pipeline — fully testable with stub clients
+  orchestrate.ts           # pipeline + createPromptedGenerateFindings — fully testable with stub clients
 ```
 
 ## Module layering
