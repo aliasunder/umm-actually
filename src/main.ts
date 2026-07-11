@@ -11,6 +11,12 @@ import { createPromptedGenerateFindings, orchestrate } from "./orchestrate.js"
 
 const logger = createLogger("umm-actually")
 
+/**
+ * Collects raw inputs at the SDK boundary. Strings come from getInput;
+ * booleans come pre-parsed from getBooleanInput, which enforces the strict
+ * YAML 1.2 core-schema list (true|True|TRUE / false|False|FALSE) and throws
+ * on anything else. Defaults from action.yml are materialized by the runner.
+ */
 const collectRawInputs = (): RawInputs => ({
   githubToken: core.getInput("github_token", { required: true }),
   openrouterApiKey: core.getInput("openrouter_api_key", { required: true }),
