@@ -3,6 +3,7 @@ import type { ActionConfig } from "./config.js"
 import {
   computeCommentableLines,
   newFilePath,
+  type CommentableFile,
 } from "./diff/commentable-lines.js"
 import { annotateDiff } from "./diff/annotate-diff.js"
 import type { Logger } from "./logger.js"
@@ -18,6 +19,7 @@ import {
   buildReviewBody,
   buildZeroFindingsBody,
   mapFindingsToReview,
+  type ReviewComment,
 } from "./review/comment-mapping.js"
 import { resolveSeverityThreshold, type Finding } from "./review/finding.js"
 import { resolvePhases, type ReviewPhase } from "./review/phases.js"
@@ -64,6 +66,43 @@ export type OrchestrateDeps = {
 const buildSkipBody = (reason: string): string =>
   `**umm-actually** — review skipped\n\n${reason}\n\n---\n*umm-actually*`
 
+type ReviewPayload = {
+  body: string
+  comments: ReviewComment[]
+  fallbackBody: string
+}
+
+/** Separates findings into inline comments and body-only findings, then
+ *  builds a fallback body that includes all findings in case GitHub rejects
+ *  the inline anchors. */
+const buildReviewPayload = ({
+  findings,
+  commentableByPath,
+  droppedByCap,
+  modelUsed,
+}: {
+  findings: Finding[]
+  commentableByPath: Map<string, CommentableFile>
+  droppedByCap: Finding[]
+  modelUsed: string
+}): ReviewPayload => {
+  const { comments, bodyFindings } = mapFindingsToReview({
+    findings,
+    commentableByPath,
+  })
+  const body = buildReviewBody({
+    bodyFindings,
+    droppedByCap,
+    model: modelUsed,
+  })
+  const fallbackBody = buildReviewBody({
+    bodyFindings: findings,
+    droppedByCap,
+    model: modelUsed,
+  })
+  return { body, comments, fallbackBody }
+}
+
 const SKIPPED_RESULT_BASE: Omit<
   OrchestrateResult,
   "reviewUrl" | "skippedReason"
@@ -73,6 +112,8 @@ const SKIPPED_RESULT_BASE: Omit<
   costSummaryMarkdown: null,
 }
 
+/** Runs the full review pipeline — event resolution through review posting —
+ *  with all I/O injected through deps so the pipeline is fully testable. */
 export const orchestrate = async (
   deps: OrchestrateDeps,
   logger: Logger,
@@ -201,24 +242,13 @@ export const orchestrate = async (
   // Step 13: post review
   const hasFindings = selected.length > 0
 
-  const reviewBody = hasFindings
-    ? (() => {
-        const { comments, bodyFindings } = mapFindingsToReview({
-          findings: selected,
-          commentableByPath,
-        })
-        const body = buildReviewBody({
-          bodyFindings,
-          droppedByCap,
-          model: modelUsed,
-        })
-        const fallbackBody = buildReviewBody({
-          bodyFindings: selected,
-          droppedByCap,
-          model: modelUsed,
-        })
-        return { body, comments, fallbackBody }
-      })()
+  const reviewPayload: ReviewPayload = hasFindings
+    ? buildReviewPayload({
+        findings: selected,
+        commentableByPath,
+        droppedByCap,
+        modelUsed,
+      })
     : {
         body: buildZeroFindingsBody({ model: modelUsed }),
         comments: [],
@@ -228,7 +258,7 @@ export const orchestrate = async (
   const { url: reviewUrl } = await githubClient.submitReview({
     prNumber: prContext.prNumber,
     commitId: prContext.headSha,
-    ...reviewBody,
+    ...reviewPayload,
   })
 
   logger.info("review posted", {
@@ -249,6 +279,9 @@ export const orchestrate = async (
   }
 }
 
+/** V1 one-shot strategy — builds a prompt from the review context and sends
+ *  it to OpenRouter. V1.5/V2 will swap in different strategies behind the
+ *  same GenerateFindings interface. */
 export const createPromptedGenerateFindings = (
   {
     openrouterClient,
