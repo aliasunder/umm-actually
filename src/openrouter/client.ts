@@ -111,7 +111,9 @@ const summarizeError = (error: unknown): string => {
   return message.length > 200 ? `${message.slice(0, 200)}…` : message
 }
 
-const settle = async <T>(
+/** Converts a throwing promise into a discriminated result — avoids
+ *  try/catch nesting at every SDK call site. */
+const toResult = async <T>(
   promise: Promise<T>,
 ): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> => {
   try {
@@ -122,6 +124,7 @@ const settle = async <T>(
   }
 }
 
+/** Wrapped in `{ parsed }` because JSON `null` is a valid parse result. */
 const parseJsonOrNull = (text: string): { parsed: unknown } | null => {
   try {
     const parsed: unknown = JSON.parse(text)
@@ -191,7 +194,7 @@ export const createOpenRouterClient = (
     chatRequest: ChatRequestSubset
     model: string
   }): Promise<SingleAttempt> => {
-    const sendResult = await settle(sdk.chat.send({ chatRequest }))
+    const sendResult = await toResult(sdk.chat.send({ chatRequest }))
     if (!sendResult.ok) {
       const statusCode = errorStatusCode(sendResult.error)
       const abort = statusCode !== undefined && ABORT_STATUSES.has(statusCode)
@@ -289,7 +292,7 @@ export const createOpenRouterClient = (
     generationId: string,
   ): Promise<number | null> => {
     if (sdk.generations === undefined) return null
-    const lookup = await settle(
+    const lookup = await toResult(
       sdk.generations.getGeneration({ id: generationId }),
     )
     if (!lookup.ok) {
