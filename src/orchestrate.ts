@@ -160,10 +160,11 @@ export const orchestrate = async (
     conventionsFile: config.conventionsFile,
   })
 
+  const fileBudgetTokens = config.contextBudgetTokens - diffTokens
   const { files: changedFiles, remainingTokens } =
     await contextReader.readChangedFiles({
       changedPaths,
-      budgetTokens: config.contextBudgetTokens,
+      budgetTokens: fileBudgetTokens,
     })
 
   const relatedFiles = config.traceRelatedFiles
