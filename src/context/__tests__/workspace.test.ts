@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -406,6 +406,68 @@ describe("findRelatedFiles", () => {
       expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
         "small.ts",
       ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("excludes importers under pruned and hidden directories from the scan", async () => {
+    const importTarget = `import { target } from "../target.js"\nexport const found = target\n`
+    const { root, cleanup } = await makeTempWorkspace({
+      "target.ts": `export const target = "target"\n`,
+      "src/legit.ts": importTarget,
+      "node_modules/dependency.ts": importTarget,
+      "dist/compiled.ts": importTarget,
+      ".hidden/covert.ts": importTarget,
+    })
+    const contextReader = createContextReader(
+      { workspaceRoot: root },
+      createTestLogger(),
+    )
+
+    try {
+      const relatedFiles = await contextReader.findRelatedFiles({
+        changedPaths: ["target.ts"],
+        budgetTokens: 100_000,
+      })
+
+      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
+        "src/legit.ts",
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("excludes an unreadable scanned file from related files with a warning", async () => {
+    const importTarget = `import { target } from "./target.js"\nexport const found = target\n`
+    const { root, cleanup } = await makeTempWorkspace({
+      "target.ts": `export const target = "target"\n`,
+      "readable.ts": importTarget,
+      "locked.ts": importTarget,
+    })
+    await chmod(path.join(root, "locked.ts"), 0o000)
+    const logger = createTestLogger()
+    const contextReader = createContextReader({ workspaceRoot: root }, logger)
+
+    try {
+      const relatedFiles = await contextReader.findRelatedFiles({
+        changedPaths: ["target.ts"],
+        budgetTokens: 100_000,
+      })
+
+      // readable.ts still arriving proves the scan carried on past the failure
+      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
+        "readable.ts",
+      ])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "scanned file unreadable — excluding from related files",
+        data: {
+          path: "locked.ts",
+          error: expect.stringContaining("EACCES"),
+        },
+      })
     } finally {
       await cleanup()
     }

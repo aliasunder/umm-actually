@@ -154,6 +154,17 @@ describe("fetchDiff", () => {
     await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow("HTTP 500")
   })
 
+  it("rethrows an error that carries no status property", async () => {
+    const stub = makeOctokitStub({
+      getResponses: [{ error: new Error("socket hang up") }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow(
+      "socket hang up",
+    )
+  })
+
   it("throws when the diff response is not a string", async () => {
     const stub = makeOctokitStub({ getResponses: [{ data: { diff: true } }] })
     const { client } = makeClient(stub)
@@ -210,7 +221,9 @@ describe("submitReview", () => {
       fallbackBody: "fallback body",
     })
 
-    expect(stub.createReviewCalls).toEqual([
+    // toStrictEqual: toEqual ignores undefined-valued keys, so it cannot
+    // tell `comments` absent apart from `comments: undefined`
+    expect(stub.createReviewCalls).toStrictEqual([
       {
         owner: "aliasunder",
         repo: "fixture",
@@ -239,14 +252,28 @@ describe("submitReview", () => {
       fallbackBody: "fallback body",
     })
 
-    expect(stub.createReviewCalls[1]).toEqual({
-      owner: "aliasunder",
-      repo: "fixture",
-      pull_number: 7,
-      commit_id: "abc123",
-      event: "COMMENT",
-      body: "fallback body",
-    })
+    // Whole-array assert: proves the first call carried the inline comments,
+    // the retry dropped them (strictly — no `comments: undefined` residue),
+    // and no third attempt followed
+    expect(stub.createReviewCalls).toStrictEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        commit_id: "abc123",
+        event: "COMMENT",
+        body: "review body",
+        comments: [inlineComment],
+      },
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        commit_id: "abc123",
+        event: "COMMENT",
+        body: "fallback body",
+      },
+    ])
     expect(result).toEqual({ url: reviewUrl, usedFallbackBody: true })
     expect(logger.messages).toContainEqual({
       level: "warn",

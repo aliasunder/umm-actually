@@ -82,8 +82,20 @@ describe("renderCostSummary", () => {
       modelUsed: "anthropic/claude-haiku-4.5",
     })
 
-    expect(summary).toContain("Total cost: $0.052100")
-    expect(summary).not.toContain("(some attempts unpriced)")
+    expect(summary).toBe(
+      [
+        "### umm-actually cost summary",
+        "",
+        "Model used: anthropic/claude-haiku-4.5",
+        "",
+        "| attempt | model | outcome | prompt tokens | completion tokens | cost |",
+        "| --- | --- | --- | --- | --- | --- |",
+        "| 1 | openai/gpt-5-mini | schema_mismatch | 12000 | 800 | $0.042100 |",
+        "| 2 | anthropic/claude-haiku-4.5 | accepted | 11000 | 600 | $0.010000 |",
+        "",
+        "Total cost: $0.052100",
+      ].join("\n"),
+    )
   })
 
   it("renders an n/a total when no attempt carries a cost", () => {
@@ -97,6 +109,18 @@ describe("renderCostSummary", () => {
       modelUsed: "openai/gpt-5-mini",
     })
 
-    expect(summary).toContain("Total cost: n/a")
+    expect(summary).toBe(
+      [
+        "### umm-actually cost summary",
+        "",
+        "Model used: openai/gpt-5-mini",
+        "",
+        "| attempt | model | outcome | prompt tokens | completion tokens | cost |",
+        "| --- | --- | --- | --- | --- | --- |",
+        "| 1 | openai/gpt-5-mini | accepted | 12000 | 800 | n/a |",
+        "",
+        "Total cost: n/a",
+      ].join("\n"),
+    )
   })
 })

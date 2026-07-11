@@ -26,6 +26,15 @@ const acceptedReview = {
   findings: [],
 }
 
+/** Accepted-shape chat result whose usage carries no cost — the case that
+ *  routes the client to the generation cost lookup. */
+const makeNoCostChatResult = (): unknown => ({
+  id: "gen-no-cost",
+  model: "openai/gpt-5-mini",
+  choices: [{ message: { content: JSON.stringify(acceptedReview) } }],
+  usage: { promptTokens: 12000, completionTokens: 800, cost: null },
+})
+
 type StubResponse = { value: unknown } | { error: unknown }
 
 const makeSdkStub = ({
@@ -247,6 +256,50 @@ describe("requestReview", () => {
     })
   })
 
+  it("retries a status-less network error and records its bare message", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: new Error("socket hang up") },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams)
+
+    expect(
+      stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
+    ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
+    expect(result.attempts[0]).toEqual({
+      model: "openai/gpt-5-mini",
+      outcome: "api_error",
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      errorSummary: "socket hang up",
+    })
+  })
+
+  it("truncates an error message longer than 200 characters in the attempt summary", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        {
+          error: Object.assign(new Error("x".repeat(250)), {
+            statusCode: 429,
+          }),
+        },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams)
+
+    expect(result.attempts[0]?.errorSummary).toBe(
+      `HTTP 429: ${"x".repeat(200)}…`,
+    )
+  })
+
   it("advances to the fallback model without a retry on a 404", async () => {
     const stub = makeSdkStub({
       sendResponses: [
@@ -335,20 +388,8 @@ describe("requestReview", () => {
   })
 
   it("looks up the generation cost when the accepted attempt has no usage cost", async () => {
-    const noCostResult = {
-      id: "gen-no-cost",
-      model: "openai/gpt-5-mini",
-      choices: [
-        {
-          message: {
-            content: JSON.stringify(acceptedReview),
-          },
-        },
-      ],
-      usage: { promptTokens: 12000, completionTokens: 800, cost: null },
-    }
     const stub = makeSdkStub({
-      sendResponses: [{ value: noCostResult }],
+      sendResponses: [{ value: makeNoCostChatResult() }],
       generationResponses: [{ value: { data: { totalCost: 0.0399 } } }],
     })
     const { client } = makeClient(stub)
@@ -360,14 +401,8 @@ describe("requestReview", () => {
   })
 
   it("degrades to a null cost with a warning when the generation lookup fails", async () => {
-    const noCostResult = {
-      id: "gen-no-cost",
-      model: "openai/gpt-5-mini",
-      choices: [{ message: { content: JSON.stringify(acceptedReview) } }],
-      usage: { promptTokens: 12000, completionTokens: 800, cost: null },
-    }
     const stub = makeSdkStub({
-      sendResponses: [{ value: noCostResult }],
+      sendResponses: [{ value: makeNoCostChatResult() }],
       generationResponses: [{ error: makeStatusError(500) }],
     })
     const { client, logger } = makeClient(stub)
@@ -382,15 +417,54 @@ describe("requestReview", () => {
     })
   })
 
-  it("skips the cost lookup entirely when the sdk has no generations surface", async () => {
-    const noCostResult = {
-      id: "gen-no-cost",
+  it("degrades to a null cost with a warning when the generation response has an unexpected shape", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [{ value: makeNoCostChatResult() }],
+      generationResponses: [{ value: { data: {} } }],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams)
+
+    expect(result.attempts[0]?.costUsd).toBeNull()
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "unexpected generation response shape",
+      data: {},
+    })
+  })
+
+  it("records null token counts when the response omits the usage block", async () => {
+    const noUsageResult = {
+      id: "gen-no-usage",
       model: "openai/gpt-5-mini",
       choices: [{ message: { content: JSON.stringify(acceptedReview) } }],
-      usage: { promptTokens: 12000, completionTokens: 800, cost: null },
     }
+    const stub = makeSdkStub({
+      sendResponses: [{ value: noUsageResult }],
+      generationResponses: [{ value: { data: { totalCost: 0.0399 } } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams)
+
+    // costUsd from the lookup proves the missing usage block routed the
+    // accepted attempt through the generation-cost fallback
+    expect(result.attempts).toEqual([
+      {
+        model: "openai/gpt-5-mini",
+        outcome: "accepted",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: 0.0399,
+        errorSummary: null,
+      },
+    ])
+  })
+
+  it("skips the cost lookup entirely when the sdk has no generations surface", async () => {
     const sdkWithoutGenerations: OpenRouterLike = {
-      chat: { send: async () => noCostResult },
+      chat: { send: async () => makeNoCostChatResult() },
     }
     const { client } = makeClient({ sdk: sdkWithoutGenerations })
 
