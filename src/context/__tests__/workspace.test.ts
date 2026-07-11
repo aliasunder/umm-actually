@@ -183,7 +183,10 @@ describe("readChangedFiles", () => {
     expect(logger.messages).toContainEqual({
       level: "warn",
       message: "changed file unreadable — including as diff-only",
-      data: { path: "src/missing.ts" },
+      data: {
+        path: "src/missing.ts",
+        error: expect.stringContaining("ENOENT"),
+      },
     })
   })
 

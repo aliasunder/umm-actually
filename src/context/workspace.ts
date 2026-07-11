@@ -73,18 +73,13 @@ const byRelevance = (a: ImporterCandidate, b: ImporterCandidate): number => {
   return a.path < b.path ? -1 : 1
 }
 
-const isMissingFileError = (error: unknown): boolean =>
-  typeof error === "object" &&
-  error !== null &&
-  "code" in error &&
-  error.code === "ENOENT"
-
-const readFileOrNull = async (absolutePath: string): Promise<string | null> => {
-  try {
-    return await readFile(absolutePath, "utf8")
-  } catch {
-    return null
-  }
+const isMissingFileError = (error: unknown): boolean => {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  )
 }
 
 export const createContextReader = (
@@ -164,9 +159,26 @@ export const createContextReader = (
         { path: changedPath },
       )
       return null
-    } catch {
+    } catch (readError) {
       logger.warn("changed file unreadable — including as diff-only", {
         path: changedPath,
+        error: String(readError),
+      })
+      return null
+    }
+  }
+
+  /** Best-effort read for scan candidates — an unreadable file drops out of
+   *  related-files context, logged so the exclusion is auditable. */
+  const readScannedFileOrNull = async (
+    scannedPath: string,
+  ): Promise<string | null> => {
+    try {
+      return await readFile(path.join(resolvedRoot, scannedPath), "utf8")
+    } catch (readError) {
+      logger.warn("scanned file unreadable — excluding from related files", {
+        path: scannedPath,
+        error: String(readError),
       })
       return null
     }
@@ -210,6 +222,8 @@ export const createContextReader = (
 
   const scanWorkspaceSourceFiles = async (): Promise<string[]> => {
     const sourceFilePaths: string[] = []
+    // Mutable queue by design: a breadth-first walk — subdirectories found
+    // during iteration join the queue and are visited by the advancing index.
     const directoryQueue = [""]
 
     for (let queueIndex = 0; queueIndex < directoryQueue.length; queueIndex++) {
@@ -264,7 +278,7 @@ export const createContextReader = (
     const importers: ImporterCandidate[] = []
     for (const scannedPath of scannedPaths) {
       if (changedPathSet.has(scannedPath)) continue
-      const content = await readFileOrNull(path.join(resolvedRoot, scannedPath))
+      const content = await readScannedFileOrNull(scannedPath)
       if (content === null) continue
 
       const importedChangedPaths = [

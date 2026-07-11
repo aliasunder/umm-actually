@@ -9,10 +9,12 @@ import { posix } from "node:path"
 const IMPORT_SPECIFIER_PATTERN =
   /(?:from\s+|import\s*\(\s*|require\s*\(\s*)["']([^"']+)["']/g
 
-export const extractImportSpecifiers = (source: string): string[] =>
-  [...source.matchAll(IMPORT_SPECIFIER_PATTERN)].flatMap((specifierMatch) =>
-    specifierMatch[1] === undefined ? [] : [specifierMatch[1]],
+export const extractImportSpecifiers = (source: string): string[] => {
+  return [...source.matchAll(IMPORT_SPECIFIER_PATTERN)].flatMap(
+    (specifierMatch) =>
+      specifierMatch[1] === undefined ? [] : [specifierMatch[1]],
   )
+}
 
 /** Compiled `.js`-family specifiers and the source extensions they may compile from. */
 const SOURCE_EXTENSION_REMAPS: Record<string, string[]> = {

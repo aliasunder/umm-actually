@@ -171,15 +171,14 @@ type SingleAttempt =
       abort: boolean
     }
 
+const describeAttempt = (attempt: ModelAttempt): string => {
+  const errorSuffix =
+    attempt.errorSummary === null ? "" : ` (${attempt.errorSummary})`
+  return `${attempt.model}: ${attempt.outcome}${errorSuffix}`
+}
+
 const summarizeAttempts = (attempts: ModelAttempt[]): string =>
-  attempts
-    .map(
-      (attempt) =>
-        `${attempt.model}: ${attempt.outcome}${
-          attempt.errorSummary === null ? "" : ` (${attempt.errorSummary})`
-        }`,
-    )
-    .join("; ")
+  attempts.map(describeAttempt).join("; ")
 
 export const createOpenRouterClient = (
   { sdk }: { sdk: OpenRouterLike },

@@ -23,12 +23,12 @@ export const renderCostSummary = ({
     attempt.costUsd === null ? [] : [attempt.costUsd],
   )
   const totalCost = knownCosts.reduce((sum, costUsd) => sum + costUsd, 0)
+  const unpricedSuffix =
+    knownCosts.length < attempts.length ? " (some attempts unpriced)" : ""
   const totalLine =
     knownCosts.length === 0
       ? "Total cost: n/a"
-      : `Total cost: ${formatCost(totalCost)}${
-          knownCosts.length < attempts.length ? " (some attempts unpriced)" : ""
-        }`
+      : `Total cost: ${formatCost(totalCost)}${unpricedSuffix}`
 
   return [
     "### umm-actually cost summary",
