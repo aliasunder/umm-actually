@@ -23,10 +23,15 @@ const collectRawInputs = (): RawInputs => ({
 })
 
 // Input collection and config validation are wired now so bad inputs fail
-// loudly today; the V1 pipeline (orchestrate.ts + I/O clients) lands in the
-// next PR and replaces the setFailed stub below.
+// loudly today; orchestrate.ts lands in the next PR and replaces the
+// setFailed stub below.
 try {
-  parseConfig(collectRawInputs())
+  const config = parseConfig(collectRawInputs())
+  // Register both credentials with the runner's masker before anything can
+  // log — our JSON logger writes raw to stdout, bypassing the masking the
+  // runner applies only to values passed through ::add-mask::.
+  core.setSecret(config.githubToken)
+  core.setSecret(config.openrouterApiKey)
   core.setFailed(
     "umm-actually: review pipeline not yet implemented (scaffold only)",
   )

@@ -1,0 +1,12 @@
+{
+  "number": 7,
+  "state": "open",
+  "title": "feat: trim names before greeting",
+  "body": "Trims whitespace from names and validates registry keys.",
+  "head": {
+    "sha": "abc123def456abc123def456abc123def456abc1",
+    "ref": "feat/trim-names"
+  },
+  "base": { "ref": "main" },
+  "html_url": "https://github.com/aliasunder/fixture/pull/7"
+}
