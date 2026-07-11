@@ -1,9 +1,35 @@
-# Keeps the digest-pinned base image in the Dockerfile current — pinning
-# closes the mutable-tag supply-chain hole; Dependabot restores the patch
-# stream the pin would otherwise lose.
 version: 2
 updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      production:
+        dependency-type: production
+      development:
+        dependency-type: development
+    ignore:
+      # typescript-eslint's peer range caps TypeScript — a TS major in
+      # the dev group breaks npm ci with ERESOLVE. TS majors are a
+      # deliberate decision gated on typescript-eslint support.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Keeps the digest-pinned FROM lines in the Dockerfile current when
+  # upstream node:24-slim rebuilds (e.g. Debian security releases).
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # A base-image major is a Node.js major — the action pins
+      # engines >=24 <25 (.nvmrc, package.json). Node version
+      # upgrades are deliberate, not dependency churn.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
