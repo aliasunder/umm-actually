@@ -245,7 +245,7 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      expect(result.skippedReason).toContain("diff exceeds")
+      expect(result.skippedReason).toBe("diff exceeds GitHub's diff API limits")
       expect(result.reviewUrl).toBe("https://github.com/test/review/1")
       expect(result.findingsCount).toBe(0)
       expect(result.modelUsed).toBe("")
@@ -289,6 +289,21 @@ describe("orchestrate", () => {
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
     })
+
+    it("passes correct prNumber and commitId in skip reviews", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "too_large" as const }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const reviewCall = stubs.submitReviewCalls[0] as Record<string, unknown>
+      expect(reviewCall["prNumber"]).toBe(fixturePrContext.prNumber)
+      expect(reviewCall["commitId"]).toBe(fixturePrContext.headSha)
+    })
   })
 
   describe("happy path", () => {
@@ -302,7 +317,8 @@ describe("orchestrate", () => {
       expect(result.reviewUrl).toBe("https://github.com/test/review/1")
       expect(result.modelUsed).toBe("test/model")
       expect(result.skippedReason).toBe("")
-      expect(result.costSummaryMarkdown).toEqual(expect.any(String))
+      expect(result.costSummaryMarkdown).toContain("test/model")
+      expect(result.costSummaryMarkdown).toContain("$0.010000")
 
       expect(stubs.submitReviewCalls).toHaveLength(1)
       const reviewCall = stubs.submitReviewCalls[0] as Record<string, unknown>
@@ -337,7 +353,78 @@ describe("orchestrate", () => {
         unknown
       >
       const annotatedDiff = reviewContext["annotatedDiff"] as string
-      expect(annotatedDiff).toContain("src/greeter.ts")
+      expect(annotatedDiff).toContain("=== src/greeter.ts ===")
+    })
+  })
+
+  describe("context wiring", () => {
+    it("passes budget minus diff tokens to readChangedFiles", async () => {
+      const readChangedFilesCalls: Record<string, unknown>[] = []
+      const stubs = makeOrchestrateDeps({
+        contextReader: {
+          readChangedFiles: async (params) => {
+            readChangedFilesCalls.push(params)
+            return { files: [fixtureChangedFile], remainingTokens: 10_000 }
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(readChangedFilesCalls).toHaveLength(1)
+      const call = readChangedFilesCalls[0] as Record<string, unknown>
+      const budgetTokens = call["budgetTokens"] as number
+      // Budget for files = contextBudgetTokens (80k) - diffTokens; diffTokens
+      // varies with fixture size but must be less than the full budget and the
+      // resulting file budget must be positive and less than the total.
+      expect(budgetTokens).toBeGreaterThan(0)
+      expect(budgetTokens).toBeLessThan(baseConfig.contextBudgetTokens)
+    })
+
+    it("passes remainingTokens from readChangedFiles to findRelatedFiles", async () => {
+      const expectedRemainingTokens = 12_345
+      const findRelatedFilesCalls: Record<string, unknown>[] = []
+      const stubs = makeOrchestrateDeps({
+        config: { traceRelatedFiles: true },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [fixtureChangedFile],
+            remainingTokens: expectedRemainingTokens,
+          }),
+          findRelatedFiles: async (params) => {
+            findRelatedFilesCalls.push(params)
+            return []
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(findRelatedFilesCalls).toHaveLength(1)
+      const call = findRelatedFilesCalls[0] as Record<string, unknown>
+      expect(call["budgetTokens"]).toBe(expectedRemainingTokens)
+    })
+
+    it("passes paths extracted from the diff to readChangedFiles", async () => {
+      const stubs = makeOrchestrateDeps()
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.readChangedFilesCalls).toHaveLength(1)
+      const changedPaths = (
+        stubs.readChangedFilesCalls[0] as Record<string, unknown>
+      )["changedPaths"] as string[]
+      // The fixture diff modifies src/greeter.ts, adds src/added-file.ts,
+      // renames to src/new-name.ts, modifies src/no-trailing-newline.ts, and
+      // deletes src/removed-file.ts (null newFilePath) + binary logo.png
+      expect(changedPaths).toContain("src/greeter.ts")
+      expect(changedPaths).toContain("src/added-file.ts")
+      expect(changedPaths).toContain("src/new-name.ts")
+      // Deleted file has no newFilePath — should NOT appear
+      expect(changedPaths).not.toContain("src/removed-file.ts")
     })
   })
 
@@ -475,10 +562,12 @@ describe("createPromptedGenerateFindings", () => {
     const { annotateDiff } = await import("../diff/annotate-diff.js")
     const { resolvePhases } = await import("../review/phases.js")
     const phases = resolvePhases("combined")
+    const phase = phases[0]
+    if (phase === undefined) throw new Error("expected a phase")
 
     await generate({
       prContext: fixturePrContext,
-      phase: phases[0]!,
+      phase,
       conventions: "test conventions",
       changedFiles: [fixtureChangedFile],
       relatedFiles: [],
@@ -517,11 +606,13 @@ describe("createPromptedGenerateFindings", () => {
     const { annotateDiff } = await import("../diff/annotate-diff.js")
     const { resolvePhases } = await import("../review/phases.js")
     const phases = resolvePhases("combined")
+    const phase = phases[0]
+    if (phase === undefined) throw new Error("expected a phase")
     const annotated = annotateDiff(files)
 
     await generate({
       prContext: fixturePrContext,
-      phase: phases[0]!,
+      phase,
       conventions: null,
       changedFiles: [],
       relatedFiles: [],
@@ -558,11 +649,13 @@ describe("createPromptedGenerateFindings", () => {
     const { annotateDiff } = await import("../diff/annotate-diff.js")
     const { resolvePhases } = await import("../review/phases.js")
     const phases = resolvePhases("combined")
+    const phase = phases[0]
+    if (phase === undefined) throw new Error("expected a phase")
     const annotated = annotateDiff(files)
 
     const context = {
       prContext: fixturePrContext,
-      phase: phases[0]!,
+      phase,
       conventions: null,
       changedFiles: [],
       relatedFiles: [],
