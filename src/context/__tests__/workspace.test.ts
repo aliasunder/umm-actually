@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -72,6 +72,58 @@ describe("readConventions", () => {
     await expect(
       contextReader.readConventions({ conventionsFile: "../outside.md" }),
     ).rejects.toThrow("path escapes the workspace: ../outside.md")
+  })
+
+  it("follows a symlinked conventions file whose target is inside the workspace", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "CLAUDE.md": "# Conventions behind a symlink\n",
+    })
+    await symlink(path.join(root, "CLAUDE.md"), path.join(root, "AGENTS.md"))
+    const contextReader = createContextReader(
+      { workspaceRoot: root },
+      createTestLogger(),
+    )
+
+    try {
+      const conventions = await contextReader.readConventions({
+        conventionsFile: "AGENTS.md",
+      })
+
+      expect(conventions).toBe("# Conventions behind a symlink\n")
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("throws when the conventions file symlinks to a target outside the workspace", async () => {
+    // The outside target must exist: a dangling link would reject with ENOENT
+    // (the missing-file path) and pass this test without the escape guard
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), "umm-outside-"))
+    await writeFile(
+      path.join(outsideRoot, "secret.md"),
+      "runner secret",
+      "utf8",
+    )
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": "# fixture\n",
+    })
+    await symlink(
+      path.join(outsideRoot, "secret.md"),
+      path.join(root, "AGENTS.md"),
+    )
+    const contextReader = createContextReader(
+      { workspaceRoot: root },
+      createTestLogger(),
+    )
+
+    try {
+      await expect(
+        contextReader.readConventions({ conventionsFile: "AGENTS.md" }),
+      ).rejects.toThrow("path escapes the workspace: AGENTS.md")
+    } finally {
+      await cleanup()
+      await rm(outsideRoot, { recursive: true, force: true })
+    }
   })
 })
 
@@ -160,6 +212,74 @@ describe("readChangedFiles", () => {
         budgetTokens: 10_000,
       }),
     ).rejects.toThrow("path escapes the workspace: ../../etc/passwd")
+  })
+
+  it("degrades a changed file that symlinks outside the workspace to diff-only", async () => {
+    // The outside target must exist: a dangling link would take the
+    // unreadable path and pass this test without the escape guard
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), "umm-outside-"))
+    await writeFile(
+      path.join(outsideRoot, "secret.txt"),
+      "runner secret",
+      "utf8",
+    )
+    const { root, cleanup } = await makeTempWorkspace({
+      "src/ok.ts": "export const ok = 1\n",
+    })
+    await symlink(
+      path.join(outsideRoot, "secret.txt"),
+      path.join(root, "src/leak.ts"),
+    )
+    const logger = createTestLogger()
+    const contextReader = createContextReader({ workspaceRoot: root }, logger)
+
+    try {
+      const result = await contextReader.readChangedFiles({
+        changedPaths: ["src/leak.ts"],
+        budgetTokens: 10_000,
+      })
+
+      expect(result.files).toEqual([
+        { path: "src/leak.ts", content: "", includedAs: "diff-only" },
+      ])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message:
+          "changed file resolves outside the reviewable workspace — including as diff-only",
+        data: { path: "src/leak.ts" },
+      })
+    } finally {
+      await cleanup()
+      await rm(outsideRoot, { recursive: true, force: true })
+    }
+  })
+
+  it("degrades a changed file that symlinks into .git to diff-only", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      ".git/config": "[http]\n\textraheader = AUTHORIZATION: basic abc123\n",
+    })
+    await symlink(path.join(root, ".git/config"), path.join(root, "leak.ts"))
+    const logger = createTestLogger()
+    const contextReader = createContextReader({ workspaceRoot: root }, logger)
+
+    try {
+      const result = await contextReader.readChangedFiles({
+        changedPaths: ["leak.ts"],
+        budgetTokens: 10_000,
+      })
+
+      expect(result.files).toEqual([
+        { path: "leak.ts", content: "", includedAs: "diff-only" },
+      ])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message:
+          "changed file resolves outside the reviewable workspace — including as diff-only",
+        data: { path: "leak.ts" },
+      })
+    } finally {
+      await cleanup()
+    }
   })
 })
 

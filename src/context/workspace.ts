@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises"
+import { readFile, readdir, realpath, stat } from "node:fs/promises"
 import path, { posix } from "node:path"
 import type { Logger } from "../logger.js"
 import { estimateTokens, type PromptFile } from "../review/prompt.js"
@@ -103,6 +103,30 @@ export const createContextReader = (
     return resolvedPath
   }
 
+  /**
+   * The lexical check above can't see symlinks: a PR can commit a link whose
+   * target sits outside the workspace, or inside `.git/` (where the checkout
+   * token lives in `.git/config` under persist-credentials) — and readFile
+   * would follow it straight into the prompt, which is echoed into a public
+   * review. Resolve the real path and re-check before any content is read.
+   * In-workspace links (e.g. AGENTS.md → CLAUDE.md) stay readable. The root
+   * is realpath'd too — it may itself sit behind a symlink (macOS tmpdir).
+   * Missing files reject with ENOENT so callers keep their existing handling.
+   */
+  const realPathIfSafe = async (
+    absolutePath: string,
+  ): Promise<string | null> => {
+    const [realRoot, realPath] = await Promise.all([
+      realpath(resolvedRoot),
+      realpath(absolutePath),
+    ])
+    const isUnderRoot = realPath.startsWith(realRoot + path.sep)
+    const isInGitDirectory = realPath.startsWith(
+      path.join(realRoot, ".git") + path.sep,
+    )
+    return isUnderRoot && !isInGitDirectory ? realPath : null
+  }
+
   const readConventions = async ({
     conventionsFile,
   }: {
@@ -110,13 +134,41 @@ export const createContextReader = (
   }): Promise<string | null> => {
     const absolutePath = resolveUnderRoot(conventionsFile)
     try {
-      return await readFile(absolutePath, "utf8")
+      const safePath = await realPathIfSafe(absolutePath)
+      if (safePath === null) {
+        throw new Error(`path escapes the workspace: ${conventionsFile}`)
+      }
+      return await readFile(safePath, "utf8")
     } catch (readError) {
       if (isMissingFileError(readError)) {
         logger.info("no conventions file found", { path: conventionsFile })
         return null
       }
       throw readError
+    }
+  }
+
+  /** null on any unreadable changed file. A symlink that resolves outside
+   *  the safe zone is degraded to diff-only rather than fatal — one hostile
+   *  or broken file must not kill the whole review — but gets its own
+   *  warning so the exclusion is auditable. */
+  const readChangedFileOrNull = async (
+    absolutePath: string,
+    changedPath: string,
+  ): Promise<string | null> => {
+    try {
+      const safePath = await realPathIfSafe(absolutePath)
+      if (safePath !== null) return await readFile(safePath, "utf8")
+      logger.warn(
+        "changed file resolves outside the reviewable workspace — including as diff-only",
+        { path: changedPath },
+      )
+      return null
+    } catch {
+      logger.warn("changed file unreadable — including as diff-only", {
+        path: changedPath,
+      })
+      return null
     }
   }
 
@@ -134,11 +186,8 @@ export const createContextReader = (
 
     for (const changedPath of changedPaths) {
       const absolutePath = resolveUnderRoot(changedPath)
-      const content = await readFileOrNull(absolutePath)
+      const content = await readChangedFileOrNull(absolutePath, changedPath)
       if (content === null) {
-        logger.warn("changed file unreadable — including as diff-only", {
-          path: changedPath,
-        })
         files.push({ path: changedPath, content: "", includedAs: "diff-only" })
         continue
       }
