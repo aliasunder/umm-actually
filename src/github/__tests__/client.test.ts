@@ -4,7 +4,7 @@ import { createTestLogger } from "../../__tests__/test-logger.js"
 import type { ReviewComment } from "../../review/comment-mapping.js"
 import { createGithubClient, type OctokitLike } from "../client.js"
 
-const pullGetResponse: unknown = JSON.parse(
+const pullGetResponse: Record<string, unknown> = JSON.parse(
   readFileSync(
     new URL("../../../fixtures/pull.get.json", import.meta.url),
     "utf8",
@@ -96,6 +96,17 @@ describe("fetchPullRequest", () => {
       headRef: "feat/trim-names",
       baseRef: "main",
     })
+  })
+
+  it("preserves a null PR body", async () => {
+    const stub = makeOctokitStub({
+      getResponses: [{ data: { ...pullGetResponse, body: null } }],
+    })
+    const { client } = makeClient(stub)
+
+    const prContext = await client.fetchPullRequest({ prNumber: 7 })
+
+    expect(prContext.body).toBeNull()
   })
 
   it("throws on a response missing the pull request fields", async () => {

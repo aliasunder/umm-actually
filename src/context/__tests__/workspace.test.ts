@@ -71,7 +71,7 @@ describe("readConventions", () => {
 
     await expect(
       contextReader.readConventions({ conventionsFile: "../outside.md" }),
-    ).rejects.toThrow("path escapes the workspace: ../outside.md")
+    ).rejects.toThrow(new Error("path escapes the workspace: ../outside.md"))
   })
 
   it("follows a symlinked conventions file whose target is inside the workspace", async () => {
@@ -119,7 +119,7 @@ describe("readConventions", () => {
     try {
       await expect(
         contextReader.readConventions({ conventionsFile: "AGENTS.md" }),
-      ).rejects.toThrow("path escapes the workspace: AGENTS.md")
+      ).rejects.toThrow(new Error("path escapes the workspace: AGENTS.md"))
     } finally {
       await cleanup()
       await rm(outsideRoot, { recursive: true, force: true })
@@ -167,6 +167,34 @@ describe("readChangedFiles", () => {
       ],
       remainingTokens: 0,
     })
+  })
+
+  it("demotes a file whose byte size exceeds the byte budget before reading it", async () => {
+    // Multibyte content: 400 chars fit a 100-token budget, but 1200 UTF-8
+    // bytes exceed it — only the stat-first byte guard demotes this file;
+    // the post-read token check would have included it.
+    const multibyteContent = "あ".repeat(400)
+    const { root, cleanup } = await makeTempWorkspace({
+      "src/large.ts": multibyteContent,
+    })
+    const contextReader = createContextReader(
+      { workspaceRoot: root },
+      createTestLogger(),
+    )
+
+    try {
+      const result = await contextReader.readChangedFiles({
+        changedPaths: ["src/large.ts"],
+        budgetTokens: estimateTokens(multibyteContent),
+      })
+
+      expect(result).toEqual({
+        files: [{ path: "src/large.ts", content: "", includedAs: "diff-only" }],
+        remainingTokens: estimateTokens(multibyteContent),
+      })
+    } finally {
+      await cleanup()
+    }
   })
 
   it("includes a missing file as diff-only with an info log, not a warning", async () => {
@@ -244,7 +272,7 @@ describe("readChangedFiles", () => {
         changedPaths: ["../../etc/passwd"],
         budgetTokens: 10_000,
       }),
-    ).rejects.toThrow("path escapes the workspace: ../../etc/passwd")
+    ).rejects.toThrow(new Error("path escapes the workspace: ../../etc/passwd"))
   })
 
   it("degrades a changed file that symlinks outside the workspace to diff-only", async () => {

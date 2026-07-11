@@ -320,17 +320,20 @@ describe("requestReview", () => {
     ])
   })
 
-  it("aborts the ladder after exactly one call on a 401", async () => {
-    const stub = makeSdkStub({
-      sendResponses: [{ error: makeStatusError(401) }],
-    })
-    const { client } = makeClient(stub)
+  it.each([401, 402, 403])(
+    "aborts the ladder after exactly one call on a %d",
+    async (statusCode) => {
+      const stub = makeSdkStub({
+        sendResponses: [{ error: makeStatusError(statusCode) }],
+      })
+      const { client } = makeClient(stub)
 
-    await expect(client.requestReview(requestParams)).rejects.toThrow(
-      "OpenRouter auth/credit error — aborting without fallback: openai/gpt-5-mini: api_error (HTTP 401: HTTP 401)",
-    )
-    expect(stub.sendCalls).toHaveLength(1)
-  })
+      await expect(client.requestReview(requestParams)).rejects.toThrow(
+        `OpenRouter auth/credit error — aborting without fallback: openai/gpt-5-mini: api_error (HTTP ${statusCode}: HTTP ${statusCode})`,
+      )
+      expect(stub.sendCalls).toHaveLength(1)
+    },
+  )
 
   it("throws a per-attempt summary after exhausting a fallback-less ladder", async () => {
     const stub = makeSdkStub({

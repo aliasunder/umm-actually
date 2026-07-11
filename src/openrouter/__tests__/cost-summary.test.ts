@@ -12,6 +12,26 @@ const acceptedAttempt: ModelAttempt = {
 }
 
 describe("renderCostSummary", () => {
+  it("renders a well-formed empty table for zero attempts", () => {
+    const summary = renderCostSummary({
+      attempts: [],
+      modelUsed: "openai/gpt-5-mini",
+    })
+
+    expect(summary).toBe(
+      [
+        "### umm-actually cost summary",
+        "",
+        "Model used: openai/gpt-5-mini",
+        "",
+        "| attempt | model | outcome | prompt tokens | completion tokens | cost |",
+        "| --- | --- | --- | --- | --- | --- |",
+        "",
+        "Total cost: n/a",
+      ].join("\n"),
+    )
+  })
+
   it("renders a single accepted attempt with its total", () => {
     const summary = renderCostSummary({
       attempts: [acceptedAttempt],

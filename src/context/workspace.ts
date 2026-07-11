@@ -1,7 +1,11 @@
 import { readFile, readdir, realpath, stat } from "node:fs/promises"
 import path, { posix } from "node:path"
 import type { Logger } from "../logger.js"
-import { estimateTokens, type PromptFile } from "../review/prompt.js"
+import {
+  CHARS_PER_TOKEN,
+  estimateTokens,
+  type PromptFile,
+} from "../review/prompt.js"
 import {
   extractImportSpecifiers,
   resolveImportSpecifier,
@@ -209,6 +213,20 @@ export const createContextReader = (
 
     for (const changedPath of changedPaths) {
       const absolutePath = resolveUnderRoot(changedPath)
+      // Stat before reading: a changed lockfile or bundle can be arbitrarily
+      // large, and the token check below only runs after the full read. UTF-8
+      // bytes ≥ chars, so a file whose bytes exceed the remaining character
+      // budget can never fit — demote it without pulling it into memory.
+      // A failed stat (e.g. deleted file) falls through to the read path,
+      // which already logs and degrades per error kind.
+      const fileStats = await stat(absolutePath).catch(() => null)
+      if (
+        fileStats !== null &&
+        fileStats.size > remainingTokens * CHARS_PER_TOKEN
+      ) {
+        files.push({ path: changedPath, content: "", includedAs: "diff-only" })
+        continue
+      }
       const content = await readChangedFileOrNull(absolutePath, changedPath)
       if (content === null) {
         files.push({ path: changedPath, content: "", includedAs: "diff-only" })

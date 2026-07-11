@@ -12,7 +12,7 @@ export type PromptFile = {
 }
 
 /** ~4 chars per token — the standard rough heuristic; we only need order-of-magnitude. */
-const CHARS_PER_TOKEN = 4
+export const CHARS_PER_TOKEN = 4
 const CONVENTIONS_TOKEN_CAP = 8_000
 
 const IDENTITY_AND_SCOPE = `You are umm-actually, a code review bot. You review the changes in a pull
