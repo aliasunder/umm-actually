@@ -80,7 +80,7 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 | `severity_threshold`    | `low`                         | Minimum severity to post: `low` \| `medium` \| `high` \| `critical`                                         |
 | `conventions_file`      | `AGENTS.md`                   | Repo-relative path to the conventions file included in the prompt                                           |
 | `phases`                | `combined`                    | Review phases to run. V1 supports: `combined`                                                               |
-| `context_budget_tokens` | `80000`                       | Approximate token budget for prompt context (conventions + file contents + diff)                            |
+| `context_budget_tokens` | `80000`                       | Approximate token budget for prompt context (file contents + diff — conventions have a separate cap)        |
 | `trace_related_files`   | `true`                        | Include files that reference changed files in the prompt so the model can trace regressions into callers    |
 | `cost_summary`          | `true`                        | Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow step summary             |
 | `pr_number`             | `""`                          | PR number override — required only when the triggering event does not identify a PR directly                |

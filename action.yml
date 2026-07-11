@@ -37,7 +37,7 @@ inputs:
     required: false
     default: combined
   context_budget_tokens:
-    description: Approximate token budget for prompt context (conventions + file contents + diff)
+    description: Approximate token budget for prompt context (file contents + diff — conventions have a separate cap)
     required: false
     default: "80000"
   trace_related_files:
