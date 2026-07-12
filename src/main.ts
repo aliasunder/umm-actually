@@ -1,5 +1,15 @@
 import * as core from "@actions/core"
+import { context, getOctokit } from "@actions/github"
+import { OpenRouter } from "@openrouter/sdk"
+import envVar from "env-var"
 import { parseConfig, type RawInputs } from "./config.js"
+import { createContextReader } from "./context/workspace.js"
+import { createGithubClient } from "./github/client.js"
+import { createLogger } from "./logger.js"
+import { createOpenRouterClient } from "./openrouter/client.js"
+import { createPromptedGenerateFindings, orchestrate } from "./orchestrate.js"
+
+const logger = createLogger("umm-actually")
 
 /**
  * Collects raw inputs at the SDK boundary. Strings come from getInput;
@@ -22,21 +32,49 @@ const collectRawInputs = (): RawInputs => ({
   prNumberOverride: core.getInput("pr_number"),
 })
 
-// Input collection and config validation are wired now so bad inputs fail
-// loudly today; orchestrate.ts lands in the next PR and replaces the
-// setFailed stub below.
 try {
   const config = parseConfig(collectRawInputs())
-  // Register both credentials with the runner's masker before anything can
-  // log — our JSON logger writes raw to stdout, bypassing the masking the
-  // runner applies only to values passed through ::add-mask::.
   core.setSecret(config.githubToken)
   core.setSecret(config.openrouterApiKey)
-  core.setFailed(
-    "umm-actually: review pipeline not yet implemented (scaffold only)",
+
+  const workspaceRoot = envVar
+    .from(process.env)
+    .get("GITHUB_WORKSPACE")
+    .required()
+    .asString()
+  const octokit = getOctokit(config.githubToken)
+  const { owner, repo } = context.repo
+
+  const result = await orchestrate(
+    {
+      config,
+      eventName: context.eventName,
+      payload: context.payload,
+      githubClient: createGithubClient({ octokit, owner, repo }, logger),
+      contextReader: createContextReader({ workspaceRoot }, logger),
+      generateFindings: createPromptedGenerateFindings(
+        {
+          openrouterClient: createOpenRouterClient(
+            { sdk: new OpenRouter({ apiKey: config.openrouterApiKey }) },
+            logger,
+          ),
+          model: config.model,
+          fallbackModel:
+            config.fallbackModel === "" ? null : config.fallbackModel,
+        },
+        logger,
+      ),
+    },
+    logger,
   )
-} catch (configError) {
-  core.setFailed(
-    configError instanceof Error ? configError.message : String(configError),
-  )
+
+  core.setOutput("findings_count", result.findingsCount)
+  core.setOutput("review_url", result.reviewUrl)
+  core.setOutput("model_used", result.modelUsed)
+  core.setOutput("skipped_reason", result.skippedReason)
+  if (config.costSummary && result.costSummaryMarkdown !== null) {
+    await core.summary.addRaw(result.costSummaryMarkdown).write()
+  }
+} catch (error) {
+  core.setFailed(error instanceof Error ? error.message : String(error))
 }

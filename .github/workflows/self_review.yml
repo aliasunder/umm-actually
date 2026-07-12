@@ -1,0 +1,54 @@
+name: Self Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request' ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        contains(github.event.comment.body, '@umm review')
+      )
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.UMM_APP_ID }}
+          private-key: ${{ secrets.UMM_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Request review from umm-actually bot
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/requested_reviewers" \
+            --method POST -f 'reviewers[]=umm-actually[bot]' || true
+
+      - uses: ./
+        with:
+          github_token: ${{ steps.app-token.outputs.token }}
+          openrouter_api_key: ${{ secrets.OPENROUTER_KEY }}
+          model: ${{ vars.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4-6' }}

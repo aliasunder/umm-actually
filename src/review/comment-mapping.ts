@@ -185,20 +185,31 @@ const renderBodyFinding = (finding: Finding): string =>
   ${finding.description}
   **Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}`
 
-/** The review's top-level body: beyond-diff findings, cap note, attribution. */
+/** The review's top-level body: summary, body findings section, cap note, attribution. */
 export const buildReviewBody = ({
   bodyFindings,
   droppedByCap,
   model,
+  inlineCommentCount = 0,
+  bodyFindingsHeading = "Findings beyond the diff",
+  bodyFindingsDescription = "These are in code the changes touch or depend on, outside the diff's line ranges:",
 }: {
   bodyFindings: Finding[]
   droppedByCap: Finding[]
   model: string
+  inlineCommentCount?: number
+  bodyFindingsHeading?: string
+  bodyFindingsDescription?: string
 }): string => {
+  const summaryLine =
+    inlineCommentCount > 0 && bodyFindings.length === 0
+      ? `Reviewed — ${inlineCommentCount} finding(s) posted as inline comments.`
+      : ""
+
   const beyondDiffSection =
     bodyFindings.length === 0
       ? ""
-      : `### Findings beyond the diff\n\nThese are in code the changes touch or depend on, outside the diff's line ranges:\n\n${bodyFindings.map(renderBodyFinding).join("\n\n")}`
+      : `### ${bodyFindingsHeading}\n\n${bodyFindingsDescription}\n\n${bodyFindings.map(renderBodyFinding).join("\n\n")}`
 
   const capNote =
     droppedByCap.length === 0
@@ -207,7 +218,7 @@ export const buildReviewBody = ({
 
   const attribution = `---\n*umm-actually · ${model}*`
 
-  return [beyondDiffSection, capNote, attribution]
+  return [summaryLine, beyondDiffSection, capNote, attribution]
     .filter((section) => section !== "")
     .join("\n\n")
 }
