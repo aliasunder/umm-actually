@@ -10,7 +10,8 @@ import type {
   OpenRouterClient,
   StructuredReviewResult,
 } from "../openrouter/client.js"
-import type { PromptFile } from "../review/prompt.js"
+import { estimateTokens, type PromptFile } from "../review/prompt.js"
+import { annotateDiff } from "../diff/annotate-diff.js"
 import type { ReviewResponse } from "../review/finding.js"
 import type { ReviewComment } from "../review/comment-mapping.js"
 import {
@@ -26,6 +27,8 @@ const sampleDiff = readFileSync(
   new URL("../../fixtures/sample.diff", import.meta.url),
   "utf8",
 )
+
+const sampleDiffTokens = estimateTokens(annotateDiff(parseDiff(sampleDiff)))
 
 const pullRequestPayload: Record<string, unknown> = JSON.parse(
   readFileSync(
@@ -400,11 +403,9 @@ describe("orchestrate", () => {
 
       expect(localReadChangedFilesCalls).toHaveLength(1)
       const call = first(localReadChangedFilesCalls)
-      // Budget for files = contextBudgetTokens (80k) - diffTokens; diffTokens
-      // varies with fixture size but must be less than the full budget and the
-      // resulting file budget must be positive and less than the total.
-      expect(call.budgetTokens).toBeGreaterThan(0)
-      expect(call.budgetTokens).toBeLessThan(baseConfig.contextBudgetTokens)
+      expect(call.budgetTokens).toBe(
+        baseConfig.contextBudgetTokens - sampleDiffTokens,
+      )
     })
 
     it("passes remainingTokens from readChangedFiles to findRelatedFiles", async () => {

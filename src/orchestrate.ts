@@ -195,9 +195,18 @@ export const orchestrate = async (
   // Step 7: commentable lines
   const commentableByPath = computeCommentableLines(files)
 
-  // Step 8: extract changed paths
+  // Step 8: extract changed paths (includes old path for renames so the
+  // import scanner finds callers that still reference the pre-rename path)
   const changedPaths = files
-    .map((file) => newFilePath(file))
+    .flatMap((file) => {
+      const toPath = newFilePath(file)
+      const isRename =
+        toPath !== null &&
+        file.from !== undefined &&
+        file.from !== "/dev/null" &&
+        file.from !== file.to
+      return isRename ? [toPath, file.from] : [toPath]
+    })
     .filter((path): path is string => path !== null)
 
   // Step 9: context reads
