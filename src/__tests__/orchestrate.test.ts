@@ -12,8 +12,16 @@ import type {
 } from "../openrouter/client.js"
 import { estimateTokens, type PromptFile } from "../review/prompt.js"
 import { annotateDiff } from "../diff/annotate-diff.js"
+import { computeCommentableLines } from "../diff/commentable-lines.js"
 import type { ReviewResponse } from "../review/finding.js"
-import type { ReviewComment } from "../review/comment-mapping.js"
+import {
+  buildReviewBody,
+  buildZeroFindingsBody,
+  mapFindingsToReview,
+  type ReviewComment,
+} from "../review/comment-mapping.js"
+import { selectFindings } from "../review/select-findings.js"
+import { renderCostSummary } from "../openrouter/cost-summary.js"
 import {
   orchestrate,
   createPromptedGenerateFindings,
@@ -67,6 +75,60 @@ const fixtureChangedFile: PromptFile = {
   content: "export const greet = (name: string) => name.trim()",
   includedAs: "full",
 }
+
+// Precomputed expected values from deterministic fixtures — used for exact
+// assertions on the full result and submitReview params
+const fixtureFiles = parseDiff(sampleDiff)
+const fixtureCommentableByPath = computeCommentableLines(fixtureFiles)
+
+const expectedSelection = selectFindings({
+  findings: fixtureReviewResponse.findings,
+  severityThreshold: "low",
+  maxFindings: undefined,
+})
+const expectedMapped = mapFindingsToReview({
+  findings: expectedSelection.selected,
+  commentableByPath: fixtureCommentableByPath,
+})
+const expectedBody = buildReviewBody({
+  bodyFindings: expectedMapped.bodyFindings,
+  droppedByCap: expectedSelection.droppedByCap,
+  model: "test/model",
+  inlineCommentCount: expectedMapped.comments.length,
+})
+const expectedFallbackBody = buildReviewBody({
+  bodyFindings: expectedSelection.selected,
+  droppedByCap: expectedSelection.droppedByCap,
+  model: "test/model",
+  bodyFindingsHeading: "Findings",
+  bodyFindingsDescription:
+    "Inline comments were unavailable; all findings are listed here:",
+})
+const expectedCostSummary = renderCostSummary({
+  attempts: [fixtureAttempt],
+  modelUsed: "test/model",
+})
+
+const expectedCappedSelection = selectFindings({
+  findings: fixtureReviewResponse.findings,
+  severityThreshold: "low",
+  maxFindings: 1,
+})
+const expectedCappedMapped = mapFindingsToReview({
+  findings: expectedCappedSelection.selected,
+  commentableByPath: fixtureCommentableByPath,
+})
+const expectedCappedBody = buildReviewBody({
+  bodyFindings: expectedCappedMapped.bodyFindings,
+  droppedByCap: expectedCappedSelection.droppedByCap,
+  model: "test/model",
+  inlineCommentCount: expectedCappedMapped.comments.length,
+})
+
+const expectedZeroBody = buildZeroFindingsBody({ model: "test/model" })
+
+const buildSkipBody = (reason: string): string =>
+  `**umm-actually** — review skipped\n\n${reason}\n\n---\n*umm-actually*`
 
 const baseConfig: ActionConfig = {
   githubToken: "ghp_test",
@@ -248,11 +310,13 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      expect(result.skippedReason).toContain("unsupported event")
-      expect(result.reviewUrl).toBe("")
-      expect(result.findingsCount).toBe(0)
-      expect(result.modelUsed).toBe("")
-      expect(result.costSummaryMarkdown).toBeNull()
+      expect(result).toEqual({
+        findingsCount: 0,
+        reviewUrl: "",
+        modelUsed: "",
+        skippedReason: "unsupported event: push",
+        costSummaryMarkdown: null,
+      })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(0)
     })
@@ -281,15 +345,23 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      expect(result.skippedReason).toBe("diff exceeds GitHub's diff API limits")
-      expect(result.reviewUrl).toBe("https://github.com/test/review/1")
-      expect(result.findingsCount).toBe(0)
-      expect(result.modelUsed).toBe("")
+      const skipReason = "diff exceeds GitHub's diff API limits"
+      expect(result).toEqual({
+        findingsCount: 0,
+        reviewUrl: "https://github.com/test/review/1",
+        modelUsed: "",
+        skippedReason: skipReason,
+        costSummaryMarkdown: null,
+      })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
-      const reviewCall = first(stubs.submitReviewCalls)
-      expect(reviewCall.comments).toEqual([])
-      expect(reviewCall.body).toContain("diff exceeds")
+      expect(first(stubs.submitReviewCalls)).toEqual({
+        prNumber: fixturePrContext.prNumber,
+        commitId: fixturePrContext.headSha,
+        body: buildSkipBody(skipReason),
+        comments: [],
+        fallbackBody: buildSkipBody(skipReason),
+      })
     })
 
     it("posts skip review when diff parses to zero files", async () => {
@@ -302,12 +374,23 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      expect(result.skippedReason).toBe("empty diff")
-      expect(result.reviewUrl).toBe("https://github.com/test/review/1")
+      const skipReason = "empty diff"
+      expect(result).toEqual({
+        findingsCount: 0,
+        reviewUrl: "https://github.com/test/review/1",
+        modelUsed: "",
+        skippedReason: skipReason,
+        costSummaryMarkdown: null,
+      })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
-      const reviewCall = first(stubs.submitReviewCalls)
-      expect(reviewCall.body).toContain("empty diff")
+      expect(first(stubs.submitReviewCalls)).toEqual({
+        prNumber: fixturePrContext.prNumber,
+        commitId: fixturePrContext.headSha,
+        body: buildSkipBody(skipReason),
+        comments: [],
+        fallbackBody: buildSkipBody(skipReason),
+      })
     })
 
     it("posts skip review when annotated diff exceeds budget", async () => {
@@ -318,12 +401,24 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      expect(result.skippedReason).toContain("diff too large")
-      expect(result.skippedReason).toContain("tokens")
-      expect(result.skippedReason).toContain("budget")
-      expect(result.reviewUrl).toBe("https://github.com/test/review/1")
+      const budgetHalf = Math.floor(10 / 2)
+      const skipReason = `diff too large for context budget (${sampleDiffTokens} tokens, limit ${budgetHalf} of 10)`
+      expect(result).toEqual({
+        findingsCount: 0,
+        reviewUrl: "https://github.com/test/review/1",
+        modelUsed: "",
+        skippedReason: skipReason,
+        costSummaryMarkdown: null,
+      })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
+      expect(first(stubs.submitReviewCalls)).toEqual({
+        prNumber: fixturePrContext.prNumber,
+        commitId: fixturePrContext.headSha,
+        body: buildSkipBody(skipReason),
+        comments: [],
+        fallbackBody: buildSkipBody(skipReason),
+      })
     })
 
     it("passes correct prNumber and commitId in skip reviews", async () => {
@@ -349,17 +444,22 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      expect(result.findingsCount).toBe(fixtureReviewResponse.findings.length)
-      expect(result.reviewUrl).toBe("https://github.com/test/review/1")
-      expect(result.modelUsed).toBe("test/model")
-      expect(result.skippedReason).toBe("")
-      expect(result.costSummaryMarkdown).toContain("test/model")
-      expect(result.costSummaryMarkdown).toContain("$0.010000")
+      expect(result).toEqual({
+        findingsCount: expectedSelection.selected.length,
+        reviewUrl: "https://github.com/test/review/1",
+        modelUsed: "test/model",
+        skippedReason: "",
+        costSummaryMarkdown: expectedCostSummary,
+      })
 
       expect(stubs.submitReviewCalls).toHaveLength(1)
-      const reviewCall = first(stubs.submitReviewCalls)
-      expect(reviewCall.prNumber).toBe(7)
-      expect(reviewCall.commitId).toBe(fixturePrContext.headSha)
+      expect(first(stubs.submitReviewCalls)).toEqual({
+        prNumber: fixturePrContext.prNumber,
+        commitId: fixturePrContext.headSha,
+        body: expectedBody,
+        comments: expectedMapped.comments,
+        fallbackBody: expectedFallbackBody,
+      })
     })
 
     it("passes changed files and conventions to generateFindings", async () => {
@@ -489,9 +589,13 @@ describe("orchestrate", () => {
       expect(result.reviewUrl).toBe("https://github.com/test/review/1")
       expect(result.skippedReason).toBe("")
       expect(stubs.submitReviewCalls).toHaveLength(1)
-      const reviewCall = first(stubs.submitReviewCalls)
-      expect(reviewCall.body).toContain("no findings above threshold")
-      expect(reviewCall.comments).toEqual([])
+      expect(first(stubs.submitReviewCalls)).toEqual({
+        prNumber: fixturePrContext.prNumber,
+        commitId: fixturePrContext.headSha,
+        body: expectedZeroBody,
+        comments: [],
+        fallbackBody: expectedZeroBody,
+      })
     })
 
     it("respects maxFindings cap and includes dropped findings in body", async () => {
@@ -503,8 +607,9 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(1)
+      expect(stubs.submitReviewCalls).toHaveLength(1)
       const reviewCall = first(stubs.submitReviewCalls)
-      expect(reviewCall.body).toContain("omitted")
+      expect(reviewCall.body).toBe(expectedCappedBody)
     })
 
     it("returns costSummaryMarkdown when LLM call happened", async () => {
@@ -513,8 +618,7 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      expect(result.costSummaryMarkdown).not.toBeNull()
-      expect(result.costSummaryMarkdown).toContain("test/model")
+      expect(result.costSummaryMarkdown).toBe(expectedCostSummary)
     })
 
     it("returns null costSummaryMarkdown when skipped before LLM call", async () => {
@@ -537,10 +641,7 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       const reviewCall = first(stubs.submitReviewCalls)
-      expect(reviewCall.fallbackBody).toContain("test/model")
-      for (const finding of fixtureReviewResponse.findings) {
-        expect(reviewCall.fallbackBody).toContain(finding.title)
-      }
+      expect(reviewCall.fallbackBody).toBe(expectedFallbackBody)
     })
 
     it("uses complete PrContext from pull_request event without fetching", async () => {

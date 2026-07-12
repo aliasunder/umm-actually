@@ -90,7 +90,11 @@ files. Prefer SDK-provided types over redefining shapes.
 - `const` per test via factory helpers; `beforeEach` only when per-test
   creation is genuinely impractical.
 - Exact assertions over loose matchers; assert whole values over substrings
-  when output is deterministic.
+  when output is deterministic. When fixtures and stubs produce deterministic
+  results, assert the entire return value or call params — not just individual
+  fields. Asserting fragments is the cheap option; asserting the whole value
+  catches drift in formatting, structure, and attribution that field-level
+  checks miss.
 - Two-bar rule: a test must (1) fail when the behavior breaks and (2) pass
   only because the intended behavior occurred. Guard against silent no-op,
   wrong-error, and early-return passes.
