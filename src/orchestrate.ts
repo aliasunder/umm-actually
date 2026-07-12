@@ -99,6 +99,9 @@ const buildReviewPayload = ({
     bodyFindings: findings,
     droppedByCap,
     model: modelUsed,
+    bodyFindingsHeading: "Findings",
+    bodyFindingsDescription:
+      "Inline comments were unavailable; all findings are listed here:",
   })
   return { body, comments, fallbackBody }
 }
