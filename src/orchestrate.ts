@@ -340,11 +340,20 @@ export const orchestrate = async (
       totalCount: existingAnchors.size + newFindings.length,
       model: modelUsed,
     })
-    await githubClient.upsertSummaryComment({
-      prNumber: prContext.prNumber,
-      body: summaryBody,
-      anchor: RERUN_ANCHOR,
-    })
+    try {
+      await githubClient.upsertSummaryComment({
+        prNumber: prContext.prNumber,
+        body: summaryBody,
+        anchor: RERUN_ANCHOR,
+      })
+    } catch (summaryError) {
+      logger.warn("failed to upsert summary comment — review already posted", {
+        error:
+          summaryError instanceof Error
+            ? summaryError.message
+            : String(summaryError),
+      })
+    }
 
     logger.info("re-run review posted", {
       reviewUrl,
@@ -361,11 +370,20 @@ export const orchestrate = async (
       totalCount: existingAnchors.size,
       model: modelUsed,
     })
-    await githubClient.upsertSummaryComment({
-      prNumber: prContext.prNumber,
-      body: summaryBody,
-      anchor: RERUN_ANCHOR,
-    })
+    try {
+      await githubClient.upsertSummaryComment({
+        prNumber: prContext.prNumber,
+        body: summaryBody,
+        anchor: RERUN_ANCHOR,
+      })
+    } catch (summaryError) {
+      logger.warn("failed to upsert summary comment", {
+        error:
+          summaryError instanceof Error
+            ? summaryError.message
+            : String(summaryError),
+      })
+    }
 
     logger.info("re-run — no new findings", {
       totalCount: existingAnchors.size,

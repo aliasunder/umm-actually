@@ -55,7 +55,7 @@ inputs:
 
 outputs:
   findings_count:
-    description: Number of findings posted (after threshold and cap)
+    description: Number of new findings posted (after threshold, cap, and cross-run dedup)
   review_url:
     description: URL of the submitted review; empty when no review was posted
   model_used:
