@@ -319,7 +319,7 @@ export const orchestrate = async (
       modelUsed,
     })
   } else if (newFindings.length > 0) {
-    // Re-run with new findings — post only new ones + upsert summary
+    // Re-run with new findings — post only new ones
     const reviewPayload = buildReviewPayload({
       findings: newFindings,
       commentableByPath,
@@ -334,40 +334,26 @@ export const orchestrate = async (
     })
     reviewUrl = result.url
 
-    const summaryBody = buildRerunSummary({
-      sha: prContext.headSha,
-      newCount: newFindings.length,
-      totalCount: existingAnchors.size + newFindings.length,
-      model: modelUsed,
-    })
-    try {
-      await githubClient.upsertSummaryComment({
-        prNumber: prContext.prNumber,
-        body: summaryBody,
-        anchor: RERUN_ANCHOR,
-      })
-    } catch (summaryError) {
-      logger.warn("failed to upsert summary comment — review already posted", {
-        error:
-          summaryError instanceof Error
-            ? summaryError.message
-            : String(summaryError),
-      })
-    }
-
     logger.info("re-run review posted", {
       reviewUrl,
       newFindingsCount: newFindings.length,
       totalCount: existingAnchors.size + newFindings.length,
     })
   } else {
-    // Re-run with zero new findings — upsert summary only
+    // Re-run with zero new findings
     reviewUrl = ""
 
+    logger.info("re-run — no new findings", {
+      totalCount: existingAnchors.size,
+    })
+  }
+
+  // Upsert summary comment on re-runs
+  if (isRerun) {
     const summaryBody = buildRerunSummary({
       sha: prContext.headSha,
-      newCount: 0,
-      totalCount: existingAnchors.size,
+      newCount: newFindings.length,
+      totalCount: existingAnchors.size + newFindings.length,
       model: modelUsed,
     })
     try {
@@ -384,10 +370,6 @@ export const orchestrate = async (
             : String(summaryError),
       })
     }
-
-    logger.info("re-run — no new findings", {
-      totalCount: existingAnchors.size,
-    })
   }
 
   // Step 14: cost summary

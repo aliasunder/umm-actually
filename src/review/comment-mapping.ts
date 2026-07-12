@@ -25,6 +25,7 @@ export type MappedReview = {
  */
 const SNAP_DISTANCE = 3
 
+/** Matches `<!-- umm-actually:KEY -->` -- the hidden HTML anchor in each inline finding. Group 1 is the dedup key. */
 const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->/
 
 /** Deterministic dedup key for a finding — file + category + 8-char title hash. */
