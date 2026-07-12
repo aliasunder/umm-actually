@@ -29,6 +29,34 @@ export type OctokitLike = {
         body: string
         comments?: ReviewComment[]
       }): Promise<{ data: unknown }>
+      listReviewComments(params: {
+        owner: string
+        repo: string
+        pull_number: number
+        per_page?: number
+        page?: number
+      }): Promise<{ data: unknown }>
+    }
+    issues: {
+      listComments(params: {
+        owner: string
+        repo: string
+        issue_number: number
+        per_page?: number
+        page?: number
+      }): Promise<{ data: unknown }>
+      createComment(params: {
+        owner: string
+        repo: string
+        issue_number: number
+        body: string
+      }): Promise<{ data: unknown }>
+      updateComment(params: {
+        owner: string
+        repo: string
+        comment_id: number
+        body: string
+      }): Promise<{ data: unknown }>
     }
   }
 }
@@ -36,6 +64,8 @@ export type DiffFetchResult =
   { kind: "ok"; diff: string } | { kind: "too_large" }
 
 export type SubmitReviewResult = { url: string; usedFallbackBody: boolean }
+
+export type UpsertCommentResult = { url: string; created: boolean }
 
 export type GithubClient = {
   fetchPullRequest: (params: { prNumber: number }) => Promise<PrContext>
@@ -49,6 +79,14 @@ export type GithubClient = {
      *  rejects the inline anchors. */
     fallbackBody: string
   }) => Promise<SubmitReviewResult>
+  fetchReviewComments: (params: {
+    prNumber: number
+  }) => Promise<{ path: string; body: string }[]>
+  upsertSummaryComment: (params: {
+    prNumber: number
+    body: string
+    anchor: string
+  }) => Promise<UpsertCommentResult>
 }
 
 /** The pullRequestEventSchema fields minus the event wrapper — what the REST
@@ -62,6 +100,23 @@ const prResponseSchema = z.object({
 })
 
 const reviewUrlSchema = z.object({ html_url: z.string() })
+
+const reviewCommentListSchema = z.array(
+  z.object({ path: z.string(), body: z.string() }),
+)
+
+const issueCommentListSchema = z.array(
+  z.object({
+    id: z.int().positive(),
+    body: z.string(),
+    html_url: z.string(),
+  }),
+)
+
+const issueCommentResponseSchema = z.object({ html_url: z.string() })
+
+const MAX_PAGES = 10
+const PER_PAGE = 100
 
 /** Octokit request errors carry a numeric `status` — duck-typed so stubs and
  *  future octokit versions need no instanceof on octokit internals. */
@@ -189,5 +244,112 @@ export const createGithubClient = (
     }
   }
 
-  return { fetchPullRequest, fetchDiff, submitReview }
+  const fetchReviewComments = async ({
+    prNumber,
+  }: {
+    prNumber: number
+  }): Promise<{ path: string; body: string }[]> => {
+    const allComments: { path: string; body: string }[] = []
+
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const response = await octokit.rest.pulls.listReviewComments({
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: PER_PAGE,
+        page,
+      })
+      const parsed = reviewCommentListSchema.safeParse(response.data)
+      if (!parsed.success) {
+        throw new Error("unexpected review comments response shape")
+      }
+      allComments.push(...parsed.data)
+      if (parsed.data.length < PER_PAGE) break
+      if (page === MAX_PAGES) {
+        logger.warn("review comments page cap reached", {
+          prNumber,
+          totalFetched: allComments.length,
+        })
+      }
+    }
+
+    logger.info("fetched review comments", {
+      prNumber,
+      count: allComments.length,
+    })
+    return allComments
+  }
+
+  const upsertSummaryComment = async ({
+    prNumber,
+    body,
+    anchor,
+  }: {
+    prNumber: number
+    body: string
+    anchor: string
+  }): Promise<UpsertCommentResult> => {
+    let existingComment: { id: number; html_url: string } | undefined
+
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const response = await octokit.rest.issues.listComments({
+        owner,
+        repo,
+        issue_number: prNumber,
+        per_page: PER_PAGE,
+        page,
+      })
+      const parsed = issueCommentListSchema.safeParse(response.data)
+      if (!parsed.success) {
+        throw new Error("unexpected issue comments response shape")
+      }
+      existingComment = parsed.data.find((comment) =>
+        comment.body.includes(anchor),
+      )
+      if (existingComment !== undefined) break
+      if (parsed.data.length < PER_PAGE) break
+      if (page === MAX_PAGES) {
+        logger.warn("issue comments page cap reached", {
+          prNumber,
+          totalFetched: page * PER_PAGE,
+        })
+      }
+    }
+
+    if (existingComment !== undefined) {
+      const response = await octokit.rest.issues.updateComment({
+        owner,
+        repo,
+        comment_id: existingComment.id,
+        body,
+      })
+      const parsed = issueCommentResponseSchema.safeParse(response.data)
+      if (!parsed.success) {
+        throw new Error("unexpected issue comment response shape")
+      }
+      logger.info("updated summary comment", { prNumber })
+      return { url: parsed.data.html_url, created: false }
+    }
+
+    const response = await octokit.rest.issues.createComment({
+      owner,
+      repo,
+      issue_number: prNumber,
+      body,
+    })
+    const parsed = issueCommentResponseSchema.safeParse(response.data)
+    if (!parsed.success) {
+      throw new Error("unexpected issue comment response shape")
+    }
+    logger.info("created summary comment", { prNumber })
+    return { url: parsed.data.html_url, created: true }
+  }
+
+  return {
+    fetchPullRequest,
+    fetchDiff,
+    submitReview,
+    fetchReviewComments,
+    upsertSummaryComment,
+  }
 }
