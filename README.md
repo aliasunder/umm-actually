@@ -125,7 +125,6 @@ umm-actually is in early development — the core review pipeline works but ther
 - **Review dedup on re-runs** — currently each push posts a new review; working on deduplicating findings across runs and updating a single summary comment instead of creating new ones
 - **Doc-staleness detection** — extending the workspace scan to doc files (`.md`, `.json`) so unchanged docs that describe changed code reach the prompt and staleness becomes a finding
 - **Branded check run** — using the Checks API so the CI check shows the umm-actually avatar instead of the generic GitHub Actions logo
-- **Review update on vault-cortex** — replacing PR-Agent with umm-actually as the review engine on the [vault-cortex](https://github.com/aliasunder/vault-cortex) project
 
 **Planned**
 
