@@ -105,6 +105,33 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 7. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
 8. Posts one consolidated review — findings that can't be inlined render in the review body
 
+## Status
+
+umm-actually is in early development — the core review pipeline works but there's more to build. Here's what's shipped and what's in progress:
+
+**Shipped (V1)**
+
+- Single-pass review with inline findings anchored to diff lines
+- Structured output with retry ladder and fallback model
+- Import-tracing: changed code is traced into callers via reverse-import scan
+- Token-budgeted context (changed files + related files + conventions)
+- Prompt injection defense (randomized delimiter nonces)
+- Skip-path handling with posted reasons (oversized diff, empty diff, API limits)
+- Cost transparency (per-run model/token/USD report in workflow summary)
+- `@umm review` comment trigger for on-demand re-reviews
+
+**In progress**
+
+- **Review dedup on re-runs** — currently each push posts a new review; working on deduplicating findings across runs and updating a single summary comment instead of creating new ones
+- **Doc-staleness detection** — extending the workspace scan to doc files (`.md`, `.json`) so unchanged docs that describe changed code reach the prompt and staleness becomes a finding
+- **Branded check run** — using the Checks API so the CI check shows the umm-actually avatar instead of the generic GitHub Actions logo
+- **Review update on vault-cortex** — replacing PR-Agent with umm-actually as the review engine on the [vault-cortex](https://github.com/aliasunder/vault-cortex) project
+
+**Planned**
+
+- V1.5: `read_file` verification tool — the model can read additional files before finalizing findings
+- V2: bounded agentic exploration — multi-step investigation with tool use behind a `generateFindings` seam
+
 ## License
 
 [MIT](./LICENSE)
