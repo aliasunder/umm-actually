@@ -495,6 +495,27 @@ describe("fetchReviewComments", () => {
     ])
   })
 
+  it("stops at the page cap and logs a warning", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({
+      path: `src/file-${index}.ts`,
+      body: `body-${index}`,
+    }))
+    const responses = Array.from({ length: 10 }, () => ({ data: fullPage }))
+    const stub = makeOctokitStub({ listReviewCommentsResponses: responses })
+    const { client, logger } = makeClient(stub)
+
+    const comments = await client.fetchReviewComments({ prNumber: 7 })
+
+    expect(comments).toHaveLength(1000)
+    expect(stub.listReviewCommentsCalls).toHaveLength(10)
+    expect(stub.listReviewCommentsCalls[9]).toMatchObject({ page: 10 })
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "review comments page cap reached",
+      data: { prNumber: 7, totalFetched: 1000 },
+    })
+  })
+
   it("throws on a malformed response", async () => {
     const stub = makeOctokitStub({
       listReviewCommentsResponses: [{ data: "not an array" }],

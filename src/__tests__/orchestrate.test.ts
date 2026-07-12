@@ -685,8 +685,9 @@ describe("orchestrate", () => {
       const stubs = makeOrchestrateDeps()
       const logger = createTestLogger()
 
-      await orchestrate(stubs.deps, logger)
+      const result = await orchestrate(stubs.deps, logger)
 
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
       expect(stubs.fetchReviewCommentsCalls).toHaveLength(1)
       expect(stubs.submitReviewCalls).toHaveLength(1)
       expect(stubs.upsertSummaryCommentCalls).toHaveLength(0)
