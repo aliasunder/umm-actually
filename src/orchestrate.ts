@@ -94,6 +94,7 @@ const buildReviewPayload = ({
     bodyFindings,
     droppedByCap,
     model: modelUsed,
+    inlineCommentCount: comments.length,
   })
   const fallbackBody = buildReviewBody({
     bodyFindings: findings,
@@ -187,7 +188,7 @@ export const orchestrate = async (
   const budgetHalf = Math.floor(config.contextBudgetTokens / 2)
   if (diffTokens > budgetHalf) {
     return postSkipReview(
-      `diff too large for context budget (${diffTokens} tokens, budget ${config.contextBudgetTokens})`,
+      `diff too large for context budget (${diffTokens} tokens, limit ${budgetHalf} of ${config.contextBudgetTokens})`,
     )
   }
 

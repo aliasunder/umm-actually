@@ -12,11 +12,13 @@ import type {
 } from "../openrouter/client.js"
 import type { PromptFile } from "../review/prompt.js"
 import type { ReviewResponse } from "../review/finding.js"
+import type { ReviewComment } from "../review/comment-mapping.js"
 import {
   orchestrate,
   createPromptedGenerateFindings,
   type OrchestrateDeps,
   type GenerateFindings,
+  type ReviewContext,
 } from "../orchestrate.js"
 import { createTestLogger } from "./test-logger.js"
 
@@ -78,15 +80,46 @@ const baseConfig: ActionConfig = {
   prNumberOverride: undefined,
 }
 
+type SubmitReviewParams = {
+  prNumber: number
+  commitId: string
+  body: string
+  comments: ReviewComment[]
+  fallbackBody: string
+}
+
+type ReadChangedFilesParams = {
+  changedPaths: string[]
+  budgetTokens: number
+}
+
+type FindRelatedFilesParams = {
+  changedPaths: string[]
+  budgetTokens: number
+}
+
+type RequestReviewParams = {
+  systemPrompt: string
+  userPrompt: string
+  model: string
+  fallbackModel: string | null
+}
+
+const first = <T>(array: T[]): T => {
+  const item = array[0]
+  if (item === undefined) throw new Error("expected at least one element")
+  return item
+}
+
 type RecordingStubs = {
   deps: OrchestrateDeps
-  fetchPullRequestCalls: Record<string, unknown>[]
-  fetchDiffCalls: Record<string, unknown>[]
-  submitReviewCalls: Record<string, unknown>[]
-  readConventionsCalls: Record<string, unknown>[]
-  readChangedFilesCalls: Record<string, unknown>[]
-  findRelatedFilesCalls: Record<string, unknown>[]
-  generateFindingsCalls: unknown[]
+  fetchPullRequestCalls: { prNumber: number }[]
+  fetchDiffCalls: { prNumber: number }[]
+  submitReviewCalls: SubmitReviewParams[]
+  readConventionsCalls: { conventionsFile: string }[]
+  readChangedFilesCalls: ReadChangedFilesParams[]
+  findRelatedFilesCalls: FindRelatedFilesParams[]
+  generateFindingsCalls: ReviewContext[]
 }
 
 const makeOrchestrateDeps = (
@@ -100,13 +133,13 @@ const makeOrchestrateDeps = (
     fixtureResult?: Partial<StructuredReviewResult>
   } = {},
 ): RecordingStubs => {
-  const fetchPullRequestCalls: Record<string, unknown>[] = []
-  const fetchDiffCalls: Record<string, unknown>[] = []
-  const submitReviewCalls: Record<string, unknown>[] = []
-  const readConventionsCalls: Record<string, unknown>[] = []
-  const readChangedFilesCalls: Record<string, unknown>[] = []
-  const findRelatedFilesCalls: Record<string, unknown>[] = []
-  const generateFindingsCalls: unknown[] = []
+  const fetchPullRequestCalls: { prNumber: number }[] = []
+  const fetchDiffCalls: { prNumber: number }[] = []
+  const submitReviewCalls: SubmitReviewParams[] = []
+  const readConventionsCalls: { conventionsFile: string }[] = []
+  const readChangedFilesCalls: ReadChangedFilesParams[] = []
+  const findRelatedFilesCalls: FindRelatedFilesParams[] = []
+  const generateFindingsCalls: ReviewContext[] = []
 
   const structuredResult: StructuredReviewResult = {
     review: fixtureReviewResponse,
@@ -251,9 +284,9 @@ describe("orchestrate", () => {
       expect(result.modelUsed).toBe("")
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
-      const reviewCall = stubs.submitReviewCalls[0] as Record<string, unknown>
-      expect(reviewCall["comments"]).toEqual([])
-      expect(reviewCall["body"]).toContain("diff exceeds")
+      const reviewCall = first(stubs.submitReviewCalls)
+      expect(reviewCall.comments).toEqual([])
+      expect(reviewCall.body).toContain("diff exceeds")
     })
 
     it("posts skip review when diff parses to zero files", async () => {
@@ -270,8 +303,8 @@ describe("orchestrate", () => {
       expect(result.reviewUrl).toBe("https://github.com/test/review/1")
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
-      const reviewCall = stubs.submitReviewCalls[0] as Record<string, unknown>
-      expect(reviewCall["body"]).toContain("empty diff")
+      const reviewCall = first(stubs.submitReviewCalls)
+      expect(reviewCall.body).toContain("empty diff")
     })
 
     it("posts skip review when annotated diff exceeds budget", async () => {
@@ -300,9 +333,9 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      const reviewCall = stubs.submitReviewCalls[0] as Record<string, unknown>
-      expect(reviewCall["prNumber"]).toBe(fixturePrContext.prNumber)
-      expect(reviewCall["commitId"]).toBe(fixturePrContext.headSha)
+      const reviewCall = first(stubs.submitReviewCalls)
+      expect(reviewCall.prNumber).toBe(fixturePrContext.prNumber)
+      expect(reviewCall.commitId).toBe(fixturePrContext.headSha)
     })
   })
 
@@ -321,9 +354,9 @@ describe("orchestrate", () => {
       expect(result.costSummaryMarkdown).toContain("$0.010000")
 
       expect(stubs.submitReviewCalls).toHaveLength(1)
-      const reviewCall = stubs.submitReviewCalls[0] as Record<string, unknown>
-      expect(reviewCall["prNumber"]).toBe(7)
-      expect(reviewCall["commitId"]).toBe(fixturePrContext.headSha)
+      const reviewCall = first(stubs.submitReviewCalls)
+      expect(reviewCall.prNumber).toBe(7)
+      expect(reviewCall.commitId).toBe(fixturePrContext.headSha)
     })
 
     it("passes changed files and conventions to generateFindings", async () => {
@@ -333,13 +366,10 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.generateFindingsCalls).toHaveLength(1)
-      const reviewContext = stubs.generateFindingsCalls[0] as Record<
-        string,
-        unknown
-      >
-      expect(reviewContext["conventions"]).toBe("# Test conventions")
-      expect(reviewContext["changedFiles"]).toEqual([fixtureChangedFile])
-      expect(reviewContext["prContext"]).toEqual(fixturePrContext)
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.conventions).toBe("# Test conventions")
+      expect(reviewContext.changedFiles).toEqual([fixtureChangedFile])
+      expect(reviewContext.prContext).toEqual(fixturePrContext)
     })
 
     it("includes annotated diff in review context", async () => {
@@ -348,22 +378,18 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      const reviewContext = stubs.generateFindingsCalls[0] as Record<
-        string,
-        unknown
-      >
-      const annotatedDiff = reviewContext["annotatedDiff"] as string
-      expect(annotatedDiff).toContain("=== src/greeter.ts ===")
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.annotatedDiff).toContain("=== src/greeter.ts ===")
     })
   })
 
   describe("context wiring", () => {
     it("passes budget minus diff tokens to readChangedFiles", async () => {
-      const readChangedFilesCalls: Record<string, unknown>[] = []
+      const localReadChangedFilesCalls: ReadChangedFilesParams[] = []
       const stubs = makeOrchestrateDeps({
         contextReader: {
           readChangedFiles: async (params) => {
-            readChangedFilesCalls.push(params)
+            localReadChangedFilesCalls.push(params)
             return { files: [fixtureChangedFile], remainingTokens: 10_000 }
           },
         },
@@ -372,19 +398,18 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(readChangedFilesCalls).toHaveLength(1)
-      const call = readChangedFilesCalls[0] as Record<string, unknown>
-      const budgetTokens = call["budgetTokens"] as number
+      expect(localReadChangedFilesCalls).toHaveLength(1)
+      const call = first(localReadChangedFilesCalls)
       // Budget for files = contextBudgetTokens (80k) - diffTokens; diffTokens
       // varies with fixture size but must be less than the full budget and the
       // resulting file budget must be positive and less than the total.
-      expect(budgetTokens).toBeGreaterThan(0)
-      expect(budgetTokens).toBeLessThan(baseConfig.contextBudgetTokens)
+      expect(call.budgetTokens).toBeGreaterThan(0)
+      expect(call.budgetTokens).toBeLessThan(baseConfig.contextBudgetTokens)
     })
 
     it("passes remainingTokens from readChangedFiles to findRelatedFiles", async () => {
       const expectedRemainingTokens = 12_345
-      const findRelatedFilesCalls: Record<string, unknown>[] = []
+      const localFindRelatedFilesCalls: FindRelatedFilesParams[] = []
       const stubs = makeOrchestrateDeps({
         config: { traceRelatedFiles: true },
         contextReader: {
@@ -393,7 +418,7 @@ describe("orchestrate", () => {
             remainingTokens: expectedRemainingTokens,
           }),
           findRelatedFiles: async (params) => {
-            findRelatedFilesCalls.push(params)
+            localFindRelatedFilesCalls.push(params)
             return []
           },
         },
@@ -402,9 +427,9 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(findRelatedFilesCalls).toHaveLength(1)
-      const call = findRelatedFilesCalls[0] as Record<string, unknown>
-      expect(call["budgetTokens"]).toBe(expectedRemainingTokens)
+      expect(localFindRelatedFilesCalls).toHaveLength(1)
+      const call = first(localFindRelatedFilesCalls)
+      expect(call.budgetTokens).toBe(expectedRemainingTokens)
     })
 
     it("passes paths extracted from the diff to readChangedFiles", async () => {
@@ -414,9 +439,7 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.readChangedFilesCalls).toHaveLength(1)
-      const changedPaths = (
-        stubs.readChangedFilesCalls[0] as Record<string, unknown>
-      )["changedPaths"] as string[]
+      const changedPaths = first(stubs.readChangedFilesCalls).changedPaths
       // The fixture diff modifies src/greeter.ts, adds src/added-file.ts,
       // renames to src/new-name.ts, modifies src/no-trailing-newline.ts, and
       // deletes src/removed-file.ts (null newFilePath) + binary logo.png
@@ -438,11 +461,8 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.findRelatedFilesCalls).toHaveLength(0)
-      const reviewContext = stubs.generateFindingsCalls[0] as Record<
-        string,
-        unknown
-      >
-      expect(reviewContext["relatedFiles"]).toEqual([])
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.relatedFiles).toEqual([])
     })
 
     it("calls findRelatedFiles when traceRelatedFiles is true", async () => {
@@ -468,9 +488,9 @@ describe("orchestrate", () => {
       expect(result.reviewUrl).toBe("https://github.com/test/review/1")
       expect(result.skippedReason).toBe("")
       expect(stubs.submitReviewCalls).toHaveLength(1)
-      const reviewCall = stubs.submitReviewCalls[0] as Record<string, unknown>
-      expect(reviewCall["body"]).toContain("no findings above threshold")
-      expect(reviewCall["comments"]).toEqual([])
+      const reviewCall = first(stubs.submitReviewCalls)
+      expect(reviewCall.body).toContain("no findings above threshold")
+      expect(reviewCall.comments).toEqual([])
     })
 
     it("respects maxFindings cap and includes dropped findings in body", async () => {
@@ -482,9 +502,8 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(1)
-      const reviewCall = stubs.submitReviewCalls[0] as Record<string, unknown>
-      const body = reviewCall["body"] as string
-      expect(body).toContain("omitted")
+      const reviewCall = first(stubs.submitReviewCalls)
+      expect(reviewCall.body).toContain("omitted")
     })
 
     it("returns costSummaryMarkdown when LLM call happened", async () => {
@@ -516,11 +535,10 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      const reviewCall = stubs.submitReviewCalls[0] as Record<string, unknown>
-      const fallbackBody = reviewCall["fallbackBody"] as string
-      expect(fallbackBody).toContain("test/model")
+      const reviewCall = first(stubs.submitReviewCalls)
+      expect(reviewCall.fallbackBody).toContain("test/model")
       for (const finding of fixtureReviewResponse.findings) {
-        expect(fallbackBody).toContain(finding.title)
+        expect(reviewCall.fallbackBody).toContain(finding.title)
       }
     })
 
@@ -537,7 +555,7 @@ describe("orchestrate", () => {
 
 describe("createPromptedGenerateFindings", () => {
   it("passes model and fallbackModel to openrouterClient.requestReview", async () => {
-    const requestReviewCalls: Record<string, unknown>[] = []
+    const requestReviewCalls: RequestReviewParams[] = []
     const stubClient: OpenRouterClient = {
       requestReview: async (params) => {
         requestReviewCalls.push(params)
@@ -585,7 +603,7 @@ describe("createPromptedGenerateFindings", () => {
   })
 
   it("includes annotated diff in the user prompt", async () => {
-    const requestReviewCalls: Record<string, unknown>[] = []
+    const requestReviewCalls: RequestReviewParams[] = []
     const stubClient: OpenRouterClient = {
       requestReview: async (params) => {
         requestReviewCalls.push(params)
@@ -620,18 +638,15 @@ describe("createPromptedGenerateFindings", () => {
       priorFindings: [],
     })
 
-    const call = requestReviewCalls[0] as Record<string, unknown>
-    const userPrompt = call["userPrompt"] as string
-    expect(userPrompt).toContain("src/greeter.ts")
+    const call = first(requestReviewCalls)
+    expect(call.userPrompt).toContain("src/greeter.ts")
   })
 
   it("generates a unique nonce per call", async () => {
     const userPrompts: string[] = []
     const stubClient: OpenRouterClient = {
       requestReview: async (params) => {
-        userPrompts.push(
-          (params as Record<string, unknown>)["userPrompt"] as string,
-        )
+        userPrompts.push(params.userPrompt)
         return {
           review: { analysis: "", findings: [] },
           modelUsed: "m",
