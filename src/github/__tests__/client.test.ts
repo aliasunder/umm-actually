@@ -477,8 +477,22 @@ describe("fetchReviewComments", () => {
     const comments = await client.fetchReviewComments({ prNumber: 7 })
 
     expect(comments).toHaveLength(101)
-    expect(stub.listReviewCommentsCalls).toHaveLength(2)
-    expect(stub.listReviewCommentsCalls[1]).toMatchObject({ page: 2 })
+    expect(stub.listReviewCommentsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        per_page: 100,
+        page: 2,
+      },
+    ])
   })
 
   it("throws on a malformed response", async () => {
@@ -599,6 +613,51 @@ describe("upsertSummaryComment", () => {
     expect(stub.updateCommentCalls).toEqual([
       { owner: "aliasunder", repo: "fixture", comment_id: 200, body },
     ])
+  })
+
+  it("throws on a malformed issue comments response", async () => {
+    const stub = makeOctokitStub({
+      listCommentsResponses: [{ data: "not an array" }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.upsertSummaryComment({ prNumber: 7, body, anchor }),
+    ).rejects.toThrow("unexpected issue comments response shape")
+  })
+
+  it("throws when the create response has no html_url", async () => {
+    const stub = makeOctokitStub({
+      listCommentsResponses: [{ data: [] }],
+      createCommentResponses: [{ data: { id: 1 } }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.upsertSummaryComment({ prNumber: 7, body, anchor }),
+    ).rejects.toThrow("unexpected issue comment response shape")
+  })
+
+  it("throws when the update response has no html_url", async () => {
+    const stub = makeOctokitStub({
+      listCommentsResponses: [
+        {
+          data: [
+            {
+              id: 42,
+              body: `${anchor}\n\nold summary`,
+              html_url: commentUrl,
+            },
+          ],
+        },
+      ],
+      updateCommentResponses: [{ data: { id: 42 } }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.upsertSummaryComment({ prNumber: 7, body, anchor }),
+    ).rejects.toThrow("unexpected issue comment response shape")
   })
 
   it("creates when the issue comments list is empty", async () => {

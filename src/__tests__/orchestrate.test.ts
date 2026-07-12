@@ -753,7 +753,14 @@ describe("orchestrate", () => {
       expect(stubs.upsertSummaryCommentCalls).toHaveLength(1)
 
       const summaryCall = first(stubs.upsertSummaryCommentCalls)
-      expect(summaryCall.body).toContain("No new findings")
+      expect(summaryCall.body).toBe(
+        buildRerunSummary({
+          sha: fixturePrContext.headSha,
+          newCount: 0,
+          totalCount: findings.length,
+          model: "test/model",
+        }),
+      )
     })
 
     it("re-run — zero findings from LLM posts summary only", async () => {
@@ -777,6 +784,16 @@ describe("orchestrate", () => {
       expect(result.findingsCount).toBe(0)
       expect(stubs.submitReviewCalls).toHaveLength(0)
       expect(stubs.upsertSummaryCommentCalls).toHaveLength(1)
+
+      const summaryCall = first(stubs.upsertSummaryCommentCalls)
+      expect(summaryCall.body).toBe(
+        buildRerunSummary({
+          sha: fixturePrContext.headSha,
+          newCount: 0,
+          totalCount: 1,
+          model: "test/model",
+        }),
+      )
     })
 
     it("does not fetch review comments on skip paths", async () => {
@@ -790,6 +807,29 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.fetchReviewCommentsCalls).toHaveLength(0)
+    })
+
+    it("continues without throwing when upsertSummaryComment fails", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchReviewComments: async () => [
+            {
+              path: "src/a.ts",
+              body: "body\n\n<!-- umm-actually:src/a.ts:correctness:aaaaaaaa -->",
+            },
+          ],
+          upsertSummaryComment: async () => {
+            throw new Error("API rate limit")
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(result.reviewUrl).toBe("https://github.com/test/review/1")
+      expect(stubs.submitReviewCalls).toHaveLength(1)
     })
 
     it("degrades to first run when fetching review comments fails", async () => {
