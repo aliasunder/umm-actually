@@ -143,6 +143,12 @@ describe("parseConfig", () => {
     )
   })
 
+  it("rejects a zero max_related_docs", () => {
+    expect(() => parseConfig(makeRawInputs({ maxRelatedDocs: "0" }))).toThrow(
+      'maxRelatedDocs: "0" is not a positive integer',
+    )
+  })
+
   it("aggregates multiple input errors into one message", () => {
     expect(() =>
       parseConfig(makeRawInputs({ githubToken: "", maxFindings: "-1" })),
