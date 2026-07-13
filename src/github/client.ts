@@ -306,7 +306,7 @@ export const createGithubClient = (
       existingComment = parsed.data.find((comment) =>
         comment.body.includes(anchor),
       )
-      if (existingComment !== undefined) break
+      if (existingComment) break
       if (parsed.data.length < PER_PAGE) break
       if (page === MAX_PAGES) {
         logger.warn("issue comments page cap reached", {
@@ -316,7 +316,7 @@ export const createGithubClient = (
       }
     }
 
-    if (existingComment !== undefined) {
+    if (existingComment) {
       const response = await octokit.rest.issues.updateComment({
         owner,
         repo,
