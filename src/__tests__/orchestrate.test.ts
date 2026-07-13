@@ -672,9 +672,23 @@ describe("orchestrate", () => {
   })
 
   describe("conditional behaviors", () => {
-    it("does not call findRelatedFiles or findRelatedDocs when traceRelatedFiles is false", async () => {
+    it("skips findRelatedFiles but still calls findRelatedDocs for priority docs when traceRelatedFiles is false", async () => {
       const stubs = makeOrchestrateDeps({
-        config: { traceRelatedFiles: false },
+        config: { traceRelatedFiles: false, priorityDocs: ["README.md"] },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.findRelatedFilesCalls).toHaveLength(0)
+      expect(stubs.findRelatedDocsCalls).toHaveLength(1)
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.relatedFiles).toEqual([])
+    })
+
+    it("skips both findRelatedFiles and findRelatedDocs when traceRelatedFiles is false and priorityDocs is empty", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { traceRelatedFiles: false, priorityDocs: [] },
       })
       const logger = createTestLogger()
 

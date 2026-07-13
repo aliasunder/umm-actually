@@ -240,14 +240,15 @@ export const orchestrate = async (
   )
   const docBudgetTokens = Math.max(0, remainingTokens - relatedFilesTokens)
 
-  const relatedDocs = config.traceRelatedFiles
-    ? await contextReader.findRelatedDocs({
-        changedPaths,
-        budgetTokens: docBudgetTokens,
-        conventionsFile: config.conventionsFile,
-        priorityDocs: config.priorityDocs,
-      })
-    : []
+  const relatedDocs =
+    config.traceRelatedFiles || config.priorityDocs.length > 0
+      ? await contextReader.findRelatedDocs({
+          changedPaths,
+          budgetTokens: docBudgetTokens,
+          conventionsFile: config.conventionsFile,
+          priorityDocs: config.priorityDocs,
+        })
+      : []
 
   // Step 10–11: generate findings (V1: single combined phase)
   const phase = phases[0]
