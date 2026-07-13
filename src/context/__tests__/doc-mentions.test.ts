@@ -124,10 +124,9 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("requires parent directory context for extensionless generic basenames", () => {
-    const result = findMentionedChangedPaths(
-      "See the index for details.",
-      ["src/index"],
-    )
+    const result = findMentionedChangedPaths("See the index for details.", [
+      "src/index",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: [],
