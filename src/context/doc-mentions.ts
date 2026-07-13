@@ -69,7 +69,8 @@ export const findMentionedChangedPaths = (
     }
 
     const basename = posix.basename(changedPath)
-    const stem = basename.slice(0, basename.lastIndexOf("."))
+    const dotIndex = basename.lastIndexOf(".")
+    const stem = dotIndex === -1 ? basename : basename.slice(0, dotIndex)
     if (stem === "") continue
 
     if (GENERIC_BASENAMES.has(stem)) {

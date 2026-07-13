@@ -123,6 +123,32 @@ describe("findMentionedChangedPaths", () => {
     })
   })
 
+  it("requires parent directory context for extensionless generic basenames", () => {
+    const result = findMentionedChangedPaths(
+      "See the index for details.",
+      ["src/index"],
+    )
+
+    expect(result).toEqual({
+      mentionedPaths: [],
+      fullPathCount: 0,
+      basenameCount: 0,
+    })
+  })
+
+  it("matches extensionless generic basename with parent directory context", () => {
+    const result = findMentionedChangedPaths(
+      "The entry point is src/index in the source tree.",
+      ["src/index"],
+    )
+
+    expect(result).toEqual({
+      mentionedPaths: ["src/index"],
+      fullPathCount: 1,
+      basenameCount: 0,
+    })
+  })
+
   it("skips a dot-prefixed file that does not match by full path", () => {
     const result = findMentionedChangedPaths(
       "The .gitignore file controls tracking.",
