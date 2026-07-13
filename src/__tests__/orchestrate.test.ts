@@ -670,16 +670,16 @@ describe("orchestrate", () => {
         findings: [nonFinding, realFinding],
       }
 
+      const { findings: mixedFiltered } = filterNonFindings(
+        mixedResponse.findings,
+      )
       const mixedSelection = selectFindings({
-        findings: mixedResponse.findings,
+        findings: mixedFiltered,
         severityThreshold: "low",
         maxFindings: undefined,
       })
-      const { findings: mixedFiltered } = filterNonFindings(
-        mixedSelection.selected,
-      )
       const mixedMapped = mapFindingsToReview({
-        findings: mixedFiltered,
+        findings: mixedSelection.selected,
         commentableByPath: fixtureCommentableByPath,
       })
       const mixedBody = buildReviewBody({
@@ -689,7 +689,7 @@ describe("orchestrate", () => {
         inlineCommentCount: mixedMapped.comments.length,
       })
       const mixedFallbackBody = buildReviewBody({
-        bodyFindings: mixedFiltered,
+        bodyFindings: mixedSelection.selected,
         droppedByCap: mixedSelection.droppedByCap,
         model: "test/model",
         bodyFindingsHeading: "Findings",

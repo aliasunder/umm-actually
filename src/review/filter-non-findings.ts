@@ -9,7 +9,7 @@ export type FilterResult = {
 const NON_FINDING_PREFIX = /^(?:n\/?a|not applicable|placeholder)\b/i
 
 const isNonFinding = (finding: Finding): boolean =>
-  NON_FINDING_PREFIX.test(finding.failure_scenario)
+  NON_FINDING_PREFIX.test(finding.failure_scenario.trim())
 
 export const filterNonFindings = (findings: Finding[]): FilterResult => {
   const realFindings = findings.filter((finding) => !isNonFinding(finding))

@@ -220,6 +220,18 @@ The guard rejects only the exact empty string.
     expect(mapped.comments[1]?.body).not.toContain("```diff")
   })
 
+  it("omits the suggestion block for an empty-string suggestion", () => {
+    const finding = makeFinding({ line: 145, suggestion: "" })
+
+    const mapped = mapFindingsToReview({
+      findings: [finding],
+      commentableByPath: makeCommentableByPath(),
+    })
+
+    expect(mapped.comments[0]?.body).not.toContain("<details>")
+    expect(mapped.comments[0]?.body).not.toContain("```diff")
+  })
+
   it("sizes the suggestion fence beyond any backtick run inside the suggestion", () => {
     const fencedSuggestion = "```md\n-old fence\n+new fence\n```"
     const finding = makeFinding({ line: 145, suggestion: fencedSuggestion })

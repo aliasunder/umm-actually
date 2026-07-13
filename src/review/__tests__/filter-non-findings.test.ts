@@ -165,6 +165,16 @@ describe("filterNonFindings", () => {
     expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
   })
 
+  it("drops a finding with leading whitespace before the prefix", () => {
+    const finding = makeFinding({
+      failure_scenario: "  N/A — tests are valid.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
   it("handles an empty findings array", () => {
     const result = filterNonFindings([])
 

@@ -246,19 +246,19 @@ export const orchestrate = async (
 
   const { modelUsed, attempts } = structuredResult
 
-  // Step 12: select findings
-  const { selected: selectedByThreshold, droppedByCap } = selectFindings({
-    findings: structuredResult.review.findings,
-    severityThreshold,
-    maxFindings: config.maxFindings,
-  })
-
-  // Step 12.5: filter non-findings
-  const { findings: selected, droppedAsNonFinding } =
-    filterNonFindings(selectedByThreshold)
+  // Step 12: filter non-findings before selection so cap slots aren't wasted
+  const { findings: realFindings, droppedAsNonFinding } = filterNonFindings(
+    structuredResult.review.findings,
+  )
   if (droppedAsNonFinding > 0) {
     logger.info("filtered non-findings", { droppedAsNonFinding })
   }
+
+  const { selected, droppedByCap } = selectFindings({
+    findings: realFindings,
+    severityThreshold,
+    maxFindings: config.maxFindings,
+  })
 
   // Step 13: post review
   const hasFindings = selected.length > 0
