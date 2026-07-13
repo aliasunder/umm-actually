@@ -282,9 +282,26 @@ _1 lower-severity finding(s) omitted by the max_findings cap: \`src/greeter.ts:5
       model: "anthropic/claude-sonnet-4-6",
     })
 
-    expect(body).toContain(
-      "<details>\n<summary>Suggested fix</summary>\n\n```diff\n-old line\n+new line\n```\n\n</details>",
-    )
+    expect(body).toBe(`### Findings beyond the diff
+
+These are in code the changes touch or depend on, outside the diff's line ranges:
+
+- **[medium/correctness]** Whitespace-only keys pass the empty-key guard — \`src/untouched.ts:30\` _(confidence: high)_
+  The guard rejects only the exact empty string.
+  **Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
+
+<details>
+<summary>Suggested fix</summary>
+
+\`\`\`diff
+-old line
++new line
+\`\`\`
+
+</details>
+
+---
+*umm-actually · anthropic/claude-sonnet-4-6*`)
   })
 
   it("renders only attribution when there is nothing beyond the diff and no cap drops", () => {

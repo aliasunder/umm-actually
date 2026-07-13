@@ -68,6 +68,15 @@ describe("buildSystemPrompt", () => {
     expect(systemPrompt).toContain('fill the "analysis" field')
     expect(systemPrompt).toContain("Severity rubric:")
     expect(systemPrompt).toContain("OUTPUT DISCIPLINE")
+    expect(systemPrompt).toContain(
+      "imperative fix statement, under 80 characters",
+    )
+    expect(systemPrompt).toContain(
+      "1–3 sentences stating the defect and its impact",
+    )
+    expect(systemPrompt).toContain(
+      'starting with "N/A", "None",\n  "Not applicable", or "Placeholder"',
+    )
     expect(systemPrompt).toContain("HARD PROHIBITION")
     expect(systemPrompt).toContain(
       "new-file line numbers printed in\nthe annotated diff",

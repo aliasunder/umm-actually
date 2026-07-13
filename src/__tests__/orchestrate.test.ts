@@ -720,6 +720,12 @@ describe("orchestrate", () => {
         comments: mixedMapped.comments,
         fallbackBody: mixedFallbackBody,
       })
+
+      expect(logger.messages).toContainEqual({
+        level: "info",
+        message: "filtered non-findings",
+        data: { droppedAsNonFinding: 1 },
+      })
     })
   })
 })

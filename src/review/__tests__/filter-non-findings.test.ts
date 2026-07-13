@@ -27,7 +27,7 @@ describe("filterNonFindings", () => {
 
   it("drops a finding whose failure_scenario starts with 'NA' (no slash)", () => {
     const finding = makeFinding({
-      failure_scenario: "NA — this is correct behavior.",
+      failure_scenario: "NA — the code handles this edge case.",
     })
 
     const result = filterNonFindings([finding])
