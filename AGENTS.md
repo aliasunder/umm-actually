@@ -57,13 +57,19 @@ files. Prefer SDK-provided types over redefining shapes.
   cohesive service surfaces (`githubClient.submitReview(…)`).
 - `type` over `interface`. TypeScript strict mode. `node:` prefix for built-ins.
 - Explicit return types on exports. No `any`. No `as` or `!` — use runtime
-  guards or schema validation to narrow.
+  guards or schema validation to narrow. Truthy/falsy checks over explicit
+  `!== undefined` comparisons — use `if (value)` not `if (value !== undefined)`
+  unless distinguishing `undefined` from other falsy values (`null`, `0`, `""`,
+  `false`) actually matters for correctness.
 - Immutable by default; avoid `let`. A `reduce` must return a new accumulator
   each step — never mutate-and-return. When mutation is genuinely needed,
   add a comment justifying it.
 - Explicit names over abbreviations, everywhere — params, callbacks, locals.
-- Early returns over nested `if/else`. Extract multi-clause conditionals into
-  named booleans. Name booleans for the affirmative state.
+- Early returns over nested `if/else`. When a function has a primary path and
+  a secondary path (e.g. first-run vs re-run), return early from the simpler
+  branch so the remaining code flows linearly without nesting. Extract
+  multi-clause conditionals into named booleans. Name booleans for the
+  affirmative state.
 - Block bodies `{}` for any multiline function response — expression bodies
   only for one-liners. A multi-clause boolean spanning lines gets
   `{ return (...) }`; guard chains get explicit early returns, never a
