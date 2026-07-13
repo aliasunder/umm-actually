@@ -290,6 +290,7 @@ export const createGithubClient = (
     anchor: string
   }): Promise<UpsertCommentResult> => {
     let existingComment: { id: number; html_url: string } | undefined
+    let totalFetched = 0
 
     for (let page = 1; page <= MAX_PAGES; page++) {
       const response = await octokit.rest.issues.listComments({
@@ -303,6 +304,7 @@ export const createGithubClient = (
       if (!parsed.success) {
         throw new Error("unexpected issue comments response shape")
       }
+      totalFetched += parsed.data.length
       existingComment = parsed.data.find((comment) =>
         comment.body.includes(anchor),
       )
@@ -311,7 +313,7 @@ export const createGithubClient = (
       if (page === MAX_PAGES) {
         logger.warn("issue comments page cap reached", {
           prNumber,
-          totalFetched: page * PER_PAGE,
+          totalFetched,
         })
       }
     }

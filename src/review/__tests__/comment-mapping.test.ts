@@ -132,6 +132,9 @@ The guard rejects only the exact empty string.
     expect(mapped.comments[0]?.body).toContain(
       "_Anchored near line 149 (the reported line is not part of the diff)._",
     )
+    expect(mapped.comments[0]?.body).toContain(
+      `<!-- umm-actually:${computeAnchorKey(finding)} -->`,
+    )
   })
 
   it("snaps a finding exactly SNAP_DISTANCE (3) beyond the hunk end", () => {
