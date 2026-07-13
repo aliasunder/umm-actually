@@ -41,7 +41,7 @@ inputs:
     required: false
     default: "80000"
   trace_related_files:
-    description: Include files that reference changed files in the prompt so the model can trace regressions into callers
+    description: Include related files in the prompt — import-tracing for caller regressions, and doc-mention scanning for staleness detection
     required: false
     default: "true"
   cost_summary:
