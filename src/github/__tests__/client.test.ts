@@ -18,12 +18,24 @@ type StubResponse = { data: unknown } | { error: unknown }
 const makeOctokitStub = ({
   getResponses = [],
   createReviewResponses = [],
+  listReviewCommentsResponses = [],
+  listCommentsResponses = [],
+  createCommentResponses = [],
+  updateCommentResponses = [],
 }: {
   getResponses?: StubResponse[]
   createReviewResponses?: StubResponse[]
+  listReviewCommentsResponses?: StubResponse[]
+  listCommentsResponses?: StubResponse[]
+  createCommentResponses?: StubResponse[]
+  updateCommentResponses?: StubResponse[]
 } = {}) => {
   const getCalls: Record<string, unknown>[] = []
   const createReviewCalls: Record<string, unknown>[] = []
+  const listReviewCommentsCalls: Record<string, unknown>[] = []
+  const listCommentsCalls: Record<string, unknown>[] = []
+  const createCommentCalls: Record<string, unknown>[] = []
+  const updateCommentCalls: Record<string, unknown>[] = []
 
   const takeNext = (
     queue: StubResponse[],
@@ -53,11 +65,53 @@ const makeOctokitStub = ({
             "pulls.createReview",
           )
         },
+        listReviewComments: async (params) => {
+          listReviewCommentsCalls.push(params)
+          return takeNext(
+            listReviewCommentsResponses,
+            listReviewCommentsCalls.length,
+            "pulls.listReviewComments",
+          )
+        },
+      },
+      issues: {
+        listComments: async (params) => {
+          listCommentsCalls.push(params)
+          return takeNext(
+            listCommentsResponses,
+            listCommentsCalls.length,
+            "issues.listComments",
+          )
+        },
+        createComment: async (params) => {
+          createCommentCalls.push(params)
+          return takeNext(
+            createCommentResponses,
+            createCommentCalls.length,
+            "issues.createComment",
+          )
+        },
+        updateComment: async (params) => {
+          updateCommentCalls.push(params)
+          return takeNext(
+            updateCommentResponses,
+            updateCommentCalls.length,
+            "issues.updateComment",
+          )
+        },
       },
     },
   }
 
-  return { octokit, getCalls, createReviewCalls }
+  return {
+    octokit,
+    getCalls,
+    createReviewCalls,
+    listReviewCommentsCalls,
+    listCommentsCalls,
+    createCommentCalls,
+    updateCommentCalls,
+  }
 }
 
 const makeClient = (stub: { octokit: OctokitLike }) => {
@@ -375,5 +429,271 @@ describe("submitReview", () => {
         fallbackBody: "fallback body",
       }),
     ).rejects.toThrow("unexpected review response shape")
+  })
+})
+
+describe("fetchReviewComments", () => {
+  it("returns mapped path and body from review comments", async () => {
+    const stub = makeOctokitStub({
+      listReviewCommentsResponses: [
+        {
+          data: [
+            { path: "src/a.ts", body: "comment 1" },
+            { path: "src/b.ts", body: "comment 2" },
+          ],
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchReviewComments({ prNumber: 7 })
+
+    expect(comments).toEqual([
+      { path: "src/a.ts", body: "comment 1" },
+      { path: "src/b.ts", body: "comment 2" },
+    ])
+    expect(stub.listReviewCommentsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+    ])
+  })
+
+  it("paginates when a page is full", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({
+      path: `src/file-${index}.ts`,
+      body: `body-${index}`,
+    }))
+    const lastPage = [{ path: "src/last.ts", body: "last" }]
+    const stub = makeOctokitStub({
+      listReviewCommentsResponses: [{ data: fullPage }, { data: lastPage }],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchReviewComments({ prNumber: 7 })
+
+    expect(comments).toHaveLength(101)
+    expect(stub.listReviewCommentsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        per_page: 100,
+        page: 2,
+      },
+    ])
+  })
+
+  it("stops at the page cap and logs a warning", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({
+      path: `src/file-${index}.ts`,
+      body: `body-${index}`,
+    }))
+    const responses = Array.from({ length: 10 }, () => ({ data: fullPage }))
+    const stub = makeOctokitStub({ listReviewCommentsResponses: responses })
+    const { client, logger } = makeClient(stub)
+
+    const comments = await client.fetchReviewComments({ prNumber: 7 })
+
+    expect(comments).toHaveLength(1000)
+    expect(stub.listReviewCommentsCalls).toHaveLength(10)
+    expect(stub.listReviewCommentsCalls[9]).toMatchObject({ page: 10 })
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "review comments page cap reached",
+      data: { prNumber: 7, totalFetched: 1000 },
+    })
+  })
+
+  it("throws on a malformed response", async () => {
+    const stub = makeOctokitStub({
+      listReviewCommentsResponses: [{ data: "not an array" }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(client.fetchReviewComments({ prNumber: 7 })).rejects.toThrow(
+      "unexpected review comments response shape",
+    )
+  })
+})
+
+describe("upsertSummaryComment", () => {
+  const commentUrl =
+    "https://github.com/aliasunder/fixture/pull/7#issuecomment-1"
+  const anchor = "<!-- umm-actually-rerun -->"
+  const body = `${anchor}\n\n**umm-actually** re-reviewed`
+
+  it("creates a new comment when no matching anchor exists", async () => {
+    const stub = makeOctokitStub({
+      listCommentsResponses: [
+        {
+          data: [
+            { id: 99, body: "human comment", html_url: "https://example.com" },
+          ],
+        },
+      ],
+      createCommentResponses: [{ data: { html_url: commentUrl } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.upsertSummaryComment({
+      prNumber: 7,
+      body,
+      anchor,
+    })
+
+    expect(result).toEqual({ url: commentUrl, created: true })
+    expect(stub.createCommentCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        body,
+      },
+    ])
+    expect(stub.updateCommentCalls).toHaveLength(0)
+  })
+
+  it("updates an existing comment when the anchor is found", async () => {
+    const stub = makeOctokitStub({
+      listCommentsResponses: [
+        {
+          data: [
+            {
+              id: 42,
+              body: `${anchor}\n\nold summary`,
+              html_url: commentUrl,
+            },
+          ],
+        },
+      ],
+      updateCommentResponses: [{ data: { html_url: commentUrl } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.upsertSummaryComment({
+      prNumber: 7,
+      body,
+      anchor,
+    })
+
+    expect(result).toEqual({ url: commentUrl, created: false })
+    expect(stub.updateCommentCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        comment_id: 42,
+        body,
+      },
+    ])
+    expect(stub.createCommentCalls).toHaveLength(0)
+  })
+
+  it("finds the anchor comment on a later page", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      body: `comment ${index}`,
+      html_url: `https://example.com/${index}`,
+    }))
+    const stub = makeOctokitStub({
+      listCommentsResponses: [
+        { data: fullPage },
+        {
+          data: [
+            {
+              id: 200,
+              body: `${anchor}\n\nold summary`,
+              html_url: commentUrl,
+            },
+          ],
+        },
+      ],
+      updateCommentResponses: [{ data: { html_url: commentUrl } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.upsertSummaryComment({
+      prNumber: 7,
+      body,
+      anchor,
+    })
+
+    expect(result).toEqual({ url: commentUrl, created: false })
+    expect(stub.listCommentsCalls).toHaveLength(2)
+    expect(stub.updateCommentCalls).toEqual([
+      { owner: "aliasunder", repo: "fixture", comment_id: 200, body },
+    ])
+  })
+
+  it("throws on a malformed issue comments response", async () => {
+    const stub = makeOctokitStub({
+      listCommentsResponses: [{ data: "not an array" }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.upsertSummaryComment({ prNumber: 7, body, anchor }),
+    ).rejects.toThrow("unexpected issue comments response shape")
+  })
+
+  it("throws when the create response has no html_url", async () => {
+    const stub = makeOctokitStub({
+      listCommentsResponses: [{ data: [] }],
+      createCommentResponses: [{ data: { id: 1 } }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.upsertSummaryComment({ prNumber: 7, body, anchor }),
+    ).rejects.toThrow("unexpected issue comment response shape")
+  })
+
+  it("throws when the update response has no html_url", async () => {
+    const stub = makeOctokitStub({
+      listCommentsResponses: [
+        {
+          data: [
+            {
+              id: 42,
+              body: `${anchor}\n\nold summary`,
+              html_url: commentUrl,
+            },
+          ],
+        },
+      ],
+      updateCommentResponses: [{ data: { id: 42 } }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.upsertSummaryComment({ prNumber: 7, body, anchor }),
+    ).rejects.toThrow("unexpected issue comment response shape")
+  })
+
+  it("creates when the issue comments list is empty", async () => {
+    const stub = makeOctokitStub({
+      listCommentsResponses: [{ data: [] }],
+      createCommentResponses: [{ data: { html_url: commentUrl } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.upsertSummaryComment({
+      prNumber: 7,
+      body,
+      anchor,
+    })
+
+    expect(result).toEqual({ url: commentUrl, created: true })
   })
 })

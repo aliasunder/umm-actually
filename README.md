@@ -87,12 +87,12 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 
 ## Outputs
 
-| Output           | Description                                                  |
-| ---------------- | ------------------------------------------------------------ |
-| `findings_count` | Number of findings posted (after threshold and cap)          |
-| `review_url`     | URL of the submitted review; empty when no review was posted |
-| `model_used`     | Model that produced the accepted response                    |
-| `skipped_reason` | Non-empty when the review was skipped (e.g. diff too large)  |
+| Output           | Description                                                               |
+| ---------------- | ------------------------------------------------------------------------- |
+| `findings_count` | Number of new findings posted (after threshold, cap, and cross-run dedup) |
+| `review_url`     | URL of the submitted review; empty when no review was posted              |
+| `model_used`     | Model that produced the accepted response                                 |
+| `skipped_reason` | Non-empty when the review was skipped (e.g. diff too large)               |
 
 ## How it works
 
@@ -102,8 +102,9 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 4. Builds a structured prompt with randomized delimiter nonces (prompt injection defense) and sends it to OpenRouter
 5. Validates the response against a strict Zod schema, retrying with a fallback model if the primary fails
 6. Filters findings by severity threshold, deduplicates overlapping findings, and caps if configured
-7. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
-8. Posts one consolidated review — findings that can't be inlined render in the review body
+7. On re-runs, compares findings against previously posted inline comments (by hidden HTML anchor) and filters out duplicates
+8. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
+9. Posts one consolidated review — findings that can't be inlined render in the review body; re-runs upsert a summary comment with totals
 
 ## Status
 
@@ -120,10 +121,11 @@ umm-actually is in early development — the core review pipeline works but ther
 - Skip-path handling with posted reasons (oversized diff, empty diff, API limits)
 - Cost transparency (per-run model/token/USD report in workflow summary)
 - `@umm review` comment trigger for on-demand re-reviews
+- Cross-run finding dedup — re-runs detect previously posted inline findings via hidden HTML anchors and post only new ones, with an updatable summary comment tracking totals
 
 **In progress**
 
-- **Review dedup on re-runs** — currently each push posts a new review; working on deduplicating findings across runs and updating a single summary comment instead of creating new ones
+- **Doc-staleness detection** — extending the workspace scan to doc files (`.md`, `.json`) so unchanged docs that describe changed code reach the prompt and staleness becomes a finding
 - **Branded check run** — using the Checks API so the CI check shows the umm-actually avatar instead of the generic GitHub Actions logo
 
 **Planned**

@@ -16,9 +16,13 @@ import type {
 import { renderCostSummary } from "./openrouter/cost-summary.js"
 import type { ContextReader } from "./context/workspace.js"
 import {
+  buildRerunSummary,
   buildReviewBody,
   buildZeroFindingsBody,
+  computeAnchorKey,
+  extractAnchorKeys,
   mapFindingsToReview,
+  RERUN_ANCHOR,
   type ReviewComment,
 } from "./review/comment-mapping.js"
 import { resolveSeverityThreshold, type Finding } from "./review/finding.js"
@@ -30,6 +34,7 @@ import {
   generateDelimiterNonce,
   type PromptFile,
 } from "./review/prompt.js"
+import { filterNonFindings } from "./review/filter-non-findings.js"
 import { selectFindings } from "./review/select-findings.js"
 
 export type ReviewContext = {
@@ -261,46 +266,143 @@ export const orchestrate = async (
 
   const { modelUsed, attempts } = structuredResult
 
-  // Step 12: select findings
+  // Step 12: filter non-findings before selection so cap slots aren't wasted
+  const { findings: realFindings, droppedAsNonFinding } = filterNonFindings(
+    structuredResult.review.findings,
+  )
+  if (droppedAsNonFinding > 0) {
+    logger.info("filtered non-findings", { droppedAsNonFinding })
+  }
+
   const { selected, droppedByCap } = selectFindings({
-    findings: structuredResult.review.findings,
+    findings: realFindings,
     severityThreshold,
     maxFindings: config.maxFindings,
   })
 
+  // Step 12.5: cross-run dedup
+  let existingAnchors: Set<string>
+  try {
+    const existingComments = await githubClient.fetchReviewComments({
+      prNumber: prContext.prNumber,
+    })
+    existingAnchors = extractAnchorKeys(
+      existingComments.map((comment) => comment.body),
+    )
+  } catch (fetchError) {
+    const errorDetail =
+      fetchError instanceof Error
+        ? `[${fetchError.name}]: ${fetchError.message}`
+        : String(fetchError)
+    logger.warn("failed to fetch existing comments — treating as first run", {
+      error: errorDetail,
+    })
+    existingAnchors = new Set()
+  }
+
+  const isRerun = existingAnchors.size > 0
+  const isNewFinding = (finding: Finding): boolean =>
+    !existingAnchors.has(computeAnchorKey(finding))
+  const newFindings = isRerun ? selected.filter(isNewFinding) : selected
+
+  logger.info("cross-run dedup", {
+    existingAnchorCount: existingAnchors.size,
+    selectedCount: selected.length,
+    newFindingsCount: newFindings.length,
+    isRerun,
+  })
+
   // Step 13: post review
-  const hasFindings = selected.length > 0
-
-  const reviewPayload: ReviewPayload = hasFindings
-    ? buildReviewPayload({
-        findings: selected,
-        commentableByPath,
-        droppedByCap,
-        modelUsed,
-      })
-    : {
-        body: buildZeroFindingsBody({ model: modelUsed }),
-        comments: [],
-        fallbackBody: buildZeroFindingsBody({ model: modelUsed }),
-      }
-
-  const { url: reviewUrl } = await githubClient.submitReview({
-    prNumber: prContext.prNumber,
-    commitId: prContext.headSha,
-    ...reviewPayload,
-  })
-
-  logger.info("review posted", {
-    reviewUrl,
-    findingsCount: selected.length,
-    modelUsed,
-  })
-
-  // Step 14: cost summary
   const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
 
+  if (!isRerun) {
+    const reviewPayload: ReviewPayload =
+      selected.length > 0
+        ? buildReviewPayload({
+            findings: selected,
+            commentableByPath,
+            droppedByCap,
+            modelUsed,
+          })
+        : {
+            body: buildZeroFindingsBody({ model: modelUsed }),
+            comments: [],
+            fallbackBody: buildZeroFindingsBody({ model: modelUsed }),
+          }
+
+    const { url: reviewUrl } = await githubClient.submitReview({
+      prNumber: prContext.prNumber,
+      commitId: prContext.headSha,
+      ...reviewPayload,
+    })
+
+    logger.info("review posted", {
+      reviewUrl,
+      findingsCount: selected.length,
+      modelUsed,
+    })
+
+    return {
+      findingsCount: newFindings.length,
+      reviewUrl,
+      modelUsed,
+      skippedReason: "",
+      costSummaryMarkdown,
+    }
+  }
+
+  // Re-run — post only new findings, upsert summary comment
+  const totalCount = existingAnchors.size + newFindings.length
+  let reviewUrl = ""
+
+  if (newFindings.length > 0) {
+    const reviewPayload = buildReviewPayload({
+      findings: newFindings,
+      commentableByPath,
+      droppedByCap: [],
+      modelUsed,
+    })
+
+    const result = await githubClient.submitReview({
+      prNumber: prContext.prNumber,
+      commitId: prContext.headSha,
+      ...reviewPayload,
+    })
+    reviewUrl = result.url
+
+    logger.info("re-run review posted", {
+      reviewUrl,
+      newFindingsCount: newFindings.length,
+      totalCount,
+    })
+  } else {
+    logger.info("re-run — no new findings", { totalCount })
+  }
+
+  const summaryBody = buildRerunSummary({
+    sha: prContext.headSha,
+    newCount: newFindings.length,
+    totalCount,
+    model: modelUsed,
+  })
+  try {
+    await githubClient.upsertSummaryComment({
+      prNumber: prContext.prNumber,
+      body: summaryBody,
+      anchor: RERUN_ANCHOR,
+    })
+  } catch (summaryError) {
+    const errorDetail =
+      summaryError instanceof Error
+        ? `[${summaryError.name}]: ${summaryError.message}`
+        : String(summaryError)
+    logger.warn("failed to upsert summary comment", {
+      error: errorDetail,
+    })
+  }
+
   return {
-    findingsCount: selected.length,
+    findingsCount: newFindings.length,
     reviewUrl,
     modelUsed,
     skippedReason: "",

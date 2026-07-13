@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import type { CommentableFile } from "../diff/commentable-lines.js"
 import type { Finding } from "./finding.js"
 
@@ -24,11 +25,37 @@ export type MappedReview = {
  */
 const SNAP_DISTANCE = 3
 
+/** Matches `<!-- umm-actually:KEY -->` -- the hidden HTML anchor in each inline finding. Group 1 is the dedup key. */
+const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->/
+
+/** Deterministic dedup key for a finding — file + category + 8-char title hash. */
+export const computeAnchorKey = (
+  finding: Pick<Finding, "file" | "category" | "title">,
+): string => {
+  const titleHash = createHash("sha256")
+    .update(finding.title)
+    .digest("hex")
+    .slice(0, 8)
+  return `${finding.file}:${finding.category}:${titleHash}`
+}
+
+/** Extracts dedup keys from existing inline comment bodies. */
+export const extractAnchorKeys = (commentBodies: string[]): Set<string> => {
+  const keys = new Set<string>()
+  for (const body of commentBodies) {
+    const match = ANCHOR_PATTERN.exec(body)
+    if (match?.[1]) {
+      keys.add(match[1])
+    }
+  }
+  return keys
+}
+
 const findingTag = (finding: Finding): string =>
   `**[${finding.severity}/${finding.category}]** ${finding.title}`
 
 const suggestionBlock = (finding: Finding): string => {
-  if (finding.suggestion === null) return ""
+  if (!finding.suggestion) return ""
   // CommonMark: a fence longer than any backtick run inside the content
   // cannot be closed early — sizes the fence to LLM-generated suggestions
   // that themselves contain fenced blocks
@@ -38,7 +65,7 @@ const suggestionBlock = (finding: Finding): string => {
     0,
   )
   const fence = "`".repeat(Math.max(3, longestBacktickRun + 1))
-  return `\n\n${fence}diff\n${finding.suggestion}\n${fence}`
+  return `\n\n<details>\n<summary>Suggested fix</summary>\n\n${fence}diff\n${finding.suggestion}\n${fence}\n\n</details>`
 }
 
 const renderCommentBody = (
@@ -49,11 +76,12 @@ const renderCommentBody = (
     snappedFromLine === undefined
       ? ""
       : `\n\n_Anchored near line ${snappedFromLine} (the reported line is not part of the diff)._`
+  const anchor = `\n\n<!-- umm-actually:${computeAnchorKey(finding)} -->`
   return `${findingTag(finding)} _(confidence: ${finding.confidence})_
 
 ${finding.description}
 
-**Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}${snapNote}`
+**Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}${snapNote}${anchor}`
 }
 
 const nearestCommentableLine = (
@@ -226,3 +254,31 @@ export const buildReviewBody = ({
 /** Body for the confirmation review posted when nothing crossed the threshold. */
 export const buildZeroFindingsBody = ({ model }: { model: string }): string =>
   `Reviewed — no findings above threshold.\n\n---\n*umm-actually · ${model}*`
+
+export const RERUN_ANCHOR = "<!-- umm-actually-rerun -->"
+
+/** Body for the updatable issue comment posted on re-runs. */
+export const buildRerunSummary = ({
+  sha,
+  newCount,
+  totalCount,
+  model,
+}: {
+  sha: string
+  newCount: number
+  totalCount: number
+  model: string
+}): string => {
+  const shaShort = sha.slice(0, 7)
+  const findingsLine =
+    newCount > 0
+      ? `${newCount} new finding(s) posted as inline comments (${totalCount} total across all reviews).`
+      : `No new findings (${totalCount} finding(s) from prior reviews).`
+  const attribution = `---\n*umm-actually · ${model}*`
+  return [
+    RERUN_ANCHOR,
+    `**umm-actually** re-reviewed at \`${shaShort}\``,
+    findingsLine,
+    attribution,
+  ].join("\n\n")
+}
