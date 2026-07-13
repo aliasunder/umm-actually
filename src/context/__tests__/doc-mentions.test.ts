@@ -161,7 +161,7 @@ describe("findMentionedChangedPaths", () => {
     })
   })
 
-  it("matches generic basename with parent directory context", () => {
+  it("matches a generic basename by full path when the full path appears in the doc", () => {
     const result = findMentionedChangedPaths(
       "See src/config.ts for settings.",
       ["src/config.ts"],

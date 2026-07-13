@@ -457,7 +457,9 @@ export const createContextReader = (
       })
     }
 
-    const priorityPathSet = new Set(priorityDocs.map((docPath) => posix.normalize(docPath)))
+    const priorityPathSet = new Set(
+      priorityDocs.map((docPath) => posix.normalize(docPath)),
+    )
 
     // Phase 2: mention-matched docs with remaining budget
     const changedPathSet = new Set(changedPaths)
