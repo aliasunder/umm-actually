@@ -30,6 +30,7 @@ import {
   generateDelimiterNonce,
   type PromptFile,
 } from "./review/prompt.js"
+import { filterNonFindings } from "./review/filter-non-findings.js"
 import { selectFindings } from "./review/select-findings.js"
 
 export type ReviewContext = {
@@ -245,9 +246,16 @@ export const orchestrate = async (
 
   const { modelUsed, attempts } = structuredResult
 
-  // Step 12: select findings
+  // Step 12: filter non-findings before selection so cap slots aren't wasted
+  const { findings: realFindings, droppedAsNonFinding } = filterNonFindings(
+    structuredResult.review.findings,
+  )
+  if (droppedAsNonFinding > 0) {
+    logger.info("filtered non-findings", { droppedAsNonFinding })
+  }
+
   const { selected, droppedByCap } = selectFindings({
-    findings: structuredResult.review.findings,
+    findings: realFindings,
     severityThreshold,
     maxFindings: config.maxFindings,
   })

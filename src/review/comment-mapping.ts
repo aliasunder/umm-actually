@@ -28,7 +28,7 @@ const findingTag = (finding: Finding): string =>
   `**[${finding.severity}/${finding.category}]** ${finding.title}`
 
 const suggestionBlock = (finding: Finding): string => {
-  if (finding.suggestion === null) return ""
+  if (!finding.suggestion) return ""
   // CommonMark: a fence longer than any backtick run inside the content
   // cannot be closed early — sizes the fence to LLM-generated suggestions
   // that themselves contain fenced blocks
@@ -38,7 +38,7 @@ const suggestionBlock = (finding: Finding): string => {
     0,
   )
   const fence = "`".repeat(Math.max(3, longestBacktickRun + 1))
-  return `\n\n${fence}diff\n${finding.suggestion}\n${fence}`
+  return `\n\n<details>\n<summary>Suggested fix</summary>\n\n${fence}diff\n${finding.suggestion}\n${fence}\n\n</details>`
 }
 
 const renderCommentBody = (
