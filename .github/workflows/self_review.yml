@@ -39,14 +39,6 @@ jobs:
           permission-contents: read
           permission-pull-requests: write
 
-      - name: Request review from umm-actually bot
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
-        run: |
-          gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/requested_reviewers" \
-            --method POST -f 'reviewers[]=umm-actually[bot]' || true
-
       - uses: ./
         with:
           github_token: ${{ steps.app-token.outputs.token }}
