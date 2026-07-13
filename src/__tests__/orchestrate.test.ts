@@ -176,6 +176,12 @@ const first = <T>(array: T[]): T => {
   return item
 }
 
+type FindRelatedDocsParams = {
+  changedPaths: string[]
+  budgetTokens: number
+  conventionsFile: string
+}
+
 type RecordingStubs = {
   deps: OrchestrateDeps
   fetchPullRequestCalls: { prNumber: number }[]
@@ -184,6 +190,7 @@ type RecordingStubs = {
   readConventionsCalls: { conventionsFile: string }[]
   readChangedFilesCalls: ReadChangedFilesParams[]
   findRelatedFilesCalls: FindRelatedFilesParams[]
+  findRelatedDocsCalls: FindRelatedDocsParams[]
   generateFindingsCalls: ReviewContext[]
 }
 
@@ -204,6 +211,7 @@ const makeOrchestrateDeps = (
   const readConventionsCalls: { conventionsFile: string }[] = []
   const readChangedFilesCalls: ReadChangedFilesParams[] = []
   const findRelatedFilesCalls: FindRelatedFilesParams[] = []
+  const findRelatedDocsCalls: FindRelatedDocsParams[] = []
   const generateFindingsCalls: ReviewContext[] = []
 
   const structuredResult: StructuredReviewResult = {
@@ -245,6 +253,10 @@ const makeOrchestrateDeps = (
       findRelatedFilesCalls.push(params)
       return []
     },
+    findRelatedDocs: async (params) => {
+      findRelatedDocsCalls.push(params)
+      return []
+    },
     ...overrides.contextReader,
   }
 
@@ -270,6 +282,7 @@ const makeOrchestrateDeps = (
     readConventionsCalls,
     readChangedFilesCalls,
     findRelatedFilesCalls,
+    findRelatedDocsCalls,
     generateFindingsCalls,
   }
 }
@@ -550,10 +563,82 @@ describe("orchestrate", () => {
       // Deleted file has no newFilePath — should NOT appear
       expect(changedPaths).not.toContain("src/removed-file.ts")
     })
+
+    it("passes remaining budget after related files to findRelatedDocs", async () => {
+      const expectedRemainingTokens = 20_000
+      const relatedFileContent = "x".repeat(100)
+      const relatedFileTokens = estimateTokens(relatedFileContent)
+      const localDocCalls: FindRelatedDocsParams[] = []
+      const stubs = makeOrchestrateDeps({
+        config: { traceRelatedFiles: true },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [fixtureChangedFile],
+            remainingTokens: expectedRemainingTokens,
+          }),
+          findRelatedFiles: async () => [
+            {
+              path: "src/caller.ts",
+              content: relatedFileContent,
+              includedAs: "full" as const,
+              reason: "imports src/greeter.ts",
+            },
+          ],
+          findRelatedDocs: async (params) => {
+            localDocCalls.push(params)
+            return []
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(localDocCalls).toHaveLength(1)
+      const call = first(localDocCalls)
+      expect(call.budgetTokens).toBe(
+        expectedRemainingTokens - relatedFileTokens,
+      )
+    })
+
+    it("passes conventionsFile to findRelatedDocs for exclusion", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { traceRelatedFiles: true, conventionsFile: "CUSTOM.md" },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.findRelatedDocsCalls).toHaveLength(1)
+      expect(first(stubs.findRelatedDocsCalls).conventionsFile).toBe(
+        "CUSTOM.md",
+      )
+    })
+
+    it("passes relatedDocs into generateFindings review context", async () => {
+      const docFile: PromptFile = {
+        path: "docs/api.md",
+        content: "# API",
+        includedAs: "full",
+        reason: "mentions src/greeter.ts",
+      }
+      const stubs = makeOrchestrateDeps({
+        config: { traceRelatedFiles: true },
+        contextReader: {
+          findRelatedDocs: async () => [docFile],
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.relatedDocs).toEqual([docFile])
+    })
   })
 
   describe("conditional behaviors", () => {
-    it("does not call findRelatedFiles when traceRelatedFiles is false", async () => {
+    it("does not call findRelatedFiles or findRelatedDocs when traceRelatedFiles is false", async () => {
       const stubs = makeOrchestrateDeps({
         config: { traceRelatedFiles: false },
       })
@@ -562,8 +647,10 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.findRelatedFilesCalls).toHaveLength(0)
+      expect(stubs.findRelatedDocsCalls).toHaveLength(0)
       const reviewContext = first(stubs.generateFindingsCalls)
       expect(reviewContext.relatedFiles).toEqual([])
+      expect(reviewContext.relatedDocs).toEqual([])
     })
 
     it("calls findRelatedFiles when traceRelatedFiles is true", async () => {
@@ -691,6 +778,7 @@ describe("createPromptedGenerateFindings", () => {
       conventions: "test conventions",
       changedFiles: [fixtureChangedFile],
       relatedFiles: [],
+      relatedDocs: [],
       annotatedDiff: annotateDiff(files),
       priorFindings: [],
     })
@@ -736,6 +824,7 @@ describe("createPromptedGenerateFindings", () => {
       conventions: null,
       changedFiles: [],
       relatedFiles: [],
+      relatedDocs: [],
       annotatedDiff: annotated,
       priorFindings: [],
     })
@@ -770,12 +859,13 @@ describe("createPromptedGenerateFindings", () => {
     if (phase === undefined) throw new Error("expected a phase")
     const annotated = annotateDiff(files)
 
-    const context = {
+    const context: ReviewContext = {
       prContext: fixturePrContext,
       phase,
       conventions: null,
       changedFiles: [],
       relatedFiles: [],
+      relatedDocs: [],
       annotatedDiff: annotated,
       priorFindings: [],
     }

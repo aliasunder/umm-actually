@@ -41,6 +41,7 @@ const makeUserPromptParts = () => ({
       reason: "references changed-file src/greeter.ts",
     },
   ],
+  relatedDocs: [],
   annotatedDiff:
     "=== src/greeter.ts ===\n@@ -1,1 +1,1 @@\n     1 + export const greet",
   priorFindings: [],
@@ -80,8 +81,18 @@ describe("buildUserPrompt", () => {
     )
   })
 
-  it("orders sections metadata → conventions → changed files → related files → diff", () => {
-    const userPrompt = buildUserPrompt(makeUserPromptParts())
+  it("orders sections metadata → conventions → changed files → related files → related docs → diff", () => {
+    const userPrompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      relatedDocs: [
+        {
+          path: "docs/api.md",
+          content: "# API\n\nSee src/greeter.ts",
+          includedAs: "full" as const,
+          reason: "mentions src/greeter.ts",
+        },
+      ],
+    })
 
     const metadataIndex = userPrompt.indexOf("PR title:")
     const conventionsIndex = userPrompt.indexOf("<conventions-abc123def456>")
@@ -91,13 +102,47 @@ describe("buildUserPrompt", () => {
     const relatedFileIndex = userPrompt.indexOf(
       '<file-abc123def456 path="src/caller.ts"',
     )
+    const relatedDocsIndex = userPrompt.indexOf(
+      "Documentation files that reference changed code",
+    )
+    const docFileIndex = userPrompt.indexOf(
+      '<file-abc123def456 path="docs/api.md"',
+    )
     const diffIndex = userPrompt.indexOf("<diff-abc123def456")
 
     expect(metadataIndex).toBeGreaterThanOrEqual(0)
     expect(conventionsIndex).toBeGreaterThan(metadataIndex)
     expect(changedFileIndex).toBeGreaterThan(conventionsIndex)
     expect(relatedFileIndex).toBeGreaterThan(changedFileIndex)
-    expect(diffIndex).toBeGreaterThan(relatedFileIndex)
+    expect(relatedDocsIndex).toBeGreaterThan(relatedFileIndex)
+    expect(docFileIndex).toBeGreaterThan(relatedDocsIndex)
+    expect(diffIndex).toBeGreaterThan(docFileIndex)
+  })
+
+  it("omits the related docs section when relatedDocs is empty", () => {
+    const userPrompt = buildUserPrompt(makeUserPromptParts())
+
+    expect(userPrompt).not.toContain(
+      "Documentation files that reference changed code",
+    )
+  })
+
+  it("renders the staleness instruction header in the related docs section", () => {
+    const userPrompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      relatedDocs: [
+        {
+          path: "docs/api.md",
+          content: "# API",
+          includedAs: "full" as const,
+          reason: "mentions src/greeter.ts",
+        },
+      ],
+    })
+
+    expect(userPrompt).toContain(
+      "Documentation files that reference changed code (flag any claims that have become stale):",
+    )
   })
 
   it("notes a missing conventions file instead of omitting the section", () => {

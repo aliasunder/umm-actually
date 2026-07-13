@@ -7,6 +7,12 @@ import {
   type PromptFile,
 } from "../review/prompt.js"
 import {
+  DOC_EXTENSIONS,
+  byMentionRelevance,
+  findMentionedChangedPaths,
+  type DocCandidate,
+} from "./doc-mentions.js"
+import {
   extractImportSpecifiers,
   resolveImportSpecifier,
 } from "./import-resolution.js"
@@ -25,6 +31,11 @@ export type ContextReader = {
   findRelatedFiles: (params: {
     changedPaths: string[]
     budgetTokens: number
+  }) => Promise<PromptFile[]>
+  findRelatedDocs: (params: {
+    changedPaths: string[]
+    budgetTokens: number
+    conventionsFile: string
   }) => Promise<PromptFile[]>
 }
 
@@ -53,6 +64,7 @@ const PRUNED_DIRECTORIES = new Set([
 export const MAX_SCAN_FILES = 5_000
 export const MAX_SCAN_BYTES = 262_144
 export const RELATED_FILES_MAX = 8
+export const RELATED_DOCS_MAX = 4
 
 type ImporterCandidate = {
   path: string
@@ -249,8 +261,11 @@ export const createContextReader = (
     return { files, remainingTokens }
   }
 
-  const scanWorkspaceSourceFiles = async (): Promise<string[]> => {
-    const sourceFilePaths: string[] = []
+  /** BFS walk parameterized by extension set — shared by source and doc scans. */
+  const scanWorkspaceFiles = async (
+    extensions: Set<string>,
+  ): Promise<string[]> => {
+    const filePaths: string[] = []
     // Mutable queue by design: a breadth-first walk — subdirectories found
     // during iteration join the queue and are visited by the advancing index.
     const directoryQueue = [""]
@@ -276,23 +291,26 @@ export const createContextReader = (
           continue
         }
         if (!entry.isFile()) continue
-        if (!SCANNABLE_EXTENSIONS.has(posix.extname(entry.name))) continue
+        if (!extensions.has(posix.extname(entry.name))) continue
 
-        if (sourceFilePaths.length >= MAX_SCAN_FILES) {
+        if (filePaths.length >= MAX_SCAN_FILES) {
           logger.warn(
             "workspace scan capped — related-file detection may be incomplete",
             { maxScanFiles: MAX_SCAN_FILES },
           )
-          return sourceFilePaths
+          return filePaths
         }
         const fileStats = await stat(path.join(resolvedRoot, entryPath))
         if (fileStats.size > MAX_SCAN_BYTES) continue
-        sourceFilePaths.push(entryPath)
+        filePaths.push(entryPath)
       }
     }
 
-    return sourceFilePaths
+    return filePaths
   }
+
+  const scanWorkspaceSourceFiles = (): Promise<string[]> =>
+    scanWorkspaceFiles(SCANNABLE_EXTENSIONS)
 
   const findRelatedFiles = async ({
     changedPaths,
@@ -348,5 +366,72 @@ export const createContextReader = (
     return relatedFiles
   }
 
-  return { readConventions, readChangedFiles, findRelatedFiles }
+  /** Finds documentation files that mention changed code paths, ranked by
+   *  mention specificity (full-path matches outweigh basename-only). */
+  const findRelatedDocs = async ({
+    changedPaths,
+    budgetTokens,
+    conventionsFile,
+  }: {
+    changedPaths: string[]
+    budgetTokens: number
+    conventionsFile: string
+  }): Promise<PromptFile[]> => {
+    const changedPathSet = new Set(changedPaths)
+    const normalizedConventionsFile = posix.normalize(conventionsFile)
+    const scannedPaths = await scanWorkspaceFiles(DOC_EXTENSIONS)
+
+    const candidates: DocCandidate[] = []
+    for (const scannedPath of scannedPaths) {
+      if (posix.normalize(scannedPath) === normalizedConventionsFile) continue
+      if (changedPathSet.has(scannedPath)) continue
+
+      const content = await readScannedFileOrNull(scannedPath)
+      if (content === null) continue
+      if (content.includes("\x00")) continue
+
+      const { mentionedPaths, fullPathCount, basenameCount } =
+        findMentionedChangedPaths(content, changedPaths)
+      if (mentionedPaths.length === 0) continue
+
+      candidates.push({
+        path: scannedPath,
+        content,
+        fullPathCount,
+        basenameCount,
+        mentionedChangedPaths: mentionedPaths,
+      })
+    }
+
+    const rankedCandidates = [...candidates].sort(byMentionRelevance)
+
+    const relatedDocs: PromptFile[] = []
+    let remainingTokens = budgetTokens
+    for (const candidate of rankedCandidates) {
+      if (relatedDocs.length >= RELATED_DOCS_MAX) break
+      const contentTokens = estimateTokens(candidate.content)
+      if (contentTokens > remainingTokens) continue
+      remainingTokens -= contentTokens
+
+      const displayPaths = candidate.mentionedChangedPaths.slice(0, 3)
+      const overflow =
+        candidate.mentionedChangedPaths.length - displayPaths.length
+      const reasonSuffix = overflow > 0 ? `, +${overflow} more` : ""
+      relatedDocs.push({
+        path: candidate.path,
+        content: candidate.content,
+        includedAs: "full",
+        reason: `mentions ${displayPaths.join(", ")}${reasonSuffix}`,
+      })
+    }
+
+    return relatedDocs
+  }
+
+  return {
+    readConventions,
+    readChangedFiles,
+    findRelatedFiles,
+    findRelatedDocs,
+  }
 }

@@ -6,7 +6,11 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { createTestLogger } from "../../__tests__/test-logger.js"
 import { estimateTokens } from "../../review/prompt.js"
-import { createContextReader, MAX_SCAN_FILES } from "../workspace.js"
+import {
+  createContextReader,
+  MAX_SCAN_FILES,
+  RELATED_DOCS_MAX,
+} from "../workspace.js"
 
 const workspaceRoot = fileURLToPath(
   new URL("../../../fixtures/workspace", import.meta.url),
@@ -21,6 +25,8 @@ const callerContent = readFixture("src/caller.ts")
 const consumerContent = readFixture("src/consumer.ts")
 const barrelConsumerContent = readFixture("src/barrel-consumer.ts")
 const greeterTestContent = readFixture("src/__tests__/greeter.test.ts")
+const apiDocContent = readFixture("docs/api.md")
+const configJsonContent = readFixture("docs/config.json")
 
 const makeReader = () => {
   const logger = createTestLogger()
@@ -580,6 +586,184 @@ describe("findRelatedFiles", () => {
           "workspace scan capped — related-file detection may be incomplete",
         data: { maxScanFiles: MAX_SCAN_FILES },
       })
+    } finally {
+      await cleanup()
+    }
+  })
+})
+
+describe("findRelatedDocs", () => {
+  it("finds docs that mention changed paths", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/greeter.ts"],
+      budgetTokens: 100_000,
+      conventionsFile: "AGENTS.md",
+    })
+
+    expect(relatedDocs).toEqual([
+      {
+        path: "docs/api.md",
+        content: apiDocContent,
+        includedAs: "full",
+        reason: "mentions src/greeter.ts",
+      },
+    ])
+  })
+
+  it("finds docs with multiple mentioned paths", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/greeter.ts", "src/registry.ts"],
+      budgetTokens: 100_000,
+      conventionsFile: "AGENTS.md",
+    })
+
+    expect(relatedDocs).toEqual([
+      {
+        path: "docs/api.md",
+        content: apiDocContent,
+        includedAs: "full",
+        reason: "mentions src/greeter.ts, src/registry.ts",
+      },
+    ])
+  })
+
+  it("finds JSON doc files that mention changed paths", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/hub.ts"],
+      budgetTokens: 100_000,
+      conventionsFile: "AGENTS.md",
+    })
+
+    expect(relatedDocs).toEqual([
+      {
+        path: "docs/config.json",
+        content: configJsonContent,
+        includedAs: "full",
+        reason: "mentions src/hub.ts",
+      },
+    ])
+  })
+
+  it("excludes the conventions file from results", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/greeter.ts"],
+      budgetTokens: 100_000,
+      conventionsFile: "AGENTS.md",
+    })
+
+    const paths = relatedDocs.map((doc) => doc.path)
+    expect(paths).not.toContain("AGENTS.md")
+  })
+
+  it("excludes changed docs from results", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/greeter.ts", "docs/api.md"],
+      budgetTokens: 100_000,
+      conventionsFile: "AGENTS.md",
+    })
+
+    const paths = relatedDocs.map((doc) => doc.path)
+    expect(paths).not.toContain("docs/api.md")
+  })
+
+  it("returns empty array when no docs mention changed paths", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/nonexistent.ts"],
+      budgetTokens: 100_000,
+      conventionsFile: "AGENTS.md",
+    })
+
+    expect(relatedDocs).toEqual([])
+  })
+
+  it("respects the token budget", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/greeter.ts"],
+      budgetTokens: 1,
+      conventionsFile: "AGENTS.md",
+    })
+
+    expect(relatedDocs).toEqual([])
+  })
+
+  it("caps results at RELATED_DOCS_MAX", async () => {
+    const docFiles: Record<string, string> = {}
+    for (let fileIndex = 0; fileIndex < RELATED_DOCS_MAX + 2; fileIndex++) {
+      docFiles[`docs/doc-${fileIndex}.md`] =
+        `# Doc ${fileIndex}\n\nSee src/target.ts for details.`
+    }
+    docFiles["src/target.ts"] = "export const target = true"
+
+    const { root, cleanup } = await makeTempWorkspace(docFiles)
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader({ workspaceRoot: root }, logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+      })
+
+      expect(relatedDocs).toHaveLength(RELATED_DOCS_MAX)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("skips binary doc files", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "docs/binary.md": "# Binary\n\nSee src/target.ts\x00binary data",
+      "src/target.ts": "export const target = true",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader({ workspaceRoot: root }, logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+      })
+
+      expect(relatedDocs).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("ranks full-path mentions above basename-only mentions", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "docs/basename-only.md": "# Basename\n\nSee greeter.ts for greetings.",
+      "docs/full-path.md": "# Full Path\n\nSee src/greeter.ts for greetings.",
+      "src/greeter.ts": "export const greet = () => 'hi'",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader({ workspaceRoot: root }, logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/greeter.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+      })
+
+      expect(relatedDocs[0]?.path).toBe("docs/full-path.md")
+      expect(relatedDocs[1]?.path).toBe("docs/basename-only.md")
     } finally {
       await cleanup()
     }

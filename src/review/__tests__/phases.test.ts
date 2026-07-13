@@ -32,3 +32,14 @@ describe("resolvePhases", () => {
     )
   })
 })
+
+describe("DIMENSION_CORRECTNESS_SECURITY", () => {
+  it("includes the unchanged-doc staleness instruction", () => {
+    expect(DIMENSION_CORRECTNESS_SECURITY).toContain(
+      "When unchanged\ndocumentation files are provided as context",
+    )
+    expect(DIMENSION_CORRECTNESS_SECURITY).toContain(
+      "stale descriptions, outdated architecture references",
+    )
+  })
+})

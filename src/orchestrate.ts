@@ -38,6 +38,7 @@ export type ReviewContext = {
   conventions: string | null
   changedFiles: PromptFile[]
   relatedFiles: PromptFile[]
+  relatedDocs: PromptFile[]
   annotatedDiff: string
   priorFindings: Finding[]
 }
@@ -228,6 +229,20 @@ export const orchestrate = async (
       })
     : []
 
+  const relatedFilesTokens = relatedFiles.reduce(
+    (sum, file) => sum + estimateTokens(file.content),
+    0,
+  )
+  const docBudgetTokens = remainingTokens - relatedFilesTokens
+
+  const relatedDocs = config.traceRelatedFiles
+    ? await contextReader.findRelatedDocs({
+        changedPaths,
+        budgetTokens: docBudgetTokens,
+        conventionsFile: config.conventionsFile,
+      })
+    : []
+
   // Step 10–11: generate findings (V1: single combined phase)
   const phase = phases[0]
   if (phase === undefined) {
@@ -239,6 +254,7 @@ export const orchestrate = async (
     conventions,
     changedFiles,
     relatedFiles,
+    relatedDocs,
     annotatedDiff,
     priorFindings: [],
   })
