@@ -277,11 +277,9 @@ export const orchestrate = async (
   }
 
   const isRerun = existingAnchors.size > 0
-  const newFindings = isRerun
-    ? selected.filter(
-        (finding) => !existingAnchors.has(computeAnchorKey(finding)),
-      )
-    : selected
+  const isNewFinding = (finding: Finding): boolean =>
+    !existingAnchors.has(computeAnchorKey(finding))
+  const newFindings = isRerun ? selected.filter(isNewFinding) : selected
 
   logger.info("cross-run dedup", {
     existingAnchorCount: existingAnchors.size,
