@@ -291,11 +291,9 @@ export const orchestrate = async (
   })
 
   // Step 13: post review
-  const totalCount = existingAnchors.size + newFindings.length
-  let reviewUrl: string
+  const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
 
   if (!isRerun) {
-    // First run — standard review with body + inline comments
     const reviewPayload: ReviewPayload =
       selected.length > 0
         ? buildReviewPayload({
@@ -310,20 +308,32 @@ export const orchestrate = async (
             fallbackBody: buildZeroFindingsBody({ model: modelUsed }),
           }
 
-    const result = await githubClient.submitReview({
+    const { url: reviewUrl } = await githubClient.submitReview({
       prNumber: prContext.prNumber,
       commitId: prContext.headSha,
       ...reviewPayload,
     })
-    reviewUrl = result.url
 
     logger.info("review posted", {
       reviewUrl,
       findingsCount: selected.length,
       modelUsed,
     })
-  } else if (newFindings.length > 0) {
-    // Re-run with new findings — post only new ones
+
+    return {
+      findingsCount: newFindings.length,
+      reviewUrl,
+      modelUsed,
+      skippedReason: "",
+      costSummaryMarkdown,
+    }
+  }
+
+  // Re-run — post only new findings, upsert summary comment
+  const totalCount = existingAnchors.size + newFindings.length
+  let reviewUrl = ""
+
+  if (newFindings.length > 0) {
     const reviewPayload = buildReviewPayload({
       findings: newFindings,
       commentableByPath,
@@ -341,44 +351,33 @@ export const orchestrate = async (
     logger.info("re-run review posted", {
       reviewUrl,
       newFindingsCount: newFindings.length,
-      totalCount: totalCount,
+      totalCount,
     })
   } else {
-    // Re-run with zero new findings
-    reviewUrl = ""
-
-    logger.info("re-run — no new findings", {
-      totalCount: existingAnchors.size,
-    })
+    logger.info("re-run — no new findings", { totalCount })
   }
 
-  // Upsert summary comment on re-runs
-  if (isRerun) {
-    const summaryBody = buildRerunSummary({
-      sha: prContext.headSha,
-      newCount: newFindings.length,
-      totalCount: totalCount,
-      model: modelUsed,
+  const summaryBody = buildRerunSummary({
+    sha: prContext.headSha,
+    newCount: newFindings.length,
+    totalCount,
+    model: modelUsed,
+  })
+  try {
+    await githubClient.upsertSummaryComment({
+      prNumber: prContext.prNumber,
+      body: summaryBody,
+      anchor: RERUN_ANCHOR,
     })
-    try {
-      await githubClient.upsertSummaryComment({
-        prNumber: prContext.prNumber,
-        body: summaryBody,
-        anchor: RERUN_ANCHOR,
-      })
-    } catch (summaryError) {
-      const errorDetail =
-        summaryError instanceof Error
-          ? `[${summaryError.name}]: ${summaryError.message}`
-          : String(summaryError)
-      logger.warn("failed to upsert summary comment", {
-        error: errorDetail,
-      })
-    }
+  } catch (summaryError) {
+    const errorDetail =
+      summaryError instanceof Error
+        ? `[${summaryError.name}]: ${summaryError.message}`
+        : String(summaryError)
+    logger.warn("failed to upsert summary comment", {
+      error: errorDetail,
+    })
   }
-
-  // Step 14: cost summary
-  const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
 
   return {
     findingsCount: newFindings.length,

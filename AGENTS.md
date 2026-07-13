@@ -65,8 +65,11 @@ files. Prefer SDK-provided types over redefining shapes.
   each step — never mutate-and-return. When mutation is genuinely needed,
   add a comment justifying it.
 - Explicit names over abbreviations, everywhere — params, callbacks, locals.
-- Early returns over nested `if/else`. Extract multi-clause conditionals into
-  named booleans. Name booleans for the affirmative state.
+- Early returns over nested `if/else`. When a function has a primary path and
+  a secondary path (e.g. first-run vs re-run), return early from the simpler
+  branch so the remaining code flows linearly without nesting. Extract
+  multi-clause conditionals into named booleans. Name booleans for the
+  affirmative state.
 - Block bodies `{}` for any multiline function response — expression bodies
   only for one-liners. A multi-clause boolean spanning lines gets
   `{ return (...) }`; guard chains get explicit early returns, never a
