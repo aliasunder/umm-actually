@@ -57,7 +57,10 @@ files. Prefer SDK-provided types over redefining shapes.
   cohesive service surfaces (`githubClient.submitReview(…)`).
 - `type` over `interface`. TypeScript strict mode. `node:` prefix for built-ins.
 - Explicit return types on exports. No `any`. No `as` or `!` — use runtime
-  guards or schema validation to narrow.
+  guards or schema validation to narrow. Truthy/falsy checks over explicit
+  `!== undefined` comparisons — use `if (value)` not `if (value !== undefined)`
+  unless distinguishing `undefined` from other falsy values (`null`, `0`, `""`,
+  `false`) actually matters for correctness.
 - Immutable by default; avoid `let`. A `reduce` must return a new accumulator
   each step — never mutate-and-return. When mutation is genuinely needed,
   add a comment justifying it.
