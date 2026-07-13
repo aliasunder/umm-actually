@@ -28,7 +28,7 @@ const findingTag = (finding: Finding): string =>
   `**[${finding.severity}/${finding.category}]** ${finding.title}`
 
 const suggestionBlock = (finding: Finding): string => {
-  if (finding.suggestion === null || finding.suggestion === "") return ""
+  if (!finding.suggestion) return ""
   // CommonMark: a fence longer than any backtick run inside the content
   // cannot be closed early — sizes the fence to LLM-generated suggestions
   // that themselves contain fenced blocks
