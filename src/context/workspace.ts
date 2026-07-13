@@ -406,6 +406,8 @@ export const createContextReader = (
     const rankedCandidates = [...candidates].sort(byMentionRelevance)
 
     const relatedDocs: PromptFile[] = []
+    // Sequential state by design: rank order is priority order, and an
+    // over-budget candidate is skipped so smaller candidates still fit.
     let remainingTokens = budgetTokens
     for (const candidate of rankedCandidates) {
       if (relatedDocs.length >= RELATED_DOCS_MAX) break
