@@ -70,25 +70,25 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 
 ## Inputs
 
-| Input                   | Default                       | Description                                                                                                                   |
-| ----------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `github_token`          | _(required)_                  | Token for fetching the diff and posting the review. A GitHub App installation token keeps the bot identity.                   |
-| `openrouter_api_key`    | _(required)_                  | OpenRouter API key                                                                                                            |
-| `model`                 | `anthropic/claude-sonnet-4-6` | OpenRouter model slug exactly as listed on openrouter.ai/models                                                               |
-| `fallback_model`        | `""`                          | Model to retry with if the primary model fails the structured-output ladder                                                   |
-| `max_findings`          | `""` _(uncapped)_             | Cap on posted findings, highest severity first. Empty = all validated findings post.                                          |
-| `severity_threshold`    | `low`                         | Minimum severity to post: `low` \| `medium` \| `high` \| `critical`                                                           |
-| `conventions_file`      | `AGENTS.md`                   | Repo-relative path to the conventions file included in the prompt                                                             |
-| `phases`                | `combined`                    | Review phases to run. V1 supports: `combined`                                                                                 |
-| `context_budget_tokens` | `80000`                       | Approximate token budget for prompt context (file contents + diff — conventions have a separate cap)                          |
-| `trace_related_files`   | `true`                        | Include related files in the prompt — import-tracing for caller regressions, and doc-mention scanning for staleness detection |
-| `priority_docs`         | `README.md`                   | Comma-separated repo-relative paths always included in review context (empty = disabled)                                      |
-| `max_scan_files`        | `5000`                        | Maximum files to walk during workspace scan for related file and doc detection                                                |
-| `max_scan_bytes`        | `262144`                      | Maximum byte size of a single file to include in the workspace scan                                                           |
-| `max_related_files`     | `8`                           | Maximum import-traced related files to include in review context                                                              |
-| `max_related_docs`      | `4`                           | Maximum mention-matched documentation files to include in review context (excludes priority docs)                             |
-| `cost_summary`          | `true`                        | Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow step summary                               |
-| `pr_number`             | `""`                          | PR number override — required only when the triggering event does not identify a PR directly                                  |
+| Input                   | Default                       | Description                                                                                                                                                                                                     |
+| ----------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github_token`          | _(required)_                  | Token for fetching the diff and posting the review. A GitHub App installation token keeps the bot identity.                                                                                                     |
+| `openrouter_api_key`    | _(required)_                  | OpenRouter API key                                                                                                                                                                                              |
+| `model`                 | `anthropic/claude-sonnet-4-6` | OpenRouter model slug exactly as listed on openrouter.ai/models                                                                                                                                                 |
+| `fallback_model`        | `""`                          | Model to retry with if the primary model fails the structured-output ladder                                                                                                                                     |
+| `max_findings`          | `""` _(uncapped)_             | Cap on posted findings, highest severity first. Empty = all validated findings post.                                                                                                                            |
+| `severity_threshold`    | `low`                         | Minimum severity to post: `low` \| `medium` \| `high` \| `critical`                                                                                                                                             |
+| `conventions_file`      | `AGENTS.md`                   | Repo-relative path to the conventions file included in the prompt                                                                                                                                               |
+| `phases`                | `combined`                    | Review phases to run. V1 supports: `combined`                                                                                                                                                                   |
+| `context_budget_tokens` | `80000`                       | Approximate token budget for prompt context (file contents + diff — conventions have a separate cap)                                                                                                            |
+| `trace_related_files`   | `true`                        | Include related files in the prompt — import-tracing for caller regressions, and doc-mention scanning for staleness detection                                                                                   |
+| `priority_docs`         | `README.md`                   | Comma-separated repo-relative paths included in review context regardless of mention matching. Priority docs get first claim on the doc token budget; mention-matched docs fill the remainder. Empty = disabled |
+| `max_scan_files`        | `5000`                        | Maximum files to walk during workspace scan for related file and doc detection                                                                                                                                  |
+| `max_scan_bytes`        | `262144`                      | Maximum byte size of a single file to include in the workspace scan                                                                                                                                             |
+| `max_related_files`     | `8`                           | Maximum import-traced related files to include in review context                                                                                                                                                |
+| `max_related_docs`      | `4`                           | Maximum mention-matched documentation files to include in review context (excludes priority docs)                                                                                                               |
+| `cost_summary`          | `true`                        | Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow step summary                                                                                                                 |
+| `pr_number`             | `""`                          | PR number override — required only when the triggering event does not identify a PR directly                                                                                                                    |
 
 ## Outputs
 
