@@ -200,6 +200,32 @@ describe("findMentionedChangedPaths", () => {
     })
   })
 
+  it("does not match an extensionless path that is a prefix of a longer filename", () => {
+    const result = findMentionedChangedPaths(
+      "The file is Makefile.in for autoconf.",
+      ["Makefile"],
+    )
+
+    expect(result).toEqual({
+      mentionedPaths: [],
+      fullPathCount: 0,
+      basenameCount: 0,
+    })
+  })
+
+  it("matches an extensionless path followed by a sentence-ending period", () => {
+    const result = findMentionedChangedPaths(
+      "Check the Makefile. It has the targets.",
+      ["Makefile"],
+    )
+
+    expect(result).toEqual({
+      mentionedPaths: ["Makefile"],
+      fullPathCount: 1,
+      basenameCount: 0,
+    })
+  })
+
   it("matches a path followed by non-path punctuation", () => {
     const result = findMentionedChangedPaths(
       "Check `src/greeter.ts` for details.",

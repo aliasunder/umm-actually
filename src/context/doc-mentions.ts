@@ -30,22 +30,32 @@ export type DocCandidate = {
   mentionedChangedPaths: string[]
 }
 
-/** Characters that, when immediately following a path match, indicate the
- *  match is a prefix of a longer path token (e.g. `greeter.ts` inside
- *  `greeter.tsx`). Excludes `.` — periods commonly end sentences in prose. */
+/** Characters that always indicate the match is a prefix of a longer path
+ *  token (e.g. `greeter.ts` inside `greeter.tsx`). A `.` is treated as
+ *  continuation only when followed by a word character (file extension like
+ *  `.in`, `.bak`) — a sentence-ending period (`.` + space/EOF) is not. */
 const PATH_CONTINUATION = /[\w/-]/
 
+const isPathContinuation = (haystack: string, afterIndex: number): boolean => {
+  const charAfter = haystack[afterIndex]
+  if (charAfter === undefined) return false
+  if (PATH_CONTINUATION.test(charAfter)) return true
+  if (charAfter === ".") {
+    const charAfterDot = haystack[afterIndex + 1]
+    return charAfterDot !== undefined && /\w/.test(charAfterDot)
+  }
+  return false
+}
+
 /** True when `needle` appears in `haystack` as a complete path token — not as
- *  a prefix of a longer path (e.g. `greeter.ts` must not match `greeter.tsx`). */
+ *  a prefix of a longer path (e.g. `greeter.ts` must not match `greeter.tsx`,
+ *  and `Makefile` must not match `Makefile.in`). */
 const hasPathMention = (haystack: string, needle: string): boolean => {
   let start = 0
   while (true) {
     const index = haystack.indexOf(needle, start)
     if (index === -1) return false
-    const charAfter = haystack[index + needle.length]
-    if (charAfter === undefined || !PATH_CONTINUATION.test(charAfter)) {
-      return true
-    }
+    if (!isPathContinuation(haystack, index + needle.length)) return true
     start = index + 1
   }
 }
