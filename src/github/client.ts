@@ -99,7 +99,7 @@ const prResponseSchema = z.object({
   base: z.object({ ref: z.string() }),
 })
 
-const reviewUrlSchema = z.object({ html_url: z.string() })
+const urlResponseSchema = z.object({ html_url: z.string() })
 
 const reviewCommentListSchema = z.array(
   z.object({ path: z.string(), body: z.string() }),
@@ -112,8 +112,6 @@ const issueCommentListSchema = z.array(
     html_url: z.string(),
   }),
 )
-
-const issueCommentResponseSchema = z.object({ html_url: z.string() })
 
 /** Octokit request errors carry a numeric `status` — duck-typed so stubs and
  *  future octokit versions need no instanceof on octokit internals. */
@@ -135,7 +133,7 @@ export const createGithubClient = (
   const PER_PAGE = 100
 
   const parseReviewUrl = (data: unknown): string => {
-    const parsed = reviewUrlSchema.safeParse(data)
+    const parsed = urlResponseSchema.safeParse(data)
     if (!parsed.success) throw new Error("unexpected review response shape")
     return parsed.data.html_url
   }
@@ -289,7 +287,6 @@ export const createGithubClient = (
     body: string
     anchor: string
   }): Promise<UpsertCommentResult> => {
-    let existingComment: { id: number; html_url: string } | undefined
     let totalFetched = 0
 
     for (let page = 1; page <= MAX_PAGES; page++) {
@@ -305,10 +302,25 @@ export const createGithubClient = (
         throw new Error("unexpected issue comments response shape")
       }
       totalFetched += parsed.data.length
-      existingComment = parsed.data.find((comment) =>
+
+      const existingComment = parsed.data.find((comment) =>
         comment.body.includes(anchor),
       )
-      if (existingComment) break
+      if (existingComment) {
+        const updateResponse = await octokit.rest.issues.updateComment({
+          owner,
+          repo,
+          comment_id: existingComment.id,
+          body,
+        })
+        const updateParsed = urlResponseSchema.safeParse(updateResponse.data)
+        if (!updateParsed.success) {
+          throw new Error("unexpected issue comment response shape")
+        }
+        logger.info("updated summary comment", { prNumber })
+        return { url: updateParsed.data.html_url, created: false }
+      }
+
       if (parsed.data.length < PER_PAGE) break
       if (page === MAX_PAGES) {
         logger.warn("issue comments page cap reached", {
@@ -318,28 +330,13 @@ export const createGithubClient = (
       }
     }
 
-    if (existingComment) {
-      const response = await octokit.rest.issues.updateComment({
-        owner,
-        repo,
-        comment_id: existingComment.id,
-        body,
-      })
-      const parsed = issueCommentResponseSchema.safeParse(response.data)
-      if (!parsed.success) {
-        throw new Error("unexpected issue comment response shape")
-      }
-      logger.info("updated summary comment", { prNumber })
-      return { url: parsed.data.html_url, created: false }
-    }
-
     const response = await octokit.rest.issues.createComment({
       owner,
       repo,
       issue_number: prNumber,
       body,
     })
-    const parsed = issueCommentResponseSchema.safeParse(response.data)
+    const parsed = urlResponseSchema.safeParse(response.data)
     if (!parsed.success) {
       throw new Error("unexpected issue comment response shape")
     }
