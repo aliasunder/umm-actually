@@ -115,9 +115,6 @@ const issueCommentListSchema = z.array(
 
 const issueCommentResponseSchema = z.object({ html_url: z.string() })
 
-const MAX_PAGES = 10
-const PER_PAGE = 100
-
 /** Octokit request errors carry a numeric `status` — duck-typed so stubs and
  *  future octokit versions need no instanceof on octokit internals. */
 const errorStatus = (error: unknown): number | undefined => {
@@ -134,6 +131,9 @@ export const createGithubClient = (
   }: { octokit: OctokitLike; owner: string; repo: string },
   logger: Logger,
 ): GithubClient => {
+  const MAX_PAGES = 10
+  const PER_PAGE = 100
+
   const parseReviewUrl = (data: unknown): string => {
     const parsed = reviewUrlSchema.safeParse(data)
     if (!parsed.success) throw new Error("unexpected review response shape")
