@@ -176,7 +176,7 @@ export const buildUserPrompt = ({
     relatedDocs.length === 0
       ? ""
       : [
-          "Documentation files that reference changed code (flag any claims that have become stale):",
+          "Documentation files related to this change (flag any claims that have become stale):",
           ...relatedDocs.map((doc) => renderFileBlock(doc, delimiterNonce)),
         ].join("\n\n")
 

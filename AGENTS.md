@@ -22,7 +22,7 @@ src/
   github/                  # GitHub I/O: event payload → PrContext, octokit wrappers (diff fetch, review posting)
   openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, structured-output retry ladder, cost summary
   diff/                    # pure transforms over parse-diff output
-  context/                 # workspace I/O: conventions file, changed files, import-trace scan, doc-mention scan
+  context/                 # workspace I/O: conventions file, changed files, import-trace scan, doc-mention scan, priority docs
   review/                  # pure review logic: finding schema, phases, prompt, selection, comment mapping
   orchestrate.ts           # pipeline + createPromptedGenerateFindings — fully testable with stub clients
 ```

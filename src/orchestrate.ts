@@ -245,6 +245,7 @@ export const orchestrate = async (
         changedPaths,
         budgetTokens: docBudgetTokens,
         conventionsFile: config.conventionsFile,
+        priorityDocs: config.priorityDocs,
       })
     : []
 

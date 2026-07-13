@@ -146,6 +146,11 @@ const baseConfig: ActionConfig = {
   phases: "combined",
   contextBudgetTokens: 80_000,
   traceRelatedFiles: true,
+  maxScanFiles: 5000,
+  maxScanBytes: 262144,
+  maxRelatedFiles: 8,
+  maxRelatedDocs: 4,
+  priorityDocs: ["README.md"],
   costSummary: true,
   prNumberOverride: undefined,
 }
@@ -185,6 +190,7 @@ type FindRelatedDocsParams = {
   changedPaths: string[]
   budgetTokens: number
   conventionsFile: string
+  priorityDocs: string[]
 }
 
 type UpsertSummaryCommentParams = {

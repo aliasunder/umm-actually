@@ -82,6 +82,11 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 | `phases`                | `combined`                    | Review phases to run. V1 supports: `combined`                                                                                 |
 | `context_budget_tokens` | `80000`                       | Approximate token budget for prompt context (file contents + diff — conventions have a separate cap)                          |
 | `trace_related_files`   | `true`                        | Include related files in the prompt — import-tracing for caller regressions, and doc-mention scanning for staleness detection |
+| `priority_docs`         | `README.md`                   | Comma-separated repo-relative paths always included in review context (empty = disabled)                                      |
+| `max_scan_files`        | `5000`                        | Maximum files to walk during workspace scan for related file and doc detection                                                |
+| `max_scan_bytes`        | `262144`                      | Maximum byte size of a single file to include in the workspace scan                                                           |
+| `max_related_files`     | `8`                           | Maximum import-traced related files to include in review context                                                              |
+| `max_related_docs`      | `4`                           | Maximum mention-matched documentation files to include in review context (excludes priority docs)                             |
 | `cost_summary`          | `true`                        | Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow step summary                               |
 | `pr_number`             | `""`                          | PR number override — required only when the triggering event does not identify a PR directly                                  |
 
