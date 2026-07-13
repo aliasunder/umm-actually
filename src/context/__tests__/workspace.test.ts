@@ -1013,6 +1013,32 @@ describe("findRelatedDocs", () => {
     }
   })
 
+  it("skips a priority doc that escapes the workspace with a warn log", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "src/target.ts": "export const target = true",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        priorityDocs: ["../../etc/passwd"],
+      })
+
+      expect(relatedDocs).toEqual([])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "priority doc path escapes workspace — skipping",
+        data: { path: "../../etc/passwd" },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
   it("priority docs share the budget with mention-matched docs", async () => {
     const readmeContent = "# Project\n\n" + "x".repeat(400)
     const apiContent = "# API\n\nSee src/target.ts here."

@@ -223,8 +223,17 @@ export const createContextReader = (
   const readPriorityDocOrNull = async (
     docPath: string,
   ): Promise<string | null> => {
+    let absolutePath: string
     try {
-      return await readFile(path.join(resolvedRoot, docPath), "utf8")
+      absolutePath = resolveUnderRoot(docPath)
+    } catch {
+      logger.warn("priority doc path escapes workspace — skipping", {
+        path: docPath,
+      })
+      return null
+    }
+    try {
+      return await readFile(absolutePath, "utf8")
     } catch (readError) {
       if (isMissingFileError(readError)) {
         logger.info("priority doc not found — skipping", { path: docPath })
