@@ -186,11 +186,16 @@ const first = <T>(array: T[]): T => {
   return item
 }
 
+type ReadPriorityDocsParams = {
+  priorityDocs: string[]
+  budgetTokens: number
+}
+
 type FindRelatedDocsParams = {
   changedPaths: string[]
   budgetTokens: number
   conventionsFile: string
-  priorityDocs: string[]
+  excludePaths: string[]
 }
 
 type UpsertSummaryCommentParams = {
@@ -209,6 +214,7 @@ type RecordingStubs = {
   readConventionsCalls: { conventionsFile: string }[]
   readChangedFilesCalls: ReadChangedFilesParams[]
   findRelatedFilesCalls: FindRelatedFilesParams[]
+  readPriorityDocsCalls: ReadPriorityDocsParams[]
   findRelatedDocsCalls: FindRelatedDocsParams[]
   generateFindingsCalls: ReviewContext[]
 }
@@ -232,6 +238,7 @@ const makeOrchestrateDeps = (
   const readConventionsCalls: { conventionsFile: string }[] = []
   const readChangedFilesCalls: ReadChangedFilesParams[] = []
   const findRelatedFilesCalls: FindRelatedFilesParams[] = []
+  const readPriorityDocsCalls: ReadPriorityDocsParams[] = []
   const findRelatedDocsCalls: FindRelatedDocsParams[] = []
   const generateFindingsCalls: ReviewContext[] = []
 
@@ -285,6 +292,10 @@ const makeOrchestrateDeps = (
       findRelatedFilesCalls.push(params)
       return []
     },
+    readPriorityDocs: async (params) => {
+      readPriorityDocsCalls.push(params)
+      return { files: [], remainingTokens: params.budgetTokens }
+    },
     findRelatedDocs: async (params) => {
       findRelatedDocsCalls.push(params)
       return []
@@ -316,6 +327,7 @@ const makeOrchestrateDeps = (
     readConventionsCalls,
     readChangedFilesCalls,
     findRelatedFilesCalls,
+    readPriorityDocsCalls,
     findRelatedDocsCalls,
     generateFindingsCalls,
   }
@@ -672,7 +684,7 @@ describe("orchestrate", () => {
   })
 
   describe("conditional behaviors", () => {
-    it("skips findRelatedFiles but still calls findRelatedDocs for priority docs when traceRelatedFiles is false", async () => {
+    it("always calls readPriorityDocs even when traceRelatedFiles is false", async () => {
       const stubs = makeOrchestrateDeps({
         config: { traceRelatedFiles: false, priorityDocs: ["README.md"] },
       })
@@ -680,15 +692,15 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(stubs.findRelatedFilesCalls).toHaveLength(0)
-      expect(stubs.findRelatedDocsCalls).toHaveLength(1)
-      const reviewContext = first(stubs.generateFindingsCalls)
-      expect(reviewContext.relatedFiles).toEqual([])
+      expect(stubs.readPriorityDocsCalls).toHaveLength(1)
+      expect(first(stubs.readPriorityDocsCalls).priorityDocs).toEqual([
+        "README.md",
+      ])
     })
 
-    it("skips both findRelatedFiles and findRelatedDocs when traceRelatedFiles is false and priorityDocs is empty", async () => {
+    it("skips findRelatedFiles and findRelatedDocs when traceRelatedFiles is false", async () => {
       const stubs = makeOrchestrateDeps({
-        config: { traceRelatedFiles: false, priorityDocs: [] },
+        config: { traceRelatedFiles: false },
       })
       const logger = createTestLogger()
 

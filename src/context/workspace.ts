@@ -32,11 +32,15 @@ export type ContextReader = {
     changedPaths: string[]
     budgetTokens: number
   }) => Promise<PromptFile[]>
+  readPriorityDocs: (params: {
+    priorityDocs: string[]
+    budgetTokens: number
+  }) => Promise<BudgetedFiles>
   findRelatedDocs: (params: {
     changedPaths: string[]
     budgetTokens: number
     conventionsFile: string
-    priorityDocs: string[]
+    excludePaths: string[]
   }) => Promise<PromptFile[]>
 }
 
@@ -422,22 +426,16 @@ export const createContextReader = (
     return relatedFiles
   }
 
-  /** Finds documentation files related to the change: priority docs get
-   *  first claim on the token budget (regardless of mentions), then
-   *  mention-matched docs fill remaining slots ranked by specificity. */
-  const findRelatedDocs = async ({
-    changedPaths,
-    budgetTokens,
-    conventionsFile,
+  /** Reads explicitly named documentation files, independent of mention
+   *  matching or traceRelatedFiles. Budget-tracked like readChangedFiles. */
+  const readPriorityDocs = async ({
     priorityDocs,
+    budgetTokens,
   }: {
-    changedPaths: string[]
-    budgetTokens: number
-    conventionsFile: string
     priorityDocs: string[]
-  }): Promise<PromptFile[]> => {
-    // Phase 1: priority docs — guaranteed first claim on budget
-    const priorityFiles: PromptFile[] = []
+    budgetTokens: number
+  }): Promise<BudgetedFiles> => {
+    const files: PromptFile[] = []
     // Sequential state by design: priority order determines budget priority,
     // and each file's inclusion depends on the budget left by files before it.
     let remainingTokens = budgetTokens
@@ -449,7 +447,7 @@ export const createContextReader = (
       const contentTokens = estimateTokens(content)
       if (contentTokens > remainingTokens) continue
       remainingTokens -= contentTokens
-      priorityFiles.push({
+      files.push({
         path: docPath,
         content,
         includedAs: "full",
@@ -457,20 +455,34 @@ export const createContextReader = (
       })
     }
 
-    const priorityPathSet = new Set(
-      priorityDocs.map((docPath) => posix.normalize(docPath)),
-    )
+    return { files, remainingTokens }
+  }
 
-    // Phase 2: mention-matched docs with remaining budget
+  /** Scans the workspace for documentation files that mention changed code
+   *  paths, ranked by mention specificity. */
+  const findRelatedDocs = async ({
+    changedPaths,
+    budgetTokens,
+    conventionsFile,
+    excludePaths,
+  }: {
+    changedPaths: string[]
+    budgetTokens: number
+    conventionsFile: string
+    excludePaths: string[]
+  }): Promise<PromptFile[]> => {
     const changedPathSet = new Set(changedPaths)
     const normalizedConventionsFile = posix.normalize(conventionsFile)
+    const excludePathSet = new Set(
+      excludePaths.map((excludePath) => posix.normalize(excludePath)),
+    )
     const scannedPaths = await scanWorkspaceFiles(DOC_EXTENSIONS)
 
     const candidates: DocCandidate[] = []
     for (const scannedPath of scannedPaths) {
       if (posix.normalize(scannedPath) === normalizedConventionsFile) continue
       if (changedPathSet.has(scannedPath)) continue
-      if (priorityPathSet.has(posix.normalize(scannedPath))) continue
+      if (excludePathSet.has(posix.normalize(scannedPath))) continue
 
       const content = await readScannedFileOrNull(scannedPath)
       if (!content) continue
@@ -491,9 +503,12 @@ export const createContextReader = (
 
     const rankedCandidates = [...candidates].sort(byMentionRelevance)
 
-    const mentionDocs: PromptFile[] = []
+    const relatedDocs: PromptFile[] = []
+    // Sequential state by design: rank order is priority order, and an
+    // over-budget candidate is skipped so smaller candidates still fit.
+    let remainingTokens = budgetTokens
     for (const candidate of rankedCandidates) {
-      if (mentionDocs.length >= config.relatedDocsMax) break
+      if (relatedDocs.length >= config.relatedDocsMax) break
       const contentTokens = estimateTokens(candidate.content)
       if (contentTokens > remainingTokens) continue
       remainingTokens -= contentTokens
@@ -502,7 +517,7 @@ export const createContextReader = (
       const overflow =
         candidate.mentionedChangedPaths.length - displayPaths.length
       const reasonSuffix = overflow > 0 ? `, +${overflow} more` : ""
-      mentionDocs.push({
+      relatedDocs.push({
         path: candidate.path,
         content: candidate.content,
         includedAs: "full",
@@ -510,9 +525,9 @@ export const createContextReader = (
       })
     }
 
-    if (rankedCandidates.length > mentionDocs.length) {
+    if (rankedCandidates.length > relatedDocs.length) {
       const excluded = rankedCandidates
-        .slice(mentionDocs.length)
+        .slice(relatedDocs.length)
         .map((candidate) => candidate.path)
       logger.info("mention-matched docs exceeded cap — excluded from context", {
         maxRelatedDocs: config.relatedDocsMax,
@@ -520,13 +535,14 @@ export const createContextReader = (
       })
     }
 
-    return [...priorityFiles, ...mentionDocs]
+    return relatedDocs
   }
 
   return {
     readConventions,
     readChangedFiles,
     findRelatedFiles,
+    readPriorityDocs,
     findRelatedDocs,
   }
 }
