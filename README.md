@@ -125,7 +125,6 @@ umm-actually is in early development — the core review pipeline works but ther
 
 **In progress**
 
-- **Doc-staleness detection** — extending the workspace scan to doc files (`.md`, `.json`) so unchanged docs that describe changed code reach the prompt and staleness becomes a finding
 - **Branded check run** — using the Checks API so the CI check shows the umm-actually avatar instead of the generic GitHub Actions logo
 
 **Planned**
