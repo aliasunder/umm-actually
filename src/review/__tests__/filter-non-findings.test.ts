@@ -3,7 +3,7 @@ import { filterNonFindings } from "../filter-non-findings.js"
 import { makeFinding } from "./make-finding.js"
 
 describe("filterNonFindings", () => {
-  // --- Primary signal: prefix patterns ---
+  // --- Prefix patterns that should be dropped ---
 
   it("drops a finding whose failure_scenario starts with 'N/A'", () => {
     const finding = makeFinding({
@@ -35,16 +35,6 @@ describe("filterNonFindings", () => {
     expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
   })
 
-  it("drops a finding whose failure_scenario starts with 'None'", () => {
-    const finding = makeFinding({
-      failure_scenario: "None — logic appears correct.",
-    })
-
-    const result = filterNonFindings([finding])
-
-    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
-  })
-
   it("drops a finding whose failure_scenario starts with 'Not applicable'", () => {
     const finding = makeFinding({
       failure_scenario: "Not applicable — the code handles this edge case.",
@@ -65,78 +55,44 @@ describe("filterNonFindings", () => {
     expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
   })
 
-  // --- Secondary signal: body content ---
-
-  it("drops a finding whose failure_scenario contains 'no actual bug'", () => {
-    const finding = makeFinding({
-      failure_scenario: "After analysis, no actual bug was found in this path.",
-    })
-
-    const result = filterNonFindings([finding])
-
-    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
-  })
-
-  it("drops a finding whose failure_scenario contains 'this is correct'", () => {
-    const finding = makeFinding({
-      failure_scenario:
-        "The behavior triggered when input is empty, but this is correct per the spec.",
-    })
-
-    const result = filterNonFindings([finding])
-
-    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
-  })
-
-  it("drops a finding whose failure_scenario contains 'working as designed'", () => {
-    const finding = makeFinding({
-      failure_scenario:
-        "The function returns null for missing keys, working as designed.",
-    })
-
-    const result = filterNonFindings([finding])
-
-    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
-  })
-
-  it("drops a finding whose failure_scenario contains 'correct behavior'", () => {
-    const finding = makeFinding({
-      failure_scenario:
-        "The validation rejects empty strings — correct behavior, not a bug.",
-    })
-
-    const result = filterNonFindings([finding])
-
-    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
-  })
-
-  it("drops a finding whose failure_scenario contains 'by design'", () => {
-    const finding = makeFinding({
-      failure_scenario:
-        "The guard rejects the empty string by design; this is not a bug.",
-    })
-
-    const result = filterNonFindings([finding])
-
-    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
-  })
-
-  it("drops a finding whose failure_scenario contains 'no bug found'", () => {
-    const finding = makeFinding({
-      failure_scenario: "Reviewed the logic — no bug found after re-analysis.",
-    })
-
-    const result = filterNonFindings([finding])
-
-    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
-  })
-
-  // --- Passthrough cases ---
+  // --- Passthrough: real findings must not be dropped ---
 
   it("keeps a finding with a concrete failure scenario", () => {
     const finding = makeFinding({
       failure_scenario:
         "A CI step that gates deployment reads the env var, but the value is never set in the matrix.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  it("keeps a finding that mentions 'by design' as a qualifier", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "The function returns null by design, but the caller never null-checks.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  it("keeps a finding that mentions 'this is correct' as a qualifier", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "This is correct for ASCII but breaks on multi-byte UTF-8.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  it("keeps a finding starting with 'None of'", () => {
+    const finding = makeFinding({
+      failure_scenario: "None of the guards catch this input.",
     })
 
     const result = filterNonFindings([finding])
@@ -163,10 +119,15 @@ describe("filterNonFindings", () => {
     expect(result).toEqual({ findings, droppedAsNonFinding: 0 })
   })
 
+  // --- Mixed and edge cases ---
+
   it("returns empty findings when all findings are non-findings", () => {
     const findings = [
       makeFinding({ line: 1, failure_scenario: "N/A — tests are valid." }),
-      makeFinding({ line: 2, failure_scenario: "None — logic is correct." }),
+      makeFinding({
+        line: 2,
+        failure_scenario: "Not applicable — already handled.",
+      }),
     ]
 
     const result = filterNonFindings(findings)
