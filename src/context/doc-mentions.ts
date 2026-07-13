@@ -36,26 +36,26 @@ export type DocCandidate = {
  *  `.in`, `.bak`) — a sentence-ending period (`.` + space/EOF) is not. */
 const PATH_CONTINUATION = /[\w/-]/
 
-const isPathContinuation = (haystack: string, afterIndex: number): boolean => {
-  const charAfter = haystack[afterIndex]
+const isPathContinuation = (text: string, afterIndex: number): boolean => {
+  const charAfter = text[afterIndex]
   if (charAfter === undefined) return false
   if (PATH_CONTINUATION.test(charAfter)) return true
   if (charAfter === ".") {
-    const charAfterDot = haystack[afterIndex + 1]
+    const charAfterDot = text[afterIndex + 1]
     return charAfterDot !== undefined && /\w/.test(charAfterDot)
   }
   return false
 }
 
-/** True when `needle` appears in `haystack` as a complete path token — not as
+/** True when `pathToken` appears in `text` as a complete path token — not as
  *  a prefix of a longer path (e.g. `greeter.ts` must not match `greeter.tsx`,
  *  and `Makefile` must not match `Makefile.in`). */
-const hasPathMention = (haystack: string, needle: string): boolean => {
+const hasPathMention = (text: string, pathToken: string): boolean => {
   let start = 0
   while (true) {
-    const index = haystack.indexOf(needle, start)
+    const index = text.indexOf(pathToken, start)
     if (index === -1) return false
-    if (!isPathContinuation(haystack, index + needle.length)) return true
+    if (!isPathContinuation(text, index + pathToken.length)) return true
     start = index + 1
   }
 }

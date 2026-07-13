@@ -372,7 +372,7 @@ export const createContextReader = (
     for (const scannedPath of scannedPaths) {
       if (changedPathSet.has(scannedPath)) continue
       const content = await readScannedFileOrNull(scannedPath)
-      if (content === null) continue
+      if (!content) continue
       // A NUL byte marks binary content — the same exclusion readChangedFiles
       // applies; a source-extension file can still carry one in a string literal
       if (content.includes("\x00")) continue
@@ -457,7 +457,7 @@ export const createContextReader = (
       })
     }
 
-    const priorityPathSet = new Set(priorityDocs.map((p) => posix.normalize(p)))
+    const priorityPathSet = new Set(priorityDocs.map((docPath) => posix.normalize(docPath)))
 
     // Phase 2: mention-matched docs with remaining budget
     const changedPathSet = new Set(changedPaths)
@@ -471,7 +471,7 @@ export const createContextReader = (
       if (priorityPathSet.has(posix.normalize(scannedPath))) continue
 
       const content = await readScannedFileOrNull(scannedPath)
-      if (content === null) continue
+      if (!content) continue
       if (content.includes("\x00")) continue
 
       const { mentionedPaths, fullPathCount, basenameCount } =
