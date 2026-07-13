@@ -1039,6 +1039,73 @@ describe("findRelatedDocs", () => {
     }
   })
 
+  it("skips an unreadable priority doc with a warn log", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": "# Unreadable",
+      "src/target.ts": "export const target = true",
+    })
+    await chmod(path.join(root, "README.md"), 0o000)
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        priorityDocs: ["README.md"],
+      })
+
+      expect(relatedDocs).toEqual([])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "priority doc unreadable — skipping",
+        data: { path: "README.md", error: expect.any(String) },
+      })
+    } finally {
+      await chmod(path.join(root, "README.md"), 0o644)
+      await cleanup()
+    }
+  })
+
+  it("skips a symlinked priority doc that resolves outside the workspace", async () => {
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), "umm-outside-"))
+    await writeFile(
+      path.join(outsideRoot, "secret.md"),
+      "runner secret",
+      "utf8",
+    )
+    const { root, cleanup } = await makeTempWorkspace({
+      "src/target.ts": "export const target = true",
+    })
+    await symlink(
+      path.join(outsideRoot, "secret.md"),
+      path.join(root, "README.md"),
+    )
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        priorityDocs: ["README.md"],
+      })
+
+      expect(relatedDocs).toEqual([])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message:
+          "priority doc resolves outside the reviewable workspace — skipping",
+        data: { path: "README.md" },
+      })
+    } finally {
+      await cleanup()
+      await rm(outsideRoot, { recursive: true, force: true })
+    }
+  })
+
   it("priority docs share the budget with mention-matched docs", async () => {
     const readmeContent = "# Project\n\n" + "x".repeat(400)
     const apiContent = "# API\n\nSee src/target.ts here."

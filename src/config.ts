@@ -41,8 +41,8 @@ const configSchema = z.object({
   priorityDocs: z.string().transform((value) =>
     value
       .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s !== ""),
+      .map((segment) => segment.trim())
+      .filter((segment) => segment !== ""),
   ),
   costSummary: z.boolean(),
   prNumberOverride: optionalPositiveInteger,

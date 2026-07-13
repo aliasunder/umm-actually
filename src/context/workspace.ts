@@ -223,6 +223,8 @@ export const createContextReader = (
   const readPriorityDocOrNull = async (
     docPath: string,
   ): Promise<string | null> => {
+    // Assigned inside a try because resolveUnderRoot throws on traversal —
+    // the escaping path must degrade to a skip, not crash the review.
     let absolutePath: string
     try {
       absolutePath = resolveUnderRoot(docPath)
@@ -233,7 +235,15 @@ export const createContextReader = (
       return null
     }
     try {
-      return await readFile(absolutePath, "utf8")
+      const safePath = await realPathIfSafe(absolutePath)
+      if (safePath === null) {
+        logger.warn(
+          "priority doc resolves outside the reviewable workspace — skipping",
+          { path: docPath },
+        )
+        return null
+      }
+      return await readFile(safePath, "utf8")
     } catch (readError) {
       if (isMissingFileError(readError)) {
         logger.info("priority doc not found — skipping", { path: docPath })
@@ -402,7 +412,7 @@ export const createContextReader = (
     if (rankedImporters.length > relatedFiles.length) {
       const excluded = rankedImporters
         .slice(relatedFiles.length)
-        .map((i) => i.path)
+        .map((importer) => importer.path)
       logger.info(
         "import-traced related files exceeded cap — excluded from context",
         { maxRelatedFiles: config.relatedFilesMax, excludedPaths: excluded },
@@ -412,9 +422,9 @@ export const createContextReader = (
     return relatedFiles
   }
 
-  /** Finds documentation files related to the change: priority docs first
-   *  (always included regardless of mentions), then mention-matched docs
-   *  ranked by specificity. Both tiers share the token budget. */
+  /** Finds documentation files related to the change: priority docs get
+   *  first claim on the token budget (regardless of mentions), then
+   *  mention-matched docs fill remaining slots ranked by specificity. */
   const findRelatedDocs = async ({
     changedPaths,
     budgetTokens,
@@ -501,7 +511,7 @@ export const createContextReader = (
     if (rankedCandidates.length > mentionDocs.length) {
       const excluded = rankedCandidates
         .slice(mentionDocs.length)
-        .map((c) => c.path)
+        .map((candidate) => candidate.path)
       logger.info("mention-matched docs exceeded cap — excluded from context", {
         maxRelatedDocs: config.relatedDocsMax,
         excludedPaths: excluded,
