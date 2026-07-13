@@ -44,7 +44,7 @@ export const extractAnchorKeys = (commentBodies: string[]): Set<string> => {
   const keys = new Set<string>()
   for (const body of commentBodies) {
     const match = ANCHOR_PATTERN.exec(body)
-    if (match?.[1] !== undefined) {
+    if (match?.[1]) {
       keys.add(match[1])
     }
   }

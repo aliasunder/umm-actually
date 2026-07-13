@@ -288,6 +288,7 @@ export const orchestrate = async (
   })
 
   // Step 13: post review
+  const totalCount = existingAnchors.size + newFindings.length
   let reviewUrl: string
 
   if (!isRerun) {
@@ -337,7 +338,7 @@ export const orchestrate = async (
     logger.info("re-run review posted", {
       reviewUrl,
       newFindingsCount: newFindings.length,
-      totalCount: existingAnchors.size + newFindings.length,
+      totalCount: totalCount,
     })
   } else {
     // Re-run with zero new findings
@@ -353,7 +354,7 @@ export const orchestrate = async (
     const summaryBody = buildRerunSummary({
       sha: prContext.headSha,
       newCount: newFindings.length,
-      totalCount: existingAnchors.size + newFindings.length,
+      totalCount: totalCount,
       model: modelUsed,
     })
     try {
