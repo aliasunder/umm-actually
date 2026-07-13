@@ -266,9 +266,12 @@ export const orchestrate = async (
       existingComments.map((comment) => comment.body),
     )
   } catch (fetchError) {
+    const errorDetail =
+      fetchError instanceof Error
+        ? `[${fetchError.name}]: ${fetchError.message}`
+        : String(fetchError)
     logger.warn("failed to fetch existing comments — treating as first run", {
-      error:
-        fetchError instanceof Error ? fetchError.message : String(fetchError),
+      error: errorDetail,
     })
     existingAnchors = new Set()
   }
@@ -364,11 +367,12 @@ export const orchestrate = async (
         anchor: RERUN_ANCHOR,
       })
     } catch (summaryError) {
+      const errorDetail =
+        summaryError instanceof Error
+          ? `[${summaryError.name}]: ${summaryError.message}`
+          : String(summaryError)
       logger.warn("failed to upsert summary comment", {
-        error:
-          summaryError instanceof Error
-            ? summaryError.message
-            : String(summaryError),
+        error: errorDetail,
       })
     }
   }
