@@ -30,6 +30,26 @@ export type DocCandidate = {
   mentionedChangedPaths: string[]
 }
 
+/** Characters that, when immediately following a path match, indicate the
+ *  match is a prefix of a longer path token (e.g. `greeter.ts` inside
+ *  `greeter.tsx`). Excludes `.` — periods commonly end sentences in prose. */
+const PATH_CONTINUATION = /[\w/-]/
+
+/** True when `needle` appears in `haystack` as a complete path token — not as
+ *  a prefix of a longer path (e.g. `greeter.ts` must not match `greeter.tsx`). */
+const hasPathMention = (haystack: string, needle: string): boolean => {
+  let start = 0
+  while (true) {
+    const index = haystack.indexOf(needle, start)
+    if (index === -1) return false
+    const charAfter = haystack[index + needle.length]
+    if (charAfter === undefined || !PATH_CONTINUATION.test(charAfter)) {
+      return true
+    }
+    start = index + 1
+  }
+}
+
 /** For each changed path, determine the best match type in the doc content.
  *  Full-path matches outrank basename matches — a path that matches by full
  *  path is NOT also counted as a basename match (no double-counting). */
@@ -42,7 +62,7 @@ export const findMentionedChangedPaths = (
   let basenameCount = 0
 
   for (const changedPath of changedPaths) {
-    if (docContent.includes(changedPath)) {
+    if (hasPathMention(docContent, changedPath)) {
       mentionedPaths.push(changedPath)
       fullPathCount++
       continue
@@ -56,14 +76,14 @@ export const findMentionedChangedPaths = (
       const segments = changedPath.split("/")
       if (segments.length < 2) continue
       const lastTwoSegments = segments.slice(-2).join("/")
-      if (docContent.includes(lastTwoSegments)) {
+      if (hasPathMention(docContent, lastTwoSegments)) {
         mentionedPaths.push(changedPath)
         basenameCount++
       }
       continue
     }
 
-    if (docContent.includes(basename)) {
+    if (hasPathMention(docContent, basename)) {
       mentionedPaths.push(changedPath)
       basenameCount++
     }
@@ -83,5 +103,6 @@ export const byMentionRelevance = (
   if (a.basenameCount !== b.basenameCount) {
     return b.basenameCount - a.basenameCount
   }
+  if (a.path === b.path) return 0
   return a.path < b.path ? -1 : 1
 }

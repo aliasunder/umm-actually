@@ -148,6 +148,45 @@ describe("findMentionedChangedPaths", () => {
       basenameCount: 0,
     })
   })
+
+  it("does not match a path that is a prefix of a longer path", () => {
+    const result = findMentionedChangedPaths(
+      "The component lives in src/greeter.tsx.",
+      ["src/greeter.ts"],
+    )
+
+    expect(result).toEqual({
+      mentionedPaths: [],
+      fullPathCount: 0,
+      basenameCount: 0,
+    })
+  })
+
+  it("does not match a basename that is a prefix of a longer filename", () => {
+    const result = findMentionedChangedPaths(
+      "See greeter.tsx for the component.",
+      ["src/greeter.ts"],
+    )
+
+    expect(result).toEqual({
+      mentionedPaths: [],
+      fullPathCount: 0,
+      basenameCount: 0,
+    })
+  })
+
+  it("matches a path followed by non-path punctuation", () => {
+    const result = findMentionedChangedPaths(
+      "Check `src/greeter.ts` for details.",
+      ["src/greeter.ts"],
+    )
+
+    expect(result).toEqual({
+      mentionedPaths: ["src/greeter.ts"],
+      fullPathCount: 1,
+      basenameCount: 0,
+    })
+  })
 })
 
 describe("byMentionRelevance", () => {
@@ -191,6 +230,13 @@ describe("byMentionRelevance", () => {
 
     expect(byMentionRelevance(a, b)).toBeLessThan(0)
     expect(byMentionRelevance(b, a)).toBeGreaterThan(0)
+  })
+
+  it("returns zero for equal candidates", () => {
+    const a = makeCandidate({ path: "docs/a.md", fullPathCount: 1 })
+    const b = makeCandidate({ path: "docs/a.md", fullPathCount: 1 })
+
+    expect(byMentionRelevance(a, b)).toBe(0)
   })
 })
 

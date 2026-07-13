@@ -238,7 +238,7 @@ export const orchestrate = async (
     (sum, file) => sum + estimateTokens(file.content),
     0,
   )
-  const docBudgetTokens = remainingTokens - relatedFilesTokens
+  const docBudgetTokens = Math.max(0, remainingTokens - relatedFilesTokens)
 
   const relatedDocs = config.traceRelatedFiles
     ? await contextReader.findRelatedDocs({
