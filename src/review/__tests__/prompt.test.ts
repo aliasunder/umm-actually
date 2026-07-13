@@ -67,9 +67,22 @@ describe("buildSystemPrompt", () => {
     expect(systemPrompt).toContain("For CI/workflow files")
     expect(systemPrompt).toContain('fill the "analysis" field')
     expect(systemPrompt).toContain("Severity rubric:")
+    expect(systemPrompt).toContain("OUTPUT DISCIPLINE")
+    expect(systemPrompt).toContain("HARD PROHIBITION")
     expect(systemPrompt).toContain(
       "new-file line numbers printed in\nthe annotated diff",
     )
+  })
+
+  it("places OUTPUT DISCIPLINE between SEVERITY_RUBRIC and ANCHORING_CONTRACT", () => {
+    const systemPrompt = buildSystemPrompt({ phase: combinedPhase })
+
+    const severityIndex = systemPrompt.indexOf("Severity rubric:")
+    const outputDisciplineIndex = systemPrompt.indexOf("OUTPUT DISCIPLINE")
+    const anchoringIndex = systemPrompt.indexOf("Line anchoring:")
+
+    expect(outputDisciplineIndex).toBeGreaterThan(severityIndex)
+    expect(anchoringIndex).toBeGreaterThan(outputDisciplineIndex)
   })
 })
 

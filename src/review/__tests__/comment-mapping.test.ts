@@ -215,7 +215,7 @@ The guard rejects only the exact empty string.
     })
 
     expect(mapped.comments[0]?.body).toContain(
-      "```diff\n-old line\n+new line\n```",
+      "<details>\n<summary>Suggested fix</summary>\n\n```diff\n-old line\n+new line\n```\n\n</details>",
     )
     expect(mapped.comments[1]?.body).not.toContain("```diff")
   })
@@ -230,7 +230,7 @@ The guard rejects only the exact empty string.
     })
 
     expect(mapped.comments[0]?.body).toContain(
-      `\`\`\`\`diff\n${fencedSuggestion}\n\`\`\`\``,
+      `<details>\n<summary>Suggested fix</summary>\n\n\`\`\`\`diff\n${fencedSuggestion}\n\`\`\`\`\n\n</details>`,
     )
   })
 })
@@ -282,7 +282,9 @@ _1 lower-severity finding(s) omitted by the max_findings cap: \`src/greeter.ts:5
       model: "anthropic/claude-sonnet-4-6",
     })
 
-    expect(body).toContain("```diff\n-old line\n+new line\n```")
+    expect(body).toContain(
+      "<details>\n<summary>Suggested fix</summary>\n\n```diff\n-old line\n+new line\n```\n\n</details>",
+    )
   })
 
   it("renders only attribution when there is nothing beyond the diff and no cap drops", () => {

@@ -38,7 +38,7 @@ const suggestionBlock = (finding: Finding): string => {
     0,
   )
   const fence = "`".repeat(Math.max(3, longestBacktickRun + 1))
-  return `\n\n${fence}diff\n${finding.suggestion}\n${fence}`
+  return `\n\n<details>\n<summary>Suggested fix</summary>\n\n${fence}diff\n${finding.suggestion}\n${fence}\n\n</details>`
 }
 
 const renderCommentBody = (

@@ -20,6 +20,7 @@ import {
   mapFindingsToReview,
   type ReviewComment,
 } from "../review/comment-mapping.js"
+import { filterNonFindings } from "../review/filter-non-findings.js"
 import { selectFindings } from "../review/select-findings.js"
 import { renderCostSummary } from "../openrouter/cost-summary.js"
 import {
@@ -29,6 +30,7 @@ import {
   type GenerateFindings,
   type ReviewContext,
 } from "../orchestrate.js"
+import { makeFinding } from "../review/__tests__/make-finding.js"
 import { createTestLogger } from "./test-logger.js"
 
 const sampleDiff = readFileSync(
@@ -651,6 +653,73 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.fetchPullRequestCalls).toHaveLength(0)
+    })
+
+    it("filters non-findings from LLM output", async () => {
+      const nonFinding = makeFinding({
+        line: 3,
+        failure_scenario: "N/A — this is correct behavior.",
+      })
+      const realFinding = makeFinding({
+        line: 145,
+        failure_scenario:
+          'register(" ", "value") succeeds and the entry is orphaned.',
+      })
+      const mixedResponse: ReviewResponse = {
+        analysis: "checked",
+        findings: [nonFinding, realFinding],
+      }
+
+      const mixedSelection = selectFindings({
+        findings: mixedResponse.findings,
+        severityThreshold: "low",
+        maxFindings: undefined,
+      })
+      const { findings: mixedFiltered } = filterNonFindings(
+        mixedSelection.selected,
+      )
+      const mixedMapped = mapFindingsToReview({
+        findings: mixedFiltered,
+        commentableByPath: fixtureCommentableByPath,
+      })
+      const mixedBody = buildReviewBody({
+        bodyFindings: mixedMapped.bodyFindings,
+        droppedByCap: mixedSelection.droppedByCap,
+        model: "test/model",
+        inlineCommentCount: mixedMapped.comments.length,
+      })
+      const mixedFallbackBody = buildReviewBody({
+        bodyFindings: mixedFiltered,
+        droppedByCap: mixedSelection.droppedByCap,
+        model: "test/model",
+        bodyFindingsHeading: "Findings",
+        bodyFindingsDescription:
+          "Inline comments were unavailable; all findings are listed here:",
+      })
+
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: { review: mixedResponse },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result).toEqual({
+        findingsCount: 1,
+        reviewUrl: "https://github.com/test/review/1",
+        modelUsed: "test/model",
+        skippedReason: "",
+        costSummaryMarkdown: expectedCostSummary,
+      })
+
+      expect(stubs.submitReviewCalls).toHaveLength(1)
+      expect(first(stubs.submitReviewCalls)).toEqual({
+        prNumber: fixturePrContext.prNumber,
+        commitId: fixturePrContext.headSha,
+        body: mixedBody,
+        comments: mixedMapped.comments,
+        fallbackBody: mixedFallbackBody,
+      })
     })
   })
 })

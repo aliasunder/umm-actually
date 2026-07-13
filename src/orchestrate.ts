@@ -30,6 +30,7 @@ import {
   generateDelimiterNonce,
   type PromptFile,
 } from "./review/prompt.js"
+import { filterNonFindings } from "./review/filter-non-findings.js"
 import { selectFindings } from "./review/select-findings.js"
 
 export type ReviewContext = {
@@ -246,11 +247,18 @@ export const orchestrate = async (
   const { modelUsed, attempts } = structuredResult
 
   // Step 12: select findings
-  const { selected, droppedByCap } = selectFindings({
+  const { selected: selectedByThreshold, droppedByCap } = selectFindings({
     findings: structuredResult.review.findings,
     severityThreshold,
     maxFindings: config.maxFindings,
   })
+
+  // Step 12.5: filter non-findings
+  const { findings: selected, droppedAsNonFinding } =
+    filterNonFindings(selectedByThreshold)
+  if (droppedAsNonFinding > 0) {
+    logger.info("filtered non-findings", { droppedAsNonFinding })
+  }
 
   // Step 13: post review
   const hasFindings = selected.length > 0
