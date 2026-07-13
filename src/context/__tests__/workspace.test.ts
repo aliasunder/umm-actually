@@ -650,17 +650,35 @@ describe("findRelatedDocs", () => {
     ])
   })
 
-  it("excludes the conventions file from results", async () => {
-    const { contextReader } = makeReader()
-
-    const relatedDocs = await contextReader.findRelatedDocs({
-      changedPaths: ["src/greeter.ts"],
-      budgetTokens: 100_000,
-      conventionsFile: "AGENTS.md",
+  it("excludes the conventions file from results even when it mentions changed paths", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "AGENTS.md": "# Conventions\n\nSee src/target.ts for the implementation.",
+      "docs/other.md": "# Other\n\nAlso references src/target.ts here.",
+      "src/target.ts": "export const target = true",
     })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader({ workspaceRoot: root }, logger)
 
-    const paths = relatedDocs.map((doc) => doc.path)
-    expect(paths).not.toContain("AGENTS.md")
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+      })
+
+      // docs/other.md proves the scan ran and found results; AGENTS.md is
+      // excluded despite mentioning the changed path
+      expect(relatedDocs).toEqual([
+        {
+          path: "docs/other.md",
+          content: "# Other\n\nAlso references src/target.ts here.",
+          includedAs: "full",
+          reason: "mentions src/target.ts",
+        },
+      ])
+    } finally {
+      await cleanup()
+    }
   })
 
   it("excludes changed docs from results", async () => {
@@ -700,7 +718,7 @@ describe("findRelatedDocs", () => {
     expect(relatedDocs).toEqual([])
   })
 
-  it("caps results at RELATED_DOCS_MAX", async () => {
+  it("caps results at RELATED_DOCS_MAX, keeping alphabetically first docs", async () => {
     const docFiles: Record<string, string> = {}
     for (let fileIndex = 0; fileIndex < RELATED_DOCS_MAX + 2; fileIndex++) {
       docFiles[`docs/doc-${fileIndex}.md`] =
@@ -719,7 +737,14 @@ describe("findRelatedDocs", () => {
         conventionsFile: "AGENTS.md",
       })
 
-      expect(relatedDocs).toHaveLength(RELATED_DOCS_MAX)
+      // All 6 docs have identical relevance (1 full-path mention each), so
+      // alphabetical tiebreaker determines which 4 survive the cap
+      expect(relatedDocs.map((doc) => doc.path)).toEqual([
+        "docs/doc-0.md",
+        "docs/doc-1.md",
+        "docs/doc-2.md",
+        "docs/doc-3.md",
+      ])
     } finally {
       await cleanup()
     }
@@ -746,10 +771,47 @@ describe("findRelatedDocs", () => {
     }
   })
 
-  it("ranks full-path mentions above basename-only mentions", async () => {
+  it("truncates the reason to three paths with an overflow count", async () => {
     const { root, cleanup } = await makeTempWorkspace({
-      "docs/basename-only.md": "# Basename\n\nSee greeter.ts for greetings.",
-      "docs/full-path.md": "# Full Path\n\nSee src/greeter.ts for greetings.",
+      "docs/mentions-many.md": [
+        "# Many mentions",
+        "See src/a.ts, src/b.ts, src/c.ts, and src/d.ts for details.",
+      ].join("\n"),
+      "src/a.ts": "export const a = 1",
+      "src/b.ts": "export const b = 2",
+      "src/c.ts": "export const c = 3",
+      "src/d.ts": "export const d = 4",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader({ workspaceRoot: root }, logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+      })
+
+      expect(relatedDocs).toEqual([
+        {
+          path: "docs/mentions-many.md",
+          content:
+            "# Many mentions\nSee src/a.ts, src/b.ts, src/c.ts, and src/d.ts for details.",
+          includedAs: "full",
+          reason: "mentions src/a.ts, src/b.ts, src/c.ts, +1 more",
+        },
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("ranks full-path mentions above basename-only mentions", async () => {
+    const basenameContent = "# Basename\n\nSee greeter.ts for greetings."
+    const fullPathContent = "# Full Path\n\nSee src/greeter.ts for greetings."
+    const { root, cleanup } = await makeTempWorkspace({
+      "docs/basename-only.md": basenameContent,
+      "docs/full-path.md": fullPathContent,
       "src/greeter.ts": "export const greet = () => 'hi'",
     })
     try {
@@ -762,8 +824,20 @@ describe("findRelatedDocs", () => {
         conventionsFile: "AGENTS.md",
       })
 
-      expect(relatedDocs[0]?.path).toBe("docs/full-path.md")
-      expect(relatedDocs[1]?.path).toBe("docs/basename-only.md")
+      expect(relatedDocs).toEqual([
+        {
+          path: "docs/full-path.md",
+          content: fullPathContent,
+          includedAs: "full",
+          reason: "mentions src/greeter.ts",
+        },
+        {
+          path: "docs/basename-only.md",
+          content: basenameContent,
+          includedAs: "full",
+          reason: "mentions src/greeter.ts",
+        },
+      ])
     } finally {
       await cleanup()
     }

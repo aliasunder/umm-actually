@@ -123,6 +123,19 @@ describe("findMentionedChangedPaths", () => {
     })
   })
 
+  it("skips a dot-prefixed file that does not match by full path", () => {
+    const result = findMentionedChangedPaths(
+      "The .gitignore file controls tracking.",
+      ["src/.gitignore"],
+    )
+
+    expect(result).toEqual({
+      mentionedPaths: [],
+      fullPathCount: 0,
+      basenameCount: 0,
+    })
+  })
+
   it("matches generic basename with parent directory context", () => {
     const result = findMentionedChangedPaths(
       "See src/config.ts for settings.",
@@ -186,9 +199,18 @@ describe("constants", () => {
     expect(DOC_EXTENSIONS).toEqual(new Set([".md", ".json"]))
   })
 
-  it("GENERIC_BASENAMES includes the expected common stems", () => {
-    for (const stem of ["index", "main", "config", "types", "utils"]) {
-      expect(GENERIC_BASENAMES.has(stem)).toBe(true)
-    }
+  it("GENERIC_BASENAMES contains the exact set of common stems", () => {
+    expect(GENERIC_BASENAMES).toEqual(
+      new Set([
+        "index",
+        "main",
+        "config",
+        "types",
+        "utils",
+        "helpers",
+        "constants",
+        "mod",
+      ]),
+    )
   })
 })
