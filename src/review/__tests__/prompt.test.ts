@@ -125,7 +125,7 @@ describe("buildUserPrompt", () => {
       '<file-abc123def456 path="src/caller.ts"',
     )
     const relatedDocsIndex = userPrompt.indexOf(
-      "Documentation files related to this change",
+      "Documentation that may describe changed code",
     )
     const docFileIndex = userPrompt.indexOf(
       '<file-abc123def456 path="docs/api.md"',
@@ -145,7 +145,7 @@ describe("buildUserPrompt", () => {
     const userPrompt = buildUserPrompt(makeUserPromptParts())
 
     expect(userPrompt).not.toContain(
-      "Documentation files related to this change",
+      "Documentation that may describe changed code",
     )
   })
 
@@ -163,7 +163,7 @@ describe("buildUserPrompt", () => {
     })
 
     expect(userPrompt).toContain(
-      "Documentation files related to this change (flag any claims that have become stale):",
+      "Documentation that may describe changed code (flag any claims that have become stale):",
     )
   })
 
