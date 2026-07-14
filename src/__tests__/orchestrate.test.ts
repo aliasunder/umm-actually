@@ -661,6 +661,99 @@ describe("orchestrate", () => {
       )
     })
 
+    it("passes priorityDocs as excludePaths to findRelatedDocs", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          traceRelatedFiles: true,
+          priorityDocs: ["README.md", "CHANGELOG.md"],
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.findRelatedDocsCalls).toHaveLength(1)
+      expect(first(stubs.findRelatedDocsCalls).excludePaths).toEqual([
+        "README.md",
+        "CHANGELOG.md",
+      ])
+    })
+
+    it("clamps doc budget to zero when related files exhaust remaining tokens", async () => {
+      const largeRelatedFileContent = "x".repeat(100)
+      const largeRelatedFileTokens = estimateTokens(largeRelatedFileContent)
+      const localPriorityDocsCalls: ReadPriorityDocsParams[] = []
+      const stubs = makeOrchestrateDeps({
+        config: { traceRelatedFiles: true },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [fixtureChangedFile],
+            remainingTokens: 10,
+          }),
+          findRelatedFiles: async () => [
+            {
+              path: "src/caller.ts",
+              content: largeRelatedFileContent,
+              includedAs: "full" as const,
+              reason: "imports src/greeter.ts",
+            },
+          ],
+          readPriorityDocs: async (params) => {
+            localPriorityDocsCalls.push(params)
+            return { files: [], remainingTokens: params.budgetTokens }
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(localPriorityDocsCalls).toHaveLength(1)
+      // remainingTokens (10) < relatedFilesTokens (25) → Math.max(0, -15) = 0
+      expect(first(localPriorityDocsCalls).budgetTokens).toBe(0)
+      expect(largeRelatedFileTokens).toBeGreaterThan(10)
+    })
+
+    it("passes budget remaining after readPriorityDocs to findRelatedDocs", async () => {
+      const priorityDocTokens = 500
+      const priorityDocContent = "x".repeat(priorityDocTokens * 4)
+      const expectedRemainingTokens = 20_000
+      const localDocCalls: FindRelatedDocsParams[] = []
+      const stubs = makeOrchestrateDeps({
+        config: { traceRelatedFiles: true, priorityDocs: ["README.md"] },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [fixtureChangedFile],
+            remainingTokens: expectedRemainingTokens,
+          }),
+          findRelatedFiles: async () => [],
+          readPriorityDocs: async (params) => ({
+            files: [
+              {
+                path: "README.md",
+                content: priorityDocContent,
+                includedAs: "full" as const,
+                reason: "priority documentation",
+              },
+            ],
+            remainingTokens: params.budgetTokens - priorityDocTokens,
+          }),
+          findRelatedDocs: async (params) => {
+            localDocCalls.push(params)
+            return []
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(localDocCalls).toHaveLength(1)
+      expect(first(localDocCalls).budgetTokens).toBe(
+        expectedRemainingTokens - priorityDocTokens,
+      )
+    })
+
     it("passes relatedDocs into generateFindings review context", async () => {
       const docFile: PromptFile = {
         path: "docs/api.md",

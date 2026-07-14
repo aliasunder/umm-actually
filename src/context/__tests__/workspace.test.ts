@@ -793,6 +793,36 @@ describe("findRelatedDocs", () => {
     }
   })
 
+  it("honors a custom relatedDocsMax cap", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "docs/a.md": "# A\n\nSee src/target.ts for details.",
+      "docs/b.md": "# B\n\nSee src/target.ts for details.",
+      "docs/c.md": "# C\n\nSee src/target.ts for details.",
+      "src/target.ts": "export const target = true",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(
+        { ...defaultConfig(root), relatedDocsMax: 2 },
+        logger,
+      )
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        excludePaths: [],
+      })
+
+      expect(relatedDocs.map((doc) => doc.path)).toEqual([
+        "docs/a.md",
+        "docs/b.md",
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
   it("skips binary doc files", async () => {
     const { root, cleanup } = await makeTempWorkspace({
       "docs/binary.md": "# Binary\n\nSee src/target.ts\x00binary data",
@@ -1010,7 +1040,7 @@ describe("readPriorityDocs", () => {
       expect(logger.messages).toContainEqual({
         level: "warn",
         message: "priority doc unreadable — skipping",
-        data: { path: "README.md", error: expect.any(String) },
+        data: { path: "README.md", error: expect.stringContaining("EACCES") },
       })
     } finally {
       await chmod(path.join(root, "README.md"), 0o644)
