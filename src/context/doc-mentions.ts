@@ -69,6 +69,9 @@ export const findMentionedChangedPaths = (
   changedPaths: string[],
 ): MentionResult => {
   const mentionedPaths: string[] = []
+  // Mutable accumulators — each path is scored independently, but the
+  // best-match-type logic (full-path vs basename) uses continue to skip
+  // the basename branch, so a reduce would need an early-exit mechanism.
   let fullPathCount = 0
   let basenameCount = 0
 
