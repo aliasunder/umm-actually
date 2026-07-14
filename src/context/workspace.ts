@@ -159,7 +159,7 @@ export const createContextReader = (
     const absolutePath = resolveUnderRoot(conventionsFile)
     try {
       const safePath = await realPathIfSafe(absolutePath)
-      if (safePath === null) {
+      if (!safePath) {
         throw new Error(`path escapes the workspace: ${conventionsFile}`)
       }
       return await readFile(safePath, "utf8")
@@ -184,7 +184,7 @@ export const createContextReader = (
   ): Promise<string | null> => {
     try {
       const safePath = await realPathIfSafe(absolutePath)
-      if (safePath !== null) return await readFile(safePath, "utf8")
+      if (safePath) return await readFile(safePath, "utf8")
       logger.warn(
         "changed file resolves outside the reviewable workspace — including as diff-only",
         { path: changedPath },
@@ -240,7 +240,7 @@ export const createContextReader = (
     }
     try {
       const safePath = await realPathIfSafe(absolutePath)
-      if (safePath === null) {
+      if (!safePath) {
         logger.warn(
           "priority doc resolves outside the reviewable workspace — skipping",
           { path: docPath },

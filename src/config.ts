@@ -42,7 +42,7 @@ const configSchema = z.object({
     value
       .split(",")
       .map((segment) => segment.trim())
-      .filter((segment) => segment !== ""),
+      .filter(Boolean),
   ),
   costSummary: z.boolean(),
   prNumberOverride: optionalPositiveInteger,

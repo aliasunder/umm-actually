@@ -38,11 +38,12 @@ const PATH_CONTINUATION = /[\w/-]/
 
 const isPathContinuation = (text: string, afterIndex: number): boolean => {
   const charAfter = text[afterIndex]
-  if (charAfter === undefined) return false
+  if (!charAfter) return false
   if (PATH_CONTINUATION.test(charAfter)) return true
   if (charAfter === ".") {
     const charAfterDot = text[afterIndex + 1]
-    return charAfterDot !== undefined && /\w/.test(charAfterDot)
+    if (!charAfterDot) return false
+    return /\w/.test(charAfterDot)
   }
   return false
 }

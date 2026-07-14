@@ -177,7 +177,9 @@ export const buildUserPrompt = ({
       ? ""
       : [
           "Documentation files related to this change (flag any claims that have become stale):",
-          ...relatedDocs.map((doc) => renderFileBlock(doc, delimiterNonce)),
+          ...relatedDocs.map((relatedDoc) =>
+            renderFileBlock(relatedDoc, delimiterNonce),
+          ),
         ].join("\n\n")
 
   const priorFindingsSection =
