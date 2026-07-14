@@ -3,6 +3,7 @@
   "number": 7,
   "pull_request": {
     "number": 7,
+    "node_id": "PR_kwDOMock7",
     "title": "feat: trim names before greeting",
     "body": "Trims whitespace from names and validates registry keys.",
     "head": {

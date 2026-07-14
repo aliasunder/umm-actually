@@ -4,6 +4,7 @@ import type { Logger } from "../logger.js"
 /** Everything the review pipeline needs to know about the PR under review. */
 export type PrContext = {
   prNumber: number
+  nodeId: string
   title: string
   body: string | null
   headSha: string
@@ -23,6 +24,7 @@ export type ResolvedEvent =
 const pullRequestEventSchema = z.object({
   pull_request: z.object({
     number: z.int().positive(),
+    node_id: z.string(),
     title: z.string(),
     body: z.string().nullable(),
     head: z.object({ sha: z.string(), ref: z.string() }),
@@ -65,6 +67,7 @@ export const resolvePullRequestEvent = (
       kind: "complete",
       context: {
         prNumber: pullRequest.number,
+        nodeId: pullRequest.node_id,
         title: pullRequest.title,
         body: pullRequest.body,
         headSha: pullRequest.head.sha,

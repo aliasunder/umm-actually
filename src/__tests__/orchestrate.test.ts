@@ -59,6 +59,7 @@ const fixtureReviewResponse: ReviewResponse = JSON.parse(
 
 const fixturePrContext: PrContext = {
   prNumber: 7,
+  nodeId: "PR_kwDOMock7",
   title: "feat: trim names before greeting",
   body: "Trims whitespace from names and validates registry keys.",
   headSha: "abc123def456abc123def456abc123def456abc1",
@@ -191,6 +192,7 @@ type RecordingStubs = {
   deps: OrchestrateDeps
   fetchPullRequestCalls: { prNumber: number }[]
   fetchDiffCalls: { prNumber: number }[]
+  requestBotReviewCalls: { prNodeId: string }[]
   submitReviewCalls: SubmitReviewParams[]
   fetchReviewCommentsCalls: { prNumber: number }[]
   upsertSummaryCommentCalls: UpsertSummaryCommentParams[]
@@ -228,6 +230,8 @@ const makeOrchestrateDeps = (
     ...overrides.fixtureResult,
   }
 
+  const requestBotReviewCalls: { prNodeId: string }[] = []
+
   const githubClient: GithubClient = {
     fetchPullRequest: async (params) => {
       fetchPullRequestCalls.push(params)
@@ -236,6 +240,9 @@ const makeOrchestrateDeps = (
     fetchDiff: async (params) => {
       fetchDiffCalls.push(params)
       return { kind: "ok" as const, diff: sampleDiff }
+    },
+    requestBotReview: async (params) => {
+      requestBotReviewCalls.push(params)
     },
     submitReview: async (params) => {
       submitReviewCalls.push(params)
@@ -292,6 +299,7 @@ const makeOrchestrateDeps = (
     deps,
     fetchPullRequestCalls,
     fetchDiffCalls,
+    requestBotReviewCalls,
     submitReviewCalls,
     fetchReviewCommentsCalls,
     upsertSummaryCommentCalls,
@@ -679,6 +687,38 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.fetchPullRequestCalls).toHaveLength(0)
+    })
+
+    it("continues when requestBotReview throws", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          requestBotReview: async () => {
+            throw new Error("GraphQL viewer query failed")
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(result.reviewUrl).toBe("https://github.com/test/review/1")
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "failed to request bot review",
+        data: { error: "[Error]: GraphQL viewer query failed" },
+      })
+    })
+
+    it("calls requestBotReview with the PR node ID", async () => {
+      const stubs = makeOrchestrateDeps()
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.requestBotReviewCalls).toEqual([
+        { prNodeId: "PR_kwDOMock7" },
+      ])
     })
 
     it("filters non-findings from LLM output", async () => {
