@@ -221,6 +221,7 @@ export const buildReviewBody = ({
   inlineCommentCount = 0,
   bodyFindingsHeading = "Findings beyond the diff",
   bodyFindingsDescription = "These are in code the changes touch or depend on, outside the diff's line ranges:",
+  contextNotes = [],
 }: {
   bodyFindings: Finding[]
   droppedByCap: Finding[]
@@ -228,6 +229,7 @@ export const buildReviewBody = ({
   inlineCommentCount?: number
   bodyFindingsHeading?: string
   bodyFindingsDescription?: string
+  contextNotes?: string[]
 }): string => {
   const summaryLine =
     inlineCommentCount > 0 && bodyFindings.length === 0
@@ -244,16 +246,33 @@ export const buildReviewBody = ({
       ? ""
       : `_${droppedByCap.length} lower-severity finding(s) omitted by the max_findings cap: ${droppedByCap.map((finding) => `\`${finding.file}:${finding.line}\``).join(", ")}_`
 
+  const contextSection =
+    contextNotes.length === 0
+      ? ""
+      : `<details>\n<summary>Context notes</summary>\n\n${contextNotes.map((note) => `- ${note}`).join("\n")}\n\n</details>`
+
   const attribution = `---\n*umm-actually · ${model}*`
 
-  return [summaryLine, beyondDiffSection, capNote, attribution]
+  return [summaryLine, beyondDiffSection, capNote, contextSection, attribution]
     .filter((section) => section !== "")
     .join("\n\n")
 }
 
 /** Body for the confirmation review posted when nothing crossed the threshold. */
-export const buildZeroFindingsBody = ({ model }: { model: string }): string =>
-  `Reviewed — no findings above threshold.\n\n---\n*umm-actually · ${model}*`
+export const buildZeroFindingsBody = ({
+  model,
+  contextNotes = [],
+}: {
+  model: string
+  contextNotes?: string[]
+}): string => {
+  const contextSection =
+    contextNotes.length === 0
+      ? ""
+      : `\n\n<details>\n<summary>Context notes</summary>\n\n${contextNotes.map((note) => `- ${note}`).join("\n")}\n\n</details>`
+
+  return `Reviewed — no findings above threshold.${contextSection}\n\n---\n*umm-actually · ${model}*`
+}
 
 export const RERUN_ANCHOR = "<!-- umm-actually-rerun -->"
 

@@ -19,6 +19,11 @@ import {
 
 export type BudgetedFiles = { files: PromptFile[]; remainingTokens: number }
 
+export type RelatedFilesResult = {
+  files: PromptFile[]
+  excludedByCapPaths: string[]
+}
+
 export type ContextReader = {
   /** null when the file is missing — the prompt renders a "(no conventions…)" block. */
   readConventions: (params: {
@@ -31,7 +36,7 @@ export type ContextReader = {
   findRelatedFiles: (params: {
     changedPaths: string[]
     budgetTokens: number
-  }) => Promise<PromptFile[]>
+  }) => Promise<RelatedFilesResult>
   readPriorityDocs: (params: {
     priorityDocs: string[]
     budgetTokens: number
@@ -41,7 +46,7 @@ export type ContextReader = {
     budgetTokens: number
     conventionsFile: string
     excludePaths: string[]
-  }) => Promise<PromptFile[]>
+  }) => Promise<RelatedFilesResult>
 }
 
 const SCANNABLE_EXTENSIONS = new Set([
@@ -368,7 +373,7 @@ export const createContextReader = (
   }: {
     changedPaths: string[]
     budgetTokens: number
-  }): Promise<PromptFile[]> => {
+  }): Promise<RelatedFilesResult> => {
     const changedPathSet = new Set(changedPaths)
     const scannedPaths = await scanWorkspaceSourceFiles()
 
@@ -399,9 +404,14 @@ export const createContextReader = (
     const relatedFiles: PromptFile[] = []
     // Sequential state by design: rank order is priority order, and an
     // over-budget candidate is skipped so smaller candidates still fit.
+    // capBreakIndex tracks where the cap (not budget) stopped processing.
     let remainingTokens = budgetTokens
-    for (const importer of rankedImporters) {
-      if (relatedFiles.length >= config.relatedFilesMax) break
+    let capBreakIndex: number | undefined
+    for (const [importerIndex, importer] of rankedImporters.entries()) {
+      if (relatedFiles.length >= config.relatedFilesMax) {
+        capBreakIndex = importerIndex
+        break
+      }
       const contentTokens = estimateTokens(importer.content)
       if (contentTokens > remainingTokens) continue
       remainingTokens -= contentTokens
@@ -413,17 +423,22 @@ export const createContextReader = (
       })
     }
 
-    if (rankedImporters.length > relatedFiles.length) {
-      const excluded = rankedImporters
-        .slice(relatedFiles.length)
-        .map((importer) => importer.path)
+    const excludedByCapPaths =
+      capBreakIndex !== undefined
+        ? rankedImporters.slice(capBreakIndex).map((importer) => importer.path)
+        : []
+
+    if (excludedByCapPaths.length > 0) {
       logger.info(
         "import-traced related files exceeded cap — excluded from context",
-        { maxRelatedFiles: config.relatedFilesMax, excludedPaths: excluded },
+        {
+          maxRelatedFiles: config.relatedFilesMax,
+          excludedPaths: excludedByCapPaths,
+        },
       )
     }
 
-    return relatedFiles
+    return { files: relatedFiles, excludedByCapPaths }
   }
 
   /** Reads explicitly named documentation files, independent of mention
@@ -470,7 +485,7 @@ export const createContextReader = (
     budgetTokens: number
     conventionsFile: string
     excludePaths: string[]
-  }): Promise<PromptFile[]> => {
+  }): Promise<RelatedFilesResult> => {
     const changedPathSet = new Set(changedPaths)
     const normalizedConventionsFile = posix.normalize(conventionsFile)
     const excludePathSet = new Set(
@@ -530,17 +545,21 @@ export const createContextReader = (
       })
     }
 
-    if (capBreakIndex !== undefined) {
-      const excluded = rankedCandidates
-        .slice(capBreakIndex)
-        .map((candidate) => candidate.path)
+    const excludedByCapPaths =
+      capBreakIndex !== undefined
+        ? rankedCandidates
+            .slice(capBreakIndex)
+            .map((candidate) => candidate.path)
+        : []
+
+    if (excludedByCapPaths.length > 0) {
       logger.info("mention-matched docs exceeded cap — excluded from context", {
         maxRelatedDocs: config.relatedDocsMax,
-        excludedPaths: excluded,
+        excludedPaths: excludedByCapPaths,
       })
     }
 
-    return relatedDocs
+    return { files: relatedDocs, excludedByCapPaths }
   }
 
   return {

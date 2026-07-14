@@ -86,11 +86,13 @@ const buildReviewPayload = ({
   commentableByPath,
   droppedByCap,
   modelUsed,
+  contextNotes,
 }: {
   findings: Finding[]
   commentableByPath: Map<string, CommentableFile>
   droppedByCap: Finding[]
   modelUsed: string
+  contextNotes: string[]
 }): ReviewPayload => {
   const { comments, bodyFindings } = mapFindingsToReview({
     findings,
@@ -101,6 +103,7 @@ const buildReviewPayload = ({
     droppedByCap,
     model: modelUsed,
     inlineCommentCount: comments.length,
+    contextNotes,
   })
   const fallbackBody = buildReviewBody({
     bodyFindings: findings,
@@ -109,6 +112,7 @@ const buildReviewPayload = ({
     bodyFindingsHeading: "Findings",
     bodyFindingsDescription:
       "Inline comments were unavailable; all findings are listed here:",
+    contextNotes,
   })
   return { body, comments, fallbackBody }
 }
@@ -227,13 +231,14 @@ export const orchestrate = async (
       budgetTokens: fileBudgetTokens,
     })
 
-  const relatedFiles = config.traceRelatedFiles
+  const relatedFilesResult = config.traceRelatedFiles
     ? await contextReader.findRelatedFiles({
         changedPaths,
         budgetTokens: remainingTokens,
       })
-    : []
+    : { files: [], excludedByCapPaths: [] }
 
+  const relatedFiles = relatedFilesResult.files
   const relatedFilesTokens = relatedFiles.reduce(
     (sum, file) => sum + estimateTokens(file.content),
     0,
@@ -246,16 +251,36 @@ export const orchestrate = async (
       budgetTokens: docBudgetTokens,
     })
 
-  const mentionMatchedDocs = config.traceRelatedFiles
+  const mentionMatchedDocsResult = config.traceRelatedFiles
     ? await contextReader.findRelatedDocs({
         changedPaths,
         budgetTokens: docRemainingTokens,
         conventionsFile: config.conventionsFile,
         excludePaths: config.priorityDocs,
       })
-    : []
+    : { files: [], excludedByCapPaths: [] }
 
-  const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocs]
+  const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
+
+  const contextNotes: string[] = []
+  const skippedPriorityDocs = config.priorityDocs.filter(
+    (docPath) => !priorityDocFiles.some((file) => file.path === docPath),
+  )
+  if (skippedPriorityDocs.length > 0) {
+    contextNotes.push(
+      `Priority docs not included: ${skippedPriorityDocs.map((docPath) => `\`${docPath}\``).join(", ")} (missing, unreadable, or over budget)`,
+    )
+  }
+  if (relatedFilesResult.excludedByCapPaths.length > 0) {
+    contextNotes.push(
+      `${relatedFilesResult.excludedByCapPaths.length} related file(s) excluded by \`max_related_files\` cap: ${relatedFilesResult.excludedByCapPaths.map((filePath) => `\`${filePath}\``).join(", ")}`,
+    )
+  }
+  if (mentionMatchedDocsResult.excludedByCapPaths.length > 0) {
+    contextNotes.push(
+      `${mentionMatchedDocsResult.excludedByCapPaths.length} related doc(s) excluded by \`max_related_docs\` cap: ${mentionMatchedDocsResult.excludedByCapPaths.map((docPath) => `\`${docPath}\``).join(", ")}`,
+    )
+  }
 
   // Step 10–11: generate findings (V1: single combined phase)
   const phase = phases[0]
@@ -332,11 +357,15 @@ export const orchestrate = async (
             commentableByPath,
             droppedByCap,
             modelUsed,
+            contextNotes,
           })
         : {
-            body: buildZeroFindingsBody({ model: modelUsed }),
+            body: buildZeroFindingsBody({ model: modelUsed, contextNotes }),
             comments: [],
-            fallbackBody: buildZeroFindingsBody({ model: modelUsed }),
+            fallbackBody: buildZeroFindingsBody({
+              model: modelUsed,
+              contextNotes,
+            }),
           }
 
     const { url: reviewUrl } = await githubClient.submitReview({
@@ -370,6 +399,7 @@ export const orchestrate = async (
       commentableByPath,
       droppedByCap: [],
       modelUsed,
+      contextNotes,
     })
 
     const result = await githubClient.submitReview({
