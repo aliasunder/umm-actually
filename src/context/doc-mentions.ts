@@ -48,15 +48,18 @@ const isPathContinuation = (text: string, afterIndex: number): boolean => {
   return false
 }
 
-/** True when `pathToken` appears in `text` as a complete path token — not as
- *  a prefix of a longer path (e.g. `greeter.ts` must not match `greeter.tsx`,
- *  and `Makefile` must not match `Makefile.in`). */
+/** True when `pathToken` appears in `text` as a complete path token — not
+ *  embedded in a longer path. Checks both boundaries: `src/greeter.ts` must
+ *  not match inside `lib/src/greeter.ts` (left) or `greeter.tsx` (right). */
 const hasPathMention = (text: string, pathToken: string): boolean => {
   let start = 0
   while (true) {
     const index = text.indexOf(pathToken, start)
     if (index === -1) return false
-    if (!isPathContinuation(text, index + pathToken.length)) return true
+    const charBefore = text[index - 1]
+    const leftBoundary = !charBefore || !PATH_CONTINUATION.test(charBefore)
+    const rightBoundary = !isPathContinuation(text, index + pathToken.length)
+    if (leftBoundary && rightBoundary) return true
     start = index + 1
   }
 }

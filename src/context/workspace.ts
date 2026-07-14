@@ -506,9 +506,14 @@ export const createContextReader = (
     const relatedDocs: PromptFile[] = []
     // Sequential state by design: rank order is priority order, and an
     // over-budget candidate is skipped so smaller candidates still fit.
+    // capBreakIndex tracks where the cap (not budget) stopped processing.
     let remainingTokens = budgetTokens
-    for (const candidate of rankedCandidates) {
-      if (relatedDocs.length >= config.relatedDocsMax) break
+    let capBreakIndex: number | undefined
+    for (const [candidateIndex, candidate] of rankedCandidates.entries()) {
+      if (relatedDocs.length >= config.relatedDocsMax) {
+        capBreakIndex = candidateIndex
+        break
+      }
       const contentTokens = estimateTokens(candidate.content)
       if (contentTokens > remainingTokens) continue
       remainingTokens -= contentTokens
@@ -525,9 +530,9 @@ export const createContextReader = (
       })
     }
 
-    if (rankedCandidates.length > relatedDocs.length) {
+    if (capBreakIndex !== undefined) {
       const excluded = rankedCandidates
-        .slice(relatedDocs.length)
+        .slice(capBreakIndex)
         .map((candidate) => candidate.path)
       logger.info("mention-matched docs exceeded cap — excluded from context", {
         maxRelatedDocs: config.relatedDocsMax,

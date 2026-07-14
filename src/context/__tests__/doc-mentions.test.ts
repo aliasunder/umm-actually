@@ -213,6 +213,19 @@ describe("findMentionedChangedPaths", () => {
     })
   })
 
+  it("does not match a path that is a suffix of a longer path", () => {
+    const result = findMentionedChangedPaths(
+      "The file lives at lib/src/greeter.ts in the monorepo.",
+      ["src/greeter.ts"],
+    )
+
+    expect(result).toEqual({
+      mentionedPaths: [],
+      fullPathCount: 0,
+      basenameCount: 0,
+    })
+  })
+
   it("matches an extensionless path followed by a sentence-ending period", () => {
     const result = findMentionedChangedPaths(
       "Check the Makefile. It has the targets.",
