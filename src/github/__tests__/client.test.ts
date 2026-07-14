@@ -309,7 +309,7 @@ describe("requestBotReview", () => {
     await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
 
     expect(stub.graphqlCalls).toHaveLength(2)
-    expect(stub.graphqlCalls[0]?.query).toContain("viewer")
+    expect(stub.graphqlCalls[0]?.query).toBe("query { viewer { login } }")
     expect(stub.getByUsernameCalls).toEqual([{ username: "umm-actually[bot]" }])
     expect(stub.graphqlCalls[1]?.parameters).toEqual({
       prId: "PR_kwDOMock7",
@@ -348,6 +348,66 @@ describe("requestBotReview", () => {
     await expect(
       client.requestBotReview({ prNodeId: "PR_kwDOMock7" }),
     ).rejects.toThrow("token expired")
+  })
+
+  it("propagates errors from the getByUsername REST call", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [{ data: { viewer: { login: "umm-actually" } } }],
+      getByUsernameResponses: [{ error: makeStatusError(404) }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.requestBotReview({ prNodeId: "PR_kwDOMock7" }),
+    ).rejects.toThrow("HTTP 404")
+  })
+
+  it("propagates errors from the requestReviews mutation", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually" } } },
+        { error: new Error("insufficient permissions") },
+      ],
+      getByUsernameResponses: [
+        {
+          data: {
+            node_id: "BOT_kgDOEewBdQ",
+            login: "umm-actually[bot]",
+            type: "Bot",
+          },
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.requestBotReview({ prNodeId: "PR_kwDOMock7" }),
+    ).rejects.toThrow("insufficient permissions")
+  })
+
+  it("rejects a non-Bot user type", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [{ data: { viewer: { login: "some-app" } } }],
+      getByUsernameResponses: [
+        {
+          data: {
+            node_id: "MDQ6VXNlcjEyMzQ=",
+            login: "some-app[bot]",
+            type: "User",
+          },
+        },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
+
+    expect(stub.graphqlCalls).toHaveLength(1)
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "could not resolve bot user for review request",
+      data: { botLogin: "some-app[bot]" },
+    })
   })
 })
 

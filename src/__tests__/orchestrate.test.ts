@@ -701,8 +701,8 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      expect(result.findingsCount).toBeGreaterThanOrEqual(0)
-      expect(result.reviewUrl).toBeTruthy()
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(result.reviewUrl).toBe("https://github.com/test/review/1")
       expect(logger.messages).toContainEqual({
         level: "warn",
         message: "failed to request bot review",

@@ -201,7 +201,11 @@ export const createGithubClient = (
     }
   }
 
-  const botNodeIdSchema = z.object({ node_id: z.string(), login: z.string() })
+  const botNodeIdSchema = z.object({
+    node_id: z.string(),
+    login: z.string(),
+    type: z.literal("Bot"),
+  })
 
   const requestBotReview = async ({
     prNodeId,
