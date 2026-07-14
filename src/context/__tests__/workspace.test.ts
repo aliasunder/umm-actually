@@ -373,7 +373,7 @@ describe("findRelatedFiles", () => {
       budgetTokens: 100_000,
     })
 
-    expect(relatedFiles).toEqual([
+    expect(relatedFiles.files).toEqual([
       {
         path: "src/caller.ts",
         content: callerContent,
@@ -403,7 +403,7 @@ describe("findRelatedFiles", () => {
       budgetTokens: 100_000,
     })
 
-    expect(relatedFiles).toEqual([
+    expect(relatedFiles.files).toEqual([
       {
         path: "src/barrel-consumer.ts",
         content: barrelConsumerContent,
@@ -421,7 +421,7 @@ describe("findRelatedFiles", () => {
       budgetTokens: 100_000,
     })
 
-    expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
+    expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual([
       "src/consumer.ts",
       "src/__tests__/greeter.test.ts",
     ])
@@ -435,7 +435,7 @@ describe("findRelatedFiles", () => {
       budgetTokens: 100_000,
     })
 
-    expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
+    expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual([
       "src/importers/importer-1.ts",
       "src/importers/importer-2.ts",
       "src/importers/importer-3.ts",
@@ -455,7 +455,7 @@ describe("findRelatedFiles", () => {
       budgetTokens: estimateTokens(consumerContent),
     })
 
-    expect(relatedFiles).toEqual([
+    expect(relatedFiles.files).toEqual([
       {
         path: "src/consumer.ts",
         content: consumerContent,
@@ -481,9 +481,9 @@ describe("findRelatedFiles", () => {
         budgetTokens: 1_000_000,
       })
 
-      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
-        "small.ts",
-      ])
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
+        ["small.ts"],
+      )
     } finally {
       await cleanup()
     }
@@ -509,9 +509,9 @@ describe("findRelatedFiles", () => {
         budgetTokens: 100_000,
       })
 
-      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
-        "src/legit.ts",
-      ])
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
+        ["src/legit.ts"],
+      )
     } finally {
       await cleanup()
     }
@@ -535,9 +535,9 @@ describe("findRelatedFiles", () => {
       })
 
       // readable.ts still arriving proves the scan carried on past the failure
-      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
-        "readable.ts",
-      ])
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
+        ["readable.ts"],
+      )
       expect(logger.messages).toContainEqual({
         level: "warn",
         message: "scanned file unreadable — excluding from related files",
@@ -569,9 +569,9 @@ describe("findRelatedFiles", () => {
         budgetTokens: 100_000,
       })
 
-      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
-        "clean.ts",
-      ])
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
+        ["clean.ts"],
+      )
     } finally {
       await cleanup()
     }
@@ -617,7 +617,7 @@ describe("findRelatedDocs", () => {
       excludePaths: [],
     })
 
-    expect(relatedDocs).toEqual([
+    expect(relatedDocs.files).toEqual([
       {
         path: "docs/api.md",
         content: apiDocContent,
@@ -637,7 +637,7 @@ describe("findRelatedDocs", () => {
       excludePaths: [],
     })
 
-    expect(relatedDocs).toEqual([
+    expect(relatedDocs.files).toEqual([
       {
         path: "docs/api.md",
         content: apiDocContent,
@@ -657,7 +657,7 @@ describe("findRelatedDocs", () => {
       excludePaths: [],
     })
 
-    expect(relatedDocs).toEqual([
+    expect(relatedDocs.files).toEqual([
       {
         path: "docs/config.json",
         content: configJsonContent,
@@ -686,7 +686,7 @@ describe("findRelatedDocs", () => {
 
       // docs/other.md proves the scan ran and found results; AGENTS.md is
       // excluded despite mentioning the changed path
-      expect(relatedDocs).toEqual([
+      expect(relatedDocs.files).toEqual([
         {
           path: "docs/other.md",
           content: "# Other\n\nAlso references src/target.ts here.",
@@ -717,7 +717,7 @@ describe("findRelatedDocs", () => {
         excludePaths: [],
       })
 
-      expect(relatedDocs).toEqual([
+      expect(relatedDocs.files).toEqual([
         {
           path: "docs/retained.md",
           content: retainedContent,
@@ -740,7 +740,7 @@ describe("findRelatedDocs", () => {
       excludePaths: [],
     })
 
-    expect(relatedDocs).toEqual([])
+    expect(relatedDocs.files).toEqual([])
   })
 
   it("respects the token budget", async () => {
@@ -753,7 +753,7 @@ describe("findRelatedDocs", () => {
       excludePaths: [],
     })
 
-    expect(relatedDocs).toEqual([])
+    expect(relatedDocs.files).toEqual([])
   })
 
   it("caps results at DEFAULT_RELATED_DOCS_MAX, keeping alphabetically first docs", async () => {
@@ -782,11 +782,15 @@ describe("findRelatedDocs", () => {
 
       // All 6 docs have identical relevance (1 full-path mention each), so
       // alphabetical tiebreaker determines which 4 survive the cap
-      expect(relatedDocs.map((doc) => doc.path)).toEqual([
+      expect(relatedDocs.files.map((doc) => doc.path)).toEqual([
         "docs/doc-0.md",
         "docs/doc-1.md",
         "docs/doc-2.md",
         "docs/doc-3.md",
+      ])
+      expect(relatedDocs.excludedByCapPaths).toEqual([
+        "docs/doc-4.md",
+        "docs/doc-5.md",
       ])
     } finally {
       await cleanup()
@@ -814,7 +818,7 @@ describe("findRelatedDocs", () => {
         excludePaths: [],
       })
 
-      expect(relatedDocs.map((doc) => doc.path)).toEqual([
+      expect(relatedDocs.files.map((doc) => doc.path)).toEqual([
         "docs/a.md",
         "docs/b.md",
       ])
@@ -839,7 +843,7 @@ describe("findRelatedDocs", () => {
         excludePaths: [],
       })
 
-      expect(relatedDocs).toEqual([])
+      expect(relatedDocs.files).toEqual([])
     } finally {
       await cleanup()
     }
@@ -867,7 +871,7 @@ describe("findRelatedDocs", () => {
         excludePaths: [],
       })
 
-      expect(relatedDocs).toEqual([
+      expect(relatedDocs.files).toEqual([
         {
           path: "docs/mentions-many.md",
           content:
@@ -900,7 +904,7 @@ describe("findRelatedDocs", () => {
         excludePaths: [],
       })
 
-      expect(relatedDocs).toEqual([
+      expect(relatedDocs.files).toEqual([
         {
           path: "docs/full-path.md",
           content: fullPathContent,
@@ -936,7 +940,7 @@ describe("findRelatedDocs", () => {
         excludePaths: ["README.md"],
       })
 
-      expect(relatedDocs).toEqual([])
+      expect(relatedDocs.files).toEqual([])
     } finally {
       await cleanup()
     }

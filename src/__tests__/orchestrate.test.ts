@@ -150,7 +150,7 @@ const baseConfig: ActionConfig = {
   maxScanBytes: 262144,
   maxRelatedFiles: 8,
   maxRelatedDocs: 4,
-  priorityDocs: ["README.md"],
+  priorityDocs: [],
   costSummary: true,
   prNumberOverride: undefined,
 }
@@ -290,7 +290,7 @@ const makeOrchestrateDeps = (
     },
     findRelatedFiles: async (params) => {
       findRelatedFilesCalls.push(params)
-      return []
+      return { files: [], excludedByCapPaths: [] }
     },
     readPriorityDocs: async (params) => {
       readPriorityDocsCalls.push(params)
@@ -298,7 +298,7 @@ const makeOrchestrateDeps = (
     },
     findRelatedDocs: async (params) => {
       findRelatedDocsCalls.push(params)
-      return []
+      return { files: [], excludedByCapPaths: [] }
     },
     ...overrides.contextReader,
   }
@@ -579,7 +579,7 @@ describe("orchestrate", () => {
           }),
           findRelatedFiles: async (params) => {
             localFindRelatedFilesCalls.push(params)
-            return []
+            return { files: [], excludedByCapPaths: [] }
           },
         },
       })
@@ -622,17 +622,20 @@ describe("orchestrate", () => {
             files: [fixtureChangedFile],
             remainingTokens: expectedRemainingTokens,
           }),
-          findRelatedFiles: async () => [
-            {
-              path: "src/caller.ts",
-              content: relatedFileContent,
-              includedAs: "full" as const,
-              reason: "imports src/greeter.ts",
-            },
-          ],
+          findRelatedFiles: async () => ({
+            files: [
+              {
+                path: "src/caller.ts",
+                content: relatedFileContent,
+                includedAs: "full" as const,
+                reason: "imports src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
           findRelatedDocs: async (params) => {
             localDocCalls.push(params)
-            return []
+            return { files: [], excludedByCapPaths: [] }
           },
         },
       })
@@ -690,14 +693,17 @@ describe("orchestrate", () => {
             files: [fixtureChangedFile],
             remainingTokens: 10,
           }),
-          findRelatedFiles: async () => [
-            {
-              path: "src/caller.ts",
-              content: largeRelatedFileContent,
-              includedAs: "full" as const,
-              reason: "imports src/greeter.ts",
-            },
-          ],
+          findRelatedFiles: async () => ({
+            files: [
+              {
+                path: "src/caller.ts",
+                content: largeRelatedFileContent,
+                includedAs: "full" as const,
+                reason: "imports src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
           readPriorityDocs: async (params) => {
             localPriorityDocsCalls.push(params)
             return { files: [], remainingTokens: params.budgetTokens }
@@ -726,7 +732,10 @@ describe("orchestrate", () => {
             files: [fixtureChangedFile],
             remainingTokens: expectedRemainingTokens,
           }),
-          findRelatedFiles: async () => [],
+          findRelatedFiles: async () => ({
+            files: [],
+            excludedByCapPaths: [],
+          }),
           readPriorityDocs: async (params) => ({
             files: [
               {
@@ -740,7 +749,7 @@ describe("orchestrate", () => {
           }),
           findRelatedDocs: async (params) => {
             localDocCalls.push(params)
-            return []
+            return { files: [], excludedByCapPaths: [] }
           },
         },
       })
@@ -764,7 +773,10 @@ describe("orchestrate", () => {
       const stubs = makeOrchestrateDeps({
         config: { traceRelatedFiles: true },
         contextReader: {
-          findRelatedDocs: async () => [docFile],
+          findRelatedDocs: async () => ({
+            files: [docFile],
+            excludedByCapPaths: [],
+          }),
         },
       })
       const logger = createTestLogger()
