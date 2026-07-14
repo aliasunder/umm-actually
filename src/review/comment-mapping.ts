@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto"
 import type { CommentableFile } from "../diff/commentable-lines.js"
 import type { Finding } from "./finding.js"
 
@@ -28,28 +27,58 @@ const SNAP_DISTANCE = 3
 /** Matches `<!-- umm-actually:KEY -->` -- the hidden HTML anchor in each inline finding. Group 1 is the dedup key. */
 const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->/
 
-/** Deterministic dedup key for a finding — file + category + 8-char title hash. */
-export const computeAnchorKey = (
-  finding: Pick<Finding, "file" | "category" | "title">,
-): string => {
-  const titleHash = createHash("sha256")
-    .update(finding.title)
-    .digest("hex")
-    .slice(0, 8)
-  return `${finding.file}:${finding.category}:${titleHash}`
-}
+/**
+ * Findings within this many lines of an existing anchor in the same
+ * file+category are treated as duplicates. LLMs drift on the exact
+ * line they report for the same conceptual issue across runs.
+ */
+const LINE_PROXIMITY = 20
 
-/** Extracts dedup keys from existing inline comment bodies. */
-export const extractAnchorKeys = (commentBodies: string[]): Set<string> => {
-  const keys = new Set<string>()
+export type AnchorEntry = { file: string; category: string; line: number }
+
+/** Deterministic dedup key for a finding — file + category + line. */
+export const computeAnchorKey = (
+  finding: Pick<Finding, "file" | "category" | "line">,
+): string => `${finding.file}:${finding.category}:${finding.line}`
+
+/**
+ * Parses anchor keys from existing inline comment bodies.
+ * Skips old-format keys (title-hash) that don't end in a numeric line.
+ */
+export const extractAnchors = (commentBodies: string[]): AnchorEntry[] => {
+  const entries: AnchorEntry[] = []
   for (const body of commentBodies) {
     const match = ANCHOR_PATTERN.exec(body)
-    if (match?.[1]) {
-      keys.add(match[1])
-    }
+    if (!match?.[1]) continue
+    const key = match[1]
+    const lastColon = key.lastIndexOf(":")
+    if (lastColon === -1) continue
+    const lineStr = key.slice(lastColon + 1)
+    const line = Number(lineStr)
+    if (!Number.isInteger(line) || line <= 0) continue
+    const rest = key.slice(0, lastColon)
+    const catColon = rest.lastIndexOf(":")
+    if (catColon === -1) continue
+    entries.push({
+      file: rest.slice(0, catColon),
+      category: rest.slice(catColon + 1),
+      line,
+    })
   }
-  return keys
+  return entries
 }
+
+/** True when a finding is within LINE_PROXIMITY of an existing anchor. */
+export const isDuplicateFinding = (
+  finding: Pick<Finding, "file" | "category" | "line">,
+  anchors: AnchorEntry[],
+): boolean =>
+  anchors.some(
+    (a) =>
+      a.file === finding.file &&
+      a.category === finding.category &&
+      Math.abs(a.line - finding.line) <= LINE_PROXIMITY,
+  )
 
 const findingTag = (finding: Finding): string =>
   `**[${finding.severity}/${finding.category}]** ${finding.title}`

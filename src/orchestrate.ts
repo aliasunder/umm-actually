@@ -19,8 +19,8 @@ import {
   buildRerunSummary,
   buildReviewBody,
   buildZeroFindingsBody,
-  computeAnchorKey,
-  extractAnchorKeys,
+  extractAnchors,
+  isDuplicateFinding,
   mapFindingsToReview,
   RERUN_ANCHOR,
   type ReviewComment,
@@ -276,12 +276,12 @@ export const orchestrate = async (
   })
 
   // Step 12.5: cross-run dedup
-  let existingAnchors: Set<string>
+  let existingAnchors: { file: string; category: string; line: number }[]
   try {
     const existingComments = await githubClient.fetchReviewComments({
       prNumber: prContext.prNumber,
     })
-    existingAnchors = extractAnchorKeys(
+    existingAnchors = extractAnchors(
       existingComments.map((comment) => comment.body),
     )
   } catch (fetchError) {
@@ -292,16 +292,16 @@ export const orchestrate = async (
     logger.warn("failed to fetch existing comments — treating as first run", {
       error: errorDetail,
     })
-    existingAnchors = new Set()
+    existingAnchors = []
   }
 
-  const isRerun = existingAnchors.size > 0
-  const isNewFinding = (finding: Finding): boolean =>
-    !existingAnchors.has(computeAnchorKey(finding))
-  const newFindings = isRerun ? selected.filter(isNewFinding) : selected
+  const isRerun = existingAnchors.length > 0
+  const newFindings = isRerun
+    ? selected.filter((f) => !isDuplicateFinding(f, existingAnchors))
+    : selected
 
   logger.info("cross-run dedup", {
-    existingAnchorCount: existingAnchors.size,
+    existingAnchorCount: existingAnchors.length,
     selectedCount: selected.length,
     newFindingsCount: newFindings.length,
     isRerun,
@@ -347,7 +347,7 @@ export const orchestrate = async (
   }
 
   // Re-run — post only new findings, upsert summary comment
-  const totalCount = existingAnchors.size + newFindings.length
+  const totalCount = existingAnchors.length + newFindings.length
   let reviewUrl = ""
 
   if (newFindings.length > 0) {

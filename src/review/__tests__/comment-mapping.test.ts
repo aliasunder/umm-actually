@@ -5,7 +5,8 @@ import {
   buildReviewBody,
   buildZeroFindingsBody,
   computeAnchorKey,
-  extractAnchorKeys,
+  extractAnchors,
+  isDuplicateFinding,
   mapFindingsToReview,
   RERUN_ANCHOR,
 } from "../comment-mapping.js"
@@ -50,7 +51,7 @@ The guard rejects only the exact empty string.
 
 **Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
 
-<!-- umm-actually:src/greeter.ts:correctness:ffdf51bc -->`,
+<!-- umm-actually:src/greeter.ts:correctness:145 -->`,
       },
     ])
   })
@@ -347,19 +348,24 @@ describe("buildZeroFindingsBody", () => {
 })
 
 describe("computeAnchorKey", () => {
-  it("returns a deterministic key from file, category, and title hash", () => {
-    const finding = makeFinding()
-    const key = computeAnchorKey(finding)
+  it("returns file:category:line", () => {
+    const key = computeAnchorKey(makeFinding())
 
-    expect(key).toBe("src/greeter.ts:correctness:ffdf51bc")
-    expect(computeAnchorKey(finding)).toBe(key)
+    expect(key).toBe("src/greeter.ts:correctness:145")
   })
 
-  it("produces a different key when the title differs", () => {
+  it("produces a different key when the line differs", () => {
+    const keyA = computeAnchorKey(makeFinding({ line: 10 }))
+    const keyB = computeAnchorKey(makeFinding({ line: 20 }))
+
+    expect(keyA).not.toBe(keyB)
+  })
+
+  it("produces the same key regardless of title", () => {
     const keyA = computeAnchorKey(makeFinding({ title: "Bug A" }))
     const keyB = computeAnchorKey(makeFinding({ title: "Bug B" }))
 
-    expect(keyA).not.toBe(keyB)
+    expect(keyA).toBe(keyB)
   })
 
   it("produces a different key when the file differs", () => {
@@ -377,34 +383,122 @@ describe("computeAnchorKey", () => {
   })
 })
 
-describe("extractAnchorKeys", () => {
-  it("extracts keys from comment bodies with anchors", () => {
+describe("extractAnchors", () => {
+  it("parses line-based anchor keys from comment bodies", () => {
     const bodies = [
-      "Some comment body\n\n<!-- umm-actually:src/a.ts:correctness:abcd1234 -->",
-      "Another body\n\n<!-- umm-actually:src/b.ts:security:efgh5678 -->",
+      "Some comment body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
+      "Another body\n\n<!-- umm-actually:src/b.ts:security:100 -->",
     ]
 
-    const keys = extractAnchorKeys(bodies)
+    const anchors = extractAnchors(bodies)
 
-    expect(keys).toEqual(
-      new Set(["src/a.ts:correctness:abcd1234", "src/b.ts:security:efgh5678"]),
-    )
+    expect(anchors).toEqual([
+      { file: "src/a.ts", category: "correctness", line: 42 },
+      { file: "src/b.ts", category: "security", line: 100 },
+    ])
+  })
+
+  it("skips old-format title-hash keys", () => {
+    const bodies = [
+      "Old format\n\n<!-- umm-actually:src/a.ts:correctness:abcd1234 -->",
+      "New format\n\n<!-- umm-actually:src/b.ts:security:55 -->",
+    ]
+
+    const anchors = extractAnchors(bodies)
+
+    expect(anchors).toEqual([
+      { file: "src/b.ts", category: "security", line: 55 },
+    ])
   })
 
   it("ignores bodies without anchors", () => {
     const bodies = [
       "A comment from a human reviewer",
       "CodeRabbit: some finding here",
-      "Body with\n\n<!-- umm-actually:src/a.ts:correctness:abcd1234 -->",
+      "Body with\n\n<!-- umm-actually:src/a.ts:correctness:10 -->",
     ]
 
-    const keys = extractAnchorKeys(bodies)
+    const anchors = extractAnchors(bodies)
 
-    expect(keys).toEqual(new Set(["src/a.ts:correctness:abcd1234"]))
+    expect(anchors).toEqual([
+      { file: "src/a.ts", category: "correctness", line: 10 },
+    ])
   })
 
-  it("returns an empty set for an empty array", () => {
-    expect(extractAnchorKeys([])).toEqual(new Set())
+  it("returns an empty array for an empty input", () => {
+    expect(extractAnchors([])).toEqual([])
+  })
+})
+
+describe("isDuplicateFinding", () => {
+  it("matches a finding at the exact same location", () => {
+    const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
+
+    expect(
+      isDuplicateFinding(
+        { file: "src/a.ts", category: "correctness", line: 50 },
+        anchors,
+      ),
+    ).toBe(true)
+  })
+
+  it("matches a finding within LINE_PROXIMITY (20) lines", () => {
+    const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
+
+    expect(
+      isDuplicateFinding(
+        { file: "src/a.ts", category: "correctness", line: 65 },
+        anchors,
+      ),
+    ).toBe(true)
+    expect(
+      isDuplicateFinding(
+        { file: "src/a.ts", category: "correctness", line: 35 },
+        anchors,
+      ),
+    ).toBe(true)
+  })
+
+  it("rejects a finding beyond LINE_PROXIMITY", () => {
+    const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
+
+    expect(
+      isDuplicateFinding(
+        { file: "src/a.ts", category: "correctness", line: 71 },
+        anchors,
+      ),
+    ).toBe(false)
+  })
+
+  it("rejects when file differs", () => {
+    const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
+
+    expect(
+      isDuplicateFinding(
+        { file: "src/b.ts", category: "correctness", line: 50 },
+        anchors,
+      ),
+    ).toBe(false)
+  })
+
+  it("rejects when category differs", () => {
+    const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
+
+    expect(
+      isDuplicateFinding(
+        { file: "src/a.ts", category: "security", line: 50 },
+        anchors,
+      ),
+    ).toBe(false)
+  })
+
+  it("returns false for empty anchors", () => {
+    expect(
+      isDuplicateFinding(
+        { file: "src/a.ts", category: "correctness", line: 50 },
+        [],
+      ),
+    ).toBe(false)
   })
 })
 

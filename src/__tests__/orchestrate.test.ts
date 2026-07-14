@@ -888,7 +888,7 @@ describe("orchestrate", () => {
           fetchReviewComments: async () => [
             {
               path: "src/a.ts",
-              body: "body\n\n<!-- umm-actually:src/a.ts:correctness:aaaaaaaa -->",
+              body: "body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
             },
           ],
         },
@@ -931,7 +931,7 @@ describe("orchestrate", () => {
           fetchReviewComments: async () => [
             {
               path: "src/a.ts",
-              body: "body\n\n<!-- umm-actually:src/a.ts:correctness:aaaaaaaa -->",
+              body: "body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
             },
           ],
           upsertSummaryComment: async () => {
