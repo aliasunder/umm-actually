@@ -202,8 +202,8 @@ export const createGithubClient = (
   }
 
   const botNodeIdSchema = z.object({
-    node_id: z.string(),
-    login: z.string(),
+    node_id: z.string().min(1),
+    login: z.string().min(1),
     type: z.literal("Bot"),
   })
 
