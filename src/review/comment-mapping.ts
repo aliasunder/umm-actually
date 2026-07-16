@@ -236,9 +236,9 @@ const classifyFinding = (
 /**
  * Splits findings into inline review comments (anchored to commentable diff
  * lines) and body findings (traced regressions / pre-existing bugs outside
- * the diff — expected output, rendered in the review body). GitHub rejects
- * the whole review on one bad anchor, so anything not verifiably anchorable
- * goes to the body.
+ * the diff — expected output, posted as individual issue comments). GitHub
+ * rejects the whole review on one bad anchor, so anything not verifiably
+ * anchorable is kept out of the inline batch.
  */
 export const mapFindingsToReview = ({
   findings,
@@ -260,77 +260,69 @@ export const mapFindingsToReview = ({
   return { comments, bodyFindings }
 }
 
-const renderBodyFinding = (finding: Finding): string =>
-  `- ${findingTag(finding)} — \`${finding.file}:${finding.line}\` _(confidence: ${finding.confidence})_
-  ${finding.description}
-  **Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}`
+/** Invisible body for the review that carries inline findings — the review
+ *  exists purely as the batching vehicle (one notification, no timeline
+ *  prose); all narration lives in the status comment. An HTML comment
+ *  satisfies GitHub's body requirement while rendering as nothing. */
+export const REVIEW_MARKER = "<!-- umm-actually-review -->"
 
-/** The review's top-level body: summary, body findings section, cap note, attribution. */
-export const buildReviewBody = ({
-  bodyFindings,
+/** Identifies the single updatable status comment. */
+export const STATUS_ANCHOR = "<!-- umm-actually-status -->"
+
+/** A beyond-diff finding posted as its own issue comment — a new comment is
+ *  a visible event to PR watchers, unlike an in-place status update. Carries
+ *  its dedup anchor like any inline comment. */
+export const renderStandaloneFinding = (finding: Finding): string => {
+  return `${findingTag(finding)} _(confidence: ${finding.confidence})_
+
+\`${finding.file}:${finding.line}\` — beyond the diff's line ranges, in code the changes touch or depend on.
+
+${finding.description}
+
+**Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}
+
+<!-- umm-actually:${computeAnchorKey(finding)} -->`
+}
+
+/** The single always-upserted status comment — the receipt that a run
+ *  happened and the running cross-run state. Never carries finding text;
+ *  findings are their own comments. */
+export const buildStatusComment = ({
+  sha,
+  isFirstRun,
+  newCount,
+  totalCount,
   droppedByCap,
   model,
-  inlineCommentCount = 0,
-  bodyFindingsHeading = "Findings beyond the diff",
-  bodyFindingsDescription = "These are in code the changes touch or depend on, outside the diff's line ranges:",
 }: {
-  bodyFindings: Finding[]
+  sha: string
+  isFirstRun: boolean
+  newCount: number
+  totalCount: number
   droppedByCap: Finding[]
   model: string
-  inlineCommentCount?: number
-  bodyFindingsHeading?: string
-  bodyFindingsDescription?: string
 }): string => {
-  const summaryLine =
-    inlineCommentCount > 0 && bodyFindings.length === 0
-      ? `Reviewed — ${inlineCommentCount} finding(s) posted as inline comments.`
-      : ""
-
-  const beyondDiffSection =
-    bodyFindings.length === 0
-      ? ""
-      : `### ${bodyFindingsHeading}\n\n${bodyFindingsDescription}\n\n${bodyFindings.map(renderBodyFinding).join("\n\n")}`
-
+  const shaShort = sha.slice(0, 7)
+  const verb = isFirstRun ? "reviewed" : "re-reviewed"
+  const zeroLine = isFirstRun
+    ? "No findings above threshold."
+    : `No new findings (${totalCount} tracked finding(s) across all runs).`
+  const findingsLine =
+    newCount > 0
+      ? `${newCount} new finding(s) posted (${totalCount} tracked finding(s) across all runs).`
+      : zeroLine
   const capNote =
     droppedByCap.length === 0
       ? ""
       : `_${droppedByCap.length} lower-severity finding(s) omitted by the max_findings cap: ${droppedByCap.map((finding) => `\`${finding.file}:${finding.line}\``).join(", ")}_`
-
-  const attribution = `---\n*umm-actually · ${model}*`
-
-  return [summaryLine, beyondDiffSection, capNote, attribution]
-    .filter(Boolean)
-    .join("\n\n")
-}
-
-/** Body for the confirmation review posted when nothing crossed the threshold. */
-export const buildZeroFindingsBody = ({ model }: { model: string }): string =>
-  `Reviewed — no findings above threshold.\n\n---\n*umm-actually · ${model}*`
-
-export const RERUN_ANCHOR = "<!-- umm-actually-rerun -->"
-
-/** Body for the updatable issue comment posted on re-runs. */
-export const buildRerunSummary = ({
-  sha,
-  newCount,
-  totalCount,
-  model,
-}: {
-  sha: string
-  newCount: number
-  totalCount: number
-  model: string
-}): string => {
-  const shaShort = sha.slice(0, 7)
-  const findingsLine =
-    newCount > 0
-      ? `${newCount} new finding(s) posted as inline comments (${totalCount} tracked inline finding(s) across all reviews).`
-      : `No new findings (${totalCount} tracked inline finding(s) from prior reviews).`
   const attribution = `---\n*umm-actually · ${model}*`
   return [
-    RERUN_ANCHOR,
-    `**umm-actually** re-reviewed at \`${shaShort}\``,
+    STATUS_ANCHOR,
+    `**umm-actually** ${verb} at \`${shaShort}\``,
     findingsLine,
+    capNote,
     attribution,
-  ].join("\n\n")
+  ]
+    .filter(Boolean)
+    .join("\n\n")
 }

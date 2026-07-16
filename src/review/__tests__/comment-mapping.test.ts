@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest"
 import type { CommentableFile } from "../../diff/commentable-lines.js"
 import {
-  buildRerunSummary,
-  buildReviewBody,
-  buildZeroFindingsBody,
+  buildStatusComment,
   computeAnchorKey,
   extractAnchors,
   isDuplicateFinding,
   mapFindingsToReview,
-  RERUN_ANCHOR,
+  renderStandaloneFinding,
+  STATUS_ANCHOR,
   type AnchorSource,
 } from "../comment-mapping.js"
 import { makeFinding } from "./make-finding.js"
@@ -258,60 +257,41 @@ The guard rejects only the exact empty string.
   })
 })
 
-describe("buildReviewBody", () => {
-  it("renders beyond-diff findings, the cap note, and attribution in full", () => {
-    const beyondDiffFinding = makeFinding({
-      file: "src/untouched.ts",
-      line: 30,
-      severity: "high",
-      category: "correctness",
-      title: "Caller assumes non-null return",
-      description: "The caller dereferences the result without a null check.",
-      failure_scenario: "greet(null) returns null and the caller throws.",
-      confidence: "medium",
-    })
-    const cappedFinding = makeFinding({ file: "src/greeter.ts", line: 5 })
+describe("renderStandaloneFinding", () => {
+  it("renders the full finding block with location note and anchor", () => {
+    const finding = makeFinding({ file: "src/untouched.ts", line: 30 })
 
-    const body = buildReviewBody({
-      bodyFindings: [beyondDiffFinding],
-      droppedByCap: [cappedFinding],
-      model: "anthropic/claude-sonnet-4-6",
-    })
+    const body = renderStandaloneFinding(finding)
 
-    expect(body).toBe(`### Findings beyond the diff
+    expect(body)
+      .toBe(`**[medium/correctness]** Whitespace-only keys pass the empty-key guard _(confidence: high)_
 
-These are in code the changes touch or depend on, outside the diff's line ranges:
+\`src/untouched.ts:30\` — beyond the diff's line ranges, in code the changes touch or depend on.
 
-- **[high/correctness]** Caller assumes non-null return — \`src/untouched.ts:30\` _(confidence: medium)_
-  The caller dereferences the result without a null check.
-  **Failure scenario:** greet(null) returns null and the caller throws.
+The guard rejects only the exact empty string.
 
-_1 lower-severity finding(s) omitted by the max_findings cap: \`src/greeter.ts:5\`_
+**Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
 
----
-*umm-actually · anthropic/claude-sonnet-4-6*`)
+<!-- umm-actually:src/untouched.ts:correctness:30 -->`)
   })
 
-  it("renders the suggestion fence on beyond-diff findings", () => {
-    const findingWithSuggestion = makeFinding({
+  it("renders the suggestion fence between failure scenario and anchor", () => {
+    const finding = makeFinding({
       file: "src/untouched.ts",
       line: 30,
       suggestion: "-old line\n+new line",
     })
 
-    const body = buildReviewBody({
-      bodyFindings: [findingWithSuggestion],
-      droppedByCap: [],
-      model: "anthropic/claude-sonnet-4-6",
-    })
+    const body = renderStandaloneFinding(finding)
 
-    expect(body).toBe(`### Findings beyond the diff
+    expect(body)
+      .toBe(`**[medium/correctness]** Whitespace-only keys pass the empty-key guard _(confidence: high)_
 
-These are in code the changes touch or depend on, outside the diff's line ranges:
+\`src/untouched.ts:30\` — beyond the diff's line ranges, in code the changes touch or depend on.
 
-- **[medium/correctness]** Whitespace-only keys pass the empty-key guard — \`src/untouched.ts:30\` _(confidence: high)_
-  The guard rejects only the exact empty string.
-  **Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
+The guard rejects only the exact empty string.
+
+**Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
 
 <details>
 <summary>Suggested fix</summary>
@@ -323,27 +303,83 @@ These are in code the changes touch or depend on, outside the diff's line ranges
 
 </details>
 
----
-*umm-actually · anthropic/claude-sonnet-4-6*`)
+<!-- umm-actually:src/untouched.ts:correctness:30 -->`)
   })
+})
 
-  it("renders only attribution when there is nothing beyond the diff and no cap drops", () => {
-    const body = buildReviewBody({
-      bodyFindings: [],
+describe("buildStatusComment", () => {
+  it("renders a first run with findings", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      newCount: 2,
+      totalCount: 2,
       droppedByCap: [],
       model: "anthropic/claude-sonnet-4-6",
     })
 
-    expect(body).toBe("---\n*umm-actually · anthropic/claude-sonnet-4-6*")
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\n2 new finding(s) posted (2 tracked finding(s) across all runs).\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+    )
   })
-})
 
-describe("buildZeroFindingsBody", () => {
-  it("renders the confirmation body with attribution", () => {
-    expect(
-      buildZeroFindingsBody({ model: "anthropic/claude-sonnet-4-6" }),
-    ).toBe(
-      "Reviewed — no findings above threshold.\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*",
+  it("renders a clean first run", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      newCount: 0,
+      totalCount: 0,
+      droppedByCap: [],
+      model: "anthropic/claude-sonnet-4-6",
+    })
+
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\nNo findings above threshold.\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+    )
+  })
+
+  it("renders a re-run with new findings", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: false,
+      newCount: 1,
+      totalCount: 5,
+      droppedByCap: [],
+      model: "anthropic/claude-sonnet-4-6",
+    })
+
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** re-reviewed at \`abc123d\`\n\n1 new finding(s) posted (5 tracked finding(s) across all runs).\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+    )
+  })
+
+  it("renders a re-run with no new findings", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: false,
+      newCount: 0,
+      totalCount: 3,
+      droppedByCap: [],
+      model: "anthropic/claude-sonnet-4-6",
+    })
+
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** re-reviewed at \`abc123d\`\n\nNo new findings (3 tracked finding(s) across all runs).\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+    )
+  })
+
+  it("includes the cap note when findings were dropped", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      newCount: 1,
+      totalCount: 1,
+      droppedByCap: [makeFinding({ file: "src/greeter.ts", line: 5 })],
+      model: "anthropic/claude-sonnet-4-6",
+    })
+
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\n1 new finding(s) posted (1 tracked finding(s) across all runs).\n\n_1 lower-severity finding(s) omitted by the max_findings cap: \`src/greeter.ts:5\`_\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
     )
   })
 })
@@ -582,53 +618,31 @@ describe("isDuplicateFinding", () => {
   })
 })
 
-describe("buildRerunSummary", () => {
-  it("renders the summary with new findings", () => {
-    const summary = buildRerunSummary({
-      sha: "abc123def456abc1",
-      newCount: 2,
-      totalCount: 5,
-      model: "anthropic/claude-sonnet-4-6",
-    })
-
-    expect(summary).toBe(
-      `${RERUN_ANCHOR}\n\n**umm-actually** re-reviewed at \`abc123d\`\n\n2 new finding(s) posted as inline comments (5 tracked inline finding(s) across all reviews).\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
-    )
-  })
-
-  it("renders the summary with zero new findings", () => {
-    const summary = buildRerunSummary({
-      sha: "abc123def456abc1",
-      newCount: 0,
-      totalCount: 3,
-      model: "anthropic/claude-sonnet-4-6",
-    })
-
-    expect(summary).toBe(
-      `${RERUN_ANCHOR}\n\n**umm-actually** re-reviewed at \`abc123d\`\n\nNo new findings (3 tracked inline finding(s) from prior reviews).\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
-    )
-  })
-
+describe("buildStatusComment — anchor and sha handling", () => {
   it("truncates the sha to 7 characters", () => {
-    const summary = buildRerunSummary({
+    const body = buildStatusComment({
       sha: "0000000999999",
+      isFirstRun: true,
       newCount: 1,
       totalCount: 1,
+      droppedByCap: [],
       model: "test/model",
     })
 
-    expect(summary).toContain("`0000000`")
-    expect(summary).not.toContain("999999")
+    expect(body).toContain("`0000000`")
+    expect(body).not.toContain("999999")
   })
 
-  it("starts with the rerun anchor for upsert detection", () => {
-    const summary = buildRerunSummary({
+  it("starts with the status anchor for upsert detection", () => {
+    const body = buildStatusComment({
       sha: "abc123d",
+      isFirstRun: false,
       newCount: 0,
       totalCount: 0,
+      droppedByCap: [],
       model: "test/model",
     })
 
-    expect(summary.startsWith(RERUN_ANCHOR)).toBe(true)
+    expect(body.startsWith(STATUS_ANCHOR)).toBe(true)
   })
 })

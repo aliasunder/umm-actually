@@ -43,13 +43,6 @@ export type OctokitLike = {
         per_page?: number
         page?: number
       }): Promise<{ data: unknown }>
-      listReviews(params: {
-        owner: string
-        repo: string
-        pull_number: number
-        per_page?: number
-        page?: number
-      }): Promise<{ data: unknown }>
     }
     issues: {
       listComments(params: {
@@ -94,6 +87,11 @@ export type ExistingReviewComment = {
   originalLine: number | null
 }
 
+/** Outcome of posting the inline-findings review: `rejected` is GitHub's
+ *  422 on the comment anchors — the caller falls back to issue comments. */
+export type FindingsReviewResult =
+  { kind: "ok"; url: string } | { kind: "rejected" }
+
 export type GithubClient = {
   fetchPullRequest: (params: { prNumber: number }) => Promise<PrContext>
   fetchDiff: (params: { prNumber: number }) => Promise<DiffFetchResult>
@@ -102,15 +100,23 @@ export type GithubClient = {
     prNumber: number
     commitId: string
     body: string
-    comments: ReviewComment[]
-    /** Precomputed by the caller (pure code); posted body-only if GitHub
-     *  rejects the inline anchors. */
-    fallbackBody: string
   }) => Promise<SubmitReviewResult>
+  postFindingsReview: (params: {
+    prNumber: number
+    commitId: string
+    body: string
+    comments: ReviewComment[]
+  }) => Promise<FindingsReviewResult>
+  postIssueComment: (params: {
+    prNumber: number
+    body: string
+  }) => Promise<{ url: string }>
   fetchBotReviewComments: (params: {
     prNumber: number
   }) => Promise<ExistingReviewComment[]>
-  hasPriorBotReview: (params: { prNumber: number }) => Promise<boolean>
+  fetchBotIssueComments: (params: {
+    prNumber: number
+  }) => Promise<{ body: string }[]>
   upsertSummaryComment: (params: {
     prNumber: number
     body: string
@@ -143,15 +149,12 @@ const reviewCommentListSchema = z.array(
   }),
 )
 
-const reviewListSchema = z.array(
-  z.object({ user: z.object({ login: z.string() }).nullable() }),
-)
-
 const issueCommentListSchema = z.array(
   z.object({
     id: z.int().positive(),
     body: z.string(),
     html_url: z.string(),
+    user: z.object({ login: z.string() }).nullable(),
   }),
 )
 
@@ -286,19 +289,43 @@ export const createGithubClient = (
     logger.info("requested bot review", { login: parsed.data.login })
   }
 
+  /** Body-only review — the vehicle for skip notices. */
   const submitReview = async ({
     prNumber,
     commitId,
     body,
+  }: {
+    prNumber: number
+    commitId: string
+    body: string
+  }): Promise<SubmitReviewResult> => {
+    const response = await octokit.rest.pulls.createReview({
+      owner,
+      repo,
+      pull_number: prNumber,
+      commit_id: commitId,
+      event: "COMMENT",
+      body,
+    })
+    return { url: parseReviewUrl(response.data), usedFallbackBody: false }
+  }
+
+  /** The inline-findings batch: one review carrying every anchorable
+   *  finding, body kept to the caller's invisible marker so the timeline
+   *  shows a bare "reviewed" event. GitHub answers 422 when an anchor is
+   *  not part of the diff — e.g. a force-push racing the run — reported as
+   *  `rejected` so the caller can re-route the findings to issue comments. */
+  const postFindingsReview = async ({
+    prNumber,
+    commitId,
+    body,
     comments,
-    fallbackBody,
   }: {
     prNumber: number
     commitId: string
     body: string
     comments: ReviewComment[]
-    fallbackBody: string
-  }): Promise<SubmitReviewResult> => {
+  }): Promise<FindingsReviewResult> => {
     try {
       const response = await octokit.rest.pulls.createReview({
         owner,
@@ -307,34 +334,37 @@ export const createGithubClient = (
         commit_id: commitId,
         event: "COMMENT",
         body,
-        ...(comments.length > 0 ? { comments } : {}),
+        comments,
       })
-      return { url: parseReviewUrl(response.data), usedFallbackBody: false }
+      return { kind: "ok", url: parseReviewUrl(response.data) }
     } catch (submitError) {
-      // GitHub answers 422 when an inline anchor is not part of the diff —
-      // e.g. a force-push racing the run. Only that case gets the body-only
-      // retry; a 422 on a zero-comment review is a different bug and rethrows.
-      const inlineAnchorsRejected =
-        comments.length > 0 && errorStatus(submitError) === 422
-      if (!inlineAnchorsRejected) throw submitError
-
-      logger.warn(
-        "inline comments rejected (422) — posting body-only fallback",
-        {
-          prNumber,
-          rejectedCommentCount: comments.length,
-        },
-      )
-      const response = await octokit.rest.pulls.createReview({
-        owner,
-        repo,
-        pull_number: prNumber,
-        commit_id: commitId,
-        event: "COMMENT",
-        body: fallbackBody,
+      if (errorStatus(submitError) !== 422) throw submitError
+      logger.warn("inline comment anchors rejected (422)", {
+        prNumber,
+        rejectedCommentCount: comments.length,
       })
-      return { url: parseReviewUrl(response.data), usedFallbackBody: true }
+      return { kind: "rejected" }
     }
+  }
+
+  const postIssueComment = async ({
+    prNumber,
+    body,
+  }: {
+    prNumber: number
+    body: string
+  }): Promise<{ url: string }> => {
+    const response = await octokit.rest.issues.createComment({
+      owner,
+      repo,
+      issue_number: prNumber,
+      body,
+    })
+    const parsed = urlResponseSchema.safeParse(response.data)
+    if (!parsed.success) {
+      throw new Error("unexpected issue comment response shape")
+    }
+    return { url: parsed.data.html_url }
   }
 
   /** Only the bot's own comments count: anchors drive dedup, and anyone can
@@ -387,39 +417,42 @@ export const createGithubClient = (
     return allComments
   }
 
-  /** Whether this bot has already posted any review on the PR — the re-run
-   *  signal. Inline anchors can't serve here: zero-findings and body-only
-   *  first runs leave none. */
-  const hasPriorBotReview = async ({
+  /** The bot's own issue comments on the PR — the status comment plus any
+   *  beyond-diff finding comments. One listing serves both the run signal
+   *  and the beyond-diff dedup anchors. Author-filtered for the same reason
+   *  as fetchBotReviewComments: anyone can paste an anchor marker. */
+  const fetchBotIssueComments = async ({
     prNumber,
   }: {
     prNumber: number
-  }): Promise<boolean> => {
+  }): Promise<{ body: string }[]> => {
     const botLogin = await resolveBotLogin()
+    const allComments: { body: string }[] = []
 
     for (let page = 1; page <= MAX_PAGES; page++) {
-      const response = await octokit.rest.pulls.listReviews({
+      const response = await octokit.rest.issues.listComments({
         owner,
         repo,
-        pull_number: prNumber,
+        issue_number: prNumber,
         per_page: PER_PAGE,
         page,
       })
-      const parsed = reviewListSchema.safeParse(response.data)
+      const parsed = issueCommentListSchema.safeParse(response.data)
       if (!parsed.success) {
-        throw new Error("unexpected reviews response shape")
+        throw new Error("unexpected issue comments response shape")
       }
-      if (parsed.data.some((review) => review.user?.login === botLogin)) {
-        logger.info("found prior bot review", { prNumber, botLogin })
-        return true
-      }
+      allComments.push(
+        ...parsed.data
+          .filter((comment) => comment.user?.login === botLogin)
+          .map((comment) => ({ body: comment.body })),
+      )
       if (parsed.data.length < PER_PAGE) break
       if (page === MAX_PAGES) {
-        logger.warn("reviews page cap reached", { prNumber })
+        logger.warn("issue comments page cap reached", { prNumber })
       }
     }
 
-    return false
+    return allComments
   }
 
   const upsertSummaryComment = async ({
@@ -493,8 +526,10 @@ export const createGithubClient = (
     fetchDiff,
     requestBotReview,
     submitReview,
+    postFindingsReview,
+    postIssueComment,
     fetchBotReviewComments,
-    hasPriorBotReview,
+    fetchBotIssueComments,
     upsertSummaryComment,
   }
 }
