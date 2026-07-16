@@ -134,6 +134,7 @@ const reviewCommentListSchema = z.array(
     body: z.string(),
     line: z.int().positive().nullish(),
     original_line: z.int().positive().nullish(),
+    user: z.object({ login: z.string() }).nullable(),
   }),
 )
 
@@ -236,14 +237,18 @@ export const createGithubClient = (
 
   /** The app's own bot login (`<app-slug>[bot]`) — the author of everything
    *  this client posts. Memoized: the login never changes within a run, and
-   *  both requestBotReview and hasPriorBotReview need it. */
+   *  every method comparing or resolving authorship needs it. App
+   *  installation tokens resolve `viewer` to the bot user itself, whose
+   *  login already carries the `[bot]` suffix — append it only when absent,
+   *  or the lookup targets a nonexistent `<slug>[bot][bot]` user. */
   let botLoginCache: string | undefined
   const resolveBotLogin = async (): Promise<string> => {
     if (botLoginCache) return botLoginCache
     const viewer = await octokit.graphql<{
       viewer: { login: string }
     }>("query { viewer { login } }")
-    botLoginCache = `${viewer.viewer.login}[bot]`
+    const login = viewer.viewer.login
+    botLoginCache = login.endsWith("[bot]") ? login : `${login}[bot]`
     return botLoginCache
   }
 
@@ -325,11 +330,15 @@ export const createGithubClient = (
     }
   }
 
+  /** Only the bot's own comments count: anchors drive dedup, and anyone can
+   *  paste an `<!-- umm-actually:... -->` marker into a comment — without the
+   *  author filter that would silently suppress a real future finding. */
   const fetchReviewComments = async ({
     prNumber,
   }: {
     prNumber: number
   }): Promise<ExistingReviewComment[]> => {
+    const botLogin = await resolveBotLogin()
     const allComments: ExistingReviewComment[] = []
 
     for (let page = 1; page <= MAX_PAGES; page++) {
@@ -345,12 +354,14 @@ export const createGithubClient = (
         throw new Error("unexpected review comments response shape")
       }
       allComments.push(
-        ...parsed.data.map((comment) => ({
-          path: comment.path,
-          body: comment.body,
-          line: comment.line ?? null,
-          originalLine: comment.original_line ?? null,
-        })),
+        ...parsed.data
+          .filter((comment) => comment.user?.login === botLogin)
+          .map((comment) => ({
+            path: comment.path,
+            body: comment.body,
+            line: comment.line ?? null,
+            originalLine: comment.original_line ?? null,
+          })),
       )
       if (parsed.data.length < PER_PAGE) break
       if (page === MAX_PAGES) {

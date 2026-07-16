@@ -325,8 +325,8 @@ export const buildRerunSummary = ({
   const shaShort = sha.slice(0, 7)
   const findingsLine =
     newCount > 0
-      ? `${newCount} new finding(s) posted as inline comments (${totalCount} total across all reviews).`
-      : `No new findings (${totalCount} finding(s) from prior reviews).`
+      ? `${newCount} new finding(s) posted as inline comments (${totalCount} tracked inline finding(s) across all reviews).`
+      : `No new findings (${totalCount} tracked inline finding(s) from prior reviews).`
   const attribution = `---\n*umm-actually · ${model}*`
   return [
     RERUN_ANCHOR,

@@ -13,7 +13,7 @@ import type {
 import { estimateTokens, type PromptFile } from "../review/prompt.js"
 import { annotateDiff } from "../diff/annotate-diff.js"
 import { computeCommentableLines } from "../diff/commentable-lines.js"
-import type { ReviewResponse } from "../review/finding.js"
+import type { Finding, ReviewResponse } from "../review/finding.js"
 import {
   buildRerunSummary,
   buildReviewBody,
@@ -132,6 +132,35 @@ const expectedCappedBody = buildReviewBody({
 })
 
 const expectedZeroBody = buildZeroFindingsBody({ model: "test/model" })
+
+/** Full expected submitReview params for a re-run posting `findings` as new —
+ *  exact whole-value asserts catch a wrong finding surviving dedup or an
+ *  incomplete payload that count-only checks would miss. */
+const expectedRerunSubmit = (findings: Finding[]) => {
+  const mapped = mapFindingsToReview({
+    findings,
+    commentableByPath: fixtureCommentableByPath,
+  })
+  return {
+    prNumber: 7,
+    commitId: fixturePrContext.headSha,
+    body: buildReviewBody({
+      bodyFindings: mapped.bodyFindings,
+      droppedByCap: [],
+      model: "test/model",
+      inlineCommentCount: mapped.comments.length,
+    }),
+    comments: mapped.comments,
+    fallbackBody: buildReviewBody({
+      bodyFindings: findings,
+      droppedByCap: [],
+      model: "test/model",
+      bodyFindingsHeading: "Findings",
+      bodyFindingsDescription:
+        "Inline comments were unavailable; all findings are listed here:",
+    }),
+  }
+}
 
 const buildSkipBody = (reason: string): string =>
   `**umm-actually** — review skipped\n\n${reason}\n\n---\n*umm-actually*`
@@ -850,7 +879,9 @@ describe("orchestrate", () => {
 
       const newFindingCount = findings.length - 1
       expect(result.findingsCount).toBe(newFindingCount)
-      expect(stubs.submitReviewCalls).toHaveLength(1)
+      expect(stubs.submitReviewCalls).toEqual([
+        expectedRerunSubmit(findings.slice(1)),
+      ])
       expect(stubs.upsertSummaryCommentCalls).toHaveLength(1)
 
       const summaryCall = first(stubs.upsertSummaryCommentCalls)
@@ -925,6 +956,9 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(findings.length - 1)
+      expect(stubs.submitReviewCalls).toEqual([
+        expectedRerunSubmit(findings.slice(1)),
+      ])
     })
 
     it("re-run — dedup follows the comment's live position across pushes", async () => {
@@ -956,6 +990,9 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(findings.length - 1)
+      expect(stubs.submitReviewCalls).toEqual([
+        expectedRerunSubmit(findings.slice(1)),
+      ])
     })
 
     it("re-run — legacy title-hash anchors don't dedup but the summary still updates", async () => {
@@ -974,7 +1011,9 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
-      expect(stubs.submitReviewCalls).toHaveLength(1)
+      expect(stubs.submitReviewCalls).toEqual([
+        expectedRerunSubmit(expectedSelection.selected),
+      ])
       expect(stubs.upsertSummaryCommentCalls).toHaveLength(1)
 
       const summaryCall = first(stubs.upsertSummaryCommentCalls)
@@ -1090,7 +1129,9 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
-      expect(stubs.submitReviewCalls).toHaveLength(1)
+      expect(stubs.submitReviewCalls).toEqual([
+        expectedRerunSubmit(expectedSelection.selected),
+      ])
       expect(stubs.upsertSummaryCommentCalls).toHaveLength(1)
     })
   })

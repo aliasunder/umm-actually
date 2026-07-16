@@ -122,8 +122,7 @@ const describeError = (error: unknown): string => {
 /** Whether the bot already posted a review on this PR — the re-run signal.
  *  Fails open to first-run behavior: a duplicate full review beats silence. */
 const detectRerun = async (
-  githubClient: GithubClient,
-  prNumber: number,
+  { githubClient, prNumber }: { githubClient: GithubClient; prNumber: number },
   logger: Logger,
 ): Promise<boolean> => {
   try {
@@ -139,8 +138,7 @@ const detectRerun = async (
 /** Anchors from the bot's existing inline comments. Empty on fetch failure —
  *  every finding then posts as new; duplicates beat losing findings. */
 const fetchExistingAnchors = async (
-  githubClient: GithubClient,
-  prNumber: number,
+  { githubClient, prNumber }: { githubClient: GithubClient; prNumber: number },
   logger: Logger,
 ): Promise<AnchorEntry[]> => {
   try {
@@ -316,9 +314,15 @@ export const orchestrate = async (
   // finding slots. Re-run detection asks GitHub for a prior bot review rather
   // than inferring from inline anchors, which zero-findings and body-only
   // first runs never leave behind.
-  const isRerun = await detectRerun(githubClient, prContext.prNumber, logger)
+  const isRerun = await detectRerun(
+    { githubClient, prNumber: prContext.prNumber },
+    logger,
+  )
   const existingAnchors = isRerun
-    ? await fetchExistingAnchors(githubClient, prContext.prNumber, logger)
+    ? await fetchExistingAnchors(
+        { githubClient, prNumber: prContext.prNumber },
+        logger,
+      )
     : []
   const dedupedFindings = isRerun
     ? realFindings.filter(
@@ -378,7 +382,9 @@ export const orchestrate = async (
     }
   }
 
-  // Re-run — post only new findings, upsert summary comment
+  // Re-run — post only new findings, upsert summary comment. totalCount is
+  // anchored inline findings only: body-only findings and legacy title-hash
+  // anchors leave nothing parseable to count, and the summary wording says so.
   const totalCount = existingAnchors.length + selected.length
   let reviewUrl = ""
 

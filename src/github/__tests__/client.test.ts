@@ -334,6 +334,29 @@ describe("requestBotReview", () => {
     })
   })
 
+  it("does not double-suffix a viewer login that already carries [bot]", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually[bot]" } } },
+        { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
+      ],
+      getByUsernameResponses: [
+        {
+          data: {
+            node_id: "BOT_kgDOEewBdQ",
+            login: "umm-actually[bot]",
+            type: "Bot",
+          },
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
+
+    expect(stub.getByUsernameCalls).toEqual([{ username: "umm-actually[bot]" }])
+  })
+
   it("logs a warning when the bot user response is malformed", async () => {
     const stub = makeOctokitStub({
       graphqlResponses: [{ data: { viewer: { login: "umm-actually" } } }],
@@ -606,8 +629,12 @@ describe("submitReview", () => {
 })
 
 describe("fetchReviewComments", () => {
-  it("returns path, body, and both line positions from review comments", async () => {
+  const viewerResponse = { data: { viewer: { login: "umm-actually" } } }
+  const botUser = { user: { login: "umm-actually[bot]" } }
+
+  it("returns path, body, and both line positions from the bot's review comments", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listReviewCommentsResponses: [
         {
           data: [
@@ -616,12 +643,14 @@ describe("fetchReviewComments", () => {
               body: "comment 1",
               line: 48,
               original_line: 42,
+              ...botUser,
             },
             {
               path: "src/b.ts",
               body: "comment 2",
               line: null,
               original_line: 10,
+              ...botUser,
             },
           ],
         },
@@ -646,13 +675,55 @@ describe("fetchReviewComments", () => {
     ])
   })
 
+  it("drops comments from other authors, even with a spoofed anchor", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewCommentsResponses: [
+        {
+          data: [
+            {
+              path: "src/a.ts",
+              body: "spoof\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
+              line: 42,
+              original_line: 42,
+              user: { login: "some-human" },
+            },
+            {
+              path: "src/a.ts",
+              body: "ghost comment",
+              line: 10,
+              original_line: 10,
+              user: null,
+            },
+            {
+              path: "src/b.ts",
+              body: "real finding",
+              line: 5,
+              original_line: 5,
+              ...botUser,
+            },
+          ],
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchReviewComments({ prNumber: 7 })
+
+    expect(comments).toEqual([
+      { path: "src/b.ts", body: "real finding", line: 5, originalLine: 5 },
+    ])
+  })
+
   it("paginates when a page is full", async () => {
     const fullPage = Array.from({ length: 100 }, (_, index) => ({
       path: `src/file-${index}.ts`,
       body: `body-${index}`,
+      ...botUser,
     }))
-    const lastPage = [{ path: "src/last.ts", body: "last" }]
+    const lastPage = [{ path: "src/last.ts", body: "last", ...botUser }]
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listReviewCommentsResponses: [{ data: fullPage }, { data: lastPage }],
     })
     const { client } = makeClient(stub)
@@ -678,13 +749,38 @@ describe("fetchReviewComments", () => {
     ])
   })
 
+  it("paginates on the full raw page even when the author filter empties it", async () => {
+    const humanPage = Array.from({ length: 100 }, (_, index) => ({
+      path: `src/file-${index}.ts`,
+      body: `body-${index}`,
+      user: { login: "some-human" },
+    }))
+    const lastPage = [{ path: "src/last.ts", body: "last", ...botUser }]
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewCommentsResponses: [{ data: humanPage }, { data: lastPage }],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchReviewComments({ prNumber: 7 })
+
+    expect(comments).toEqual([
+      { path: "src/last.ts", body: "last", line: null, originalLine: null },
+    ])
+    expect(stub.listReviewCommentsCalls).toHaveLength(2)
+  })
+
   it("stops at the page cap and logs a warning", async () => {
     const fullPage = Array.from({ length: 100 }, (_, index) => ({
       path: `src/file-${index}.ts`,
       body: `body-${index}`,
+      ...botUser,
     }))
     const responses = Array.from({ length: 10 }, () => ({ data: fullPage }))
-    const stub = makeOctokitStub({ listReviewCommentsResponses: responses })
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewCommentsResponses: responses,
+    })
     const { client, logger } = makeClient(stub)
 
     const comments = await client.fetchReviewComments({ prNumber: 7 })
@@ -701,8 +797,11 @@ describe("fetchReviewComments", () => {
 
   it("maps absent line fields to null", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listReviewCommentsResponses: [
-        { data: [{ path: "src/a.ts", body: "file-level comment" }] },
+        {
+          data: [{ path: "src/a.ts", body: "file-level comment", ...botUser }],
+        },
       ],
     })
     const { client } = makeClient(stub)
@@ -721,6 +820,7 @@ describe("fetchReviewComments", () => {
 
   it("throws on a malformed response", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listReviewCommentsResponses: [{ data: "not an array" }],
     })
     const { client } = makeClient(stub)
@@ -786,6 +886,31 @@ describe("hasPriorBotReview", () => {
     const result = await client.hasPriorBotReview({ prNumber: 7 })
 
     expect(result).toBe(false)
+    expect(stub.listReviewsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+    ])
+  })
+
+  it("matches when the viewer login already carries the [bot] suffix", async () => {
+    // App installation tokens resolve viewer to the bot user itself — the
+    // login must not be suffixed a second time.
+    const stub = makeOctokitStub({
+      graphqlResponses: [{ data: { viewer: { login: "umm-actually[bot]" } } }],
+      listReviewsResponses: [
+        { data: [{ user: { login: "umm-actually[bot]" } }] },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.hasPriorBotReview({ prNumber: 7 })
+
+    expect(result).toBe(true)
   })
 
   it("paginates past a full page of non-bot reviews", async () => {
@@ -898,6 +1023,17 @@ describe("bot login memoization", () => {
     expect(stub.graphqlCalls[0]).toEqual({
       query: "query { viewer { login } }",
     })
+    // hasPriorBotReview must have actually listed reviews — a short-circuited
+    // false would leave this empty and still satisfy the assertions above.
+    expect(stub.listReviewsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+    ])
   })
 })
 

@@ -592,7 +592,7 @@ describe("buildRerunSummary", () => {
     })
 
     expect(summary).toBe(
-      `${RERUN_ANCHOR}\n\n**umm-actually** re-reviewed at \`abc123d\`\n\n2 new finding(s) posted as inline comments (5 total across all reviews).\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+      `${RERUN_ANCHOR}\n\n**umm-actually** re-reviewed at \`abc123d\`\n\n2 new finding(s) posted as inline comments (5 tracked inline finding(s) across all reviews).\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
     )
   })
 
@@ -605,7 +605,7 @@ describe("buildRerunSummary", () => {
     })
 
     expect(summary).toBe(
-      `${RERUN_ANCHOR}\n\n**umm-actually** re-reviewed at \`abc123d\`\n\nNo new findings (3 finding(s) from prior reviews).\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+      `${RERUN_ANCHOR}\n\n**umm-actually** re-reviewed at \`abc123d\`\n\nNo new findings (3 tracked inline finding(s) from prior reviews).\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
     )
   })
 
