@@ -127,10 +127,9 @@ const renderCommentBody = (
   finding: Finding,
   snappedFromLine?: number,
 ): string => {
-  const snapNote =
-    snappedFromLine === undefined
-      ? ""
-      : `\n\n_Anchored near line ${snappedFromLine} (the reported line is not part of the diff)._`
+  const snapNote = snappedFromLine
+    ? `\n\n_Anchored near line ${snappedFromLine} (the reported line is not part of the diff)._`
+    : ""
   const anchor = `\n\n<!-- umm-actually:${computeAnchorKey(finding)} -->`
   return `${findingTag(finding)} _(confidence: ${finding.confidence})_
 
@@ -197,32 +196,31 @@ const classifyFinding = (
   commentableByPath: Map<string, CommentableFile>,
 ): { comment?: ReviewComment; bodyFinding?: Finding } => {
   const commentable = commentableByPath.get(finding.file)
-  if (commentable === undefined) return { bodyFinding: finding }
+  if (!commentable) return { bodyFinding: finding }
 
   if (commentable.rightLines.has(finding.line)) {
     const endLine = multiLineEnd(finding, commentable)
     // GitHub's API: `line` is the LAST line of a multi-line range, `start_line` the first
-    const comment: ReviewComment =
-      endLine === undefined
-        ? {
-            path: finding.file,
-            line: finding.line,
-            side: "RIGHT",
-            body: renderCommentBody(finding),
-          }
-        : {
-            path: finding.file,
-            line: endLine,
-            side: "RIGHT",
-            start_line: finding.line,
-            start_side: "RIGHT",
-            body: renderCommentBody(finding),
-          }
+    const comment: ReviewComment = !endLine
+      ? {
+          path: finding.file,
+          line: finding.line,
+          side: "RIGHT",
+          body: renderCommentBody(finding),
+        }
+      : {
+          path: finding.file,
+          line: endLine,
+          side: "RIGHT",
+          start_line: finding.line,
+          start_side: "RIGHT",
+          body: renderCommentBody(finding),
+        }
     return { comment }
   }
 
   const snappedLine = nearestCommentableLine(finding.line, commentable)
-  if (snappedLine !== undefined) {
+  if (snappedLine) {
     return {
       comment: {
         path: finding.file,
@@ -255,10 +253,10 @@ export const mapFindingsToReview = ({
   )
 
   const comments = mapped.flatMap((entry) =>
-    entry.comment === undefined ? [] : [entry.comment],
+    entry.comment ? [entry.comment] : [],
   )
   const bodyFindings = mapped.flatMap((entry) =>
-    entry.bodyFinding === undefined ? [] : [entry.bodyFinding],
+    entry.bodyFinding ? [entry.bodyFinding] : [],
   )
   return { comments, bodyFindings }
 }
@@ -302,7 +300,7 @@ export const buildReviewBody = ({
   const attribution = `---\n*umm-actually · ${model}*`
 
   return [summaryLine, beyondDiffSection, capNote, attribution]
-    .filter((section) => section !== "")
+    .filter(Boolean)
     .join("\n\n")
 }
 

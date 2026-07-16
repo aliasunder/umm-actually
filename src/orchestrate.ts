@@ -289,7 +289,7 @@ export const orchestrate = async (
 
   // Step 10–11: generate findings (V1: single combined phase)
   const phase = phases[0]
-  if (phase === undefined) {
+  if (!phase) {
     throw new Error("resolvePhases returned no phases")
   }
   const structuredResult = await generateFindings({
