@@ -209,11 +209,9 @@ export const orchestrate = async (
   try {
     await githubClient.requestBotReview({ prNodeId: prContext.nodeId })
   } catch (requestError) {
-    const errorDetail =
-      requestError instanceof Error
-        ? `[${requestError.name}]: ${requestError.message}`
-        : String(requestError)
-    logger.warn("failed to request bot review", { error: errorDetail })
+    logger.warn("failed to request bot review", {
+      error: describeError(requestError),
+    })
   }
 
   const postSkipReview = async (reason: string): Promise<OrchestrateResult> => {

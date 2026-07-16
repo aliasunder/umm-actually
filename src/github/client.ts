@@ -235,12 +235,16 @@ export const createGithubClient = (
   })
 
   /** The app's own bot login (`<app-slug>[bot]`) — the author of everything
-   *  this client posts. */
+   *  this client posts. Memoized: the login never changes within a run, and
+   *  both requestBotReview and hasPriorBotReview need it. */
+  let botLoginCache: string | undefined
   const resolveBotLogin = async (): Promise<string> => {
+    if (botLoginCache) return botLoginCache
     const viewer = await octokit.graphql<{
       viewer: { login: string }
     }>("query { viewer { login } }")
-    return `${viewer.viewer.login}[bot]`
+    botLoginCache = `${viewer.viewer.login}[bot]`
+    return botLoginCache
   }
 
   const requestBotReview = async ({
