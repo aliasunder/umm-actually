@@ -223,7 +223,7 @@ type RecordingStubs = {
   fetchDiffCalls: { prNumber: number }[]
   requestBotReviewCalls: { prNodeId: string }[]
   submitReviewCalls: SubmitReviewParams[]
-  fetchReviewCommentsCalls: { prNumber: number }[]
+  fetchBotReviewCommentsCalls: { prNumber: number }[]
   hasPriorBotReviewCalls: { prNumber: number }[]
   upsertSummaryCommentCalls: UpsertSummaryCommentParams[]
   readConventionsCalls: { conventionsFile: string }[]
@@ -246,7 +246,7 @@ const makeOrchestrateDeps = (
   const fetchPullRequestCalls: { prNumber: number }[] = []
   const fetchDiffCalls: { prNumber: number }[] = []
   const submitReviewCalls: SubmitReviewParams[] = []
-  const fetchReviewCommentsCalls: { prNumber: number }[] = []
+  const fetchBotReviewCommentsCalls: { prNumber: number }[] = []
   const hasPriorBotReviewCalls: { prNumber: number }[] = []
   const upsertSummaryCommentCalls: UpsertSummaryCommentParams[] = []
   const readConventionsCalls: { conventionsFile: string }[] = []
@@ -282,8 +282,8 @@ const makeOrchestrateDeps = (
         usedFallbackBody: false,
       }
     },
-    fetchReviewComments: async (params) => {
-      fetchReviewCommentsCalls.push(params)
+    fetchBotReviewComments: async (params) => {
+      fetchBotReviewCommentsCalls.push(params)
       return []
     },
     hasPriorBotReview: async (params) => {
@@ -336,7 +336,7 @@ const makeOrchestrateDeps = (
     fetchDiffCalls,
     requestBotReviewCalls,
     submitReviewCalls,
-    fetchReviewCommentsCalls,
+    fetchBotReviewCommentsCalls,
     hasPriorBotReviewCalls,
     upsertSummaryCommentCalls,
     readConventionsCalls,
@@ -850,7 +850,7 @@ describe("orchestrate", () => {
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
       expect(stubs.hasPriorBotReviewCalls).toEqual([{ prNumber: 7 }])
-      expect(stubs.fetchReviewCommentsCalls).toHaveLength(0)
+      expect(stubs.fetchBotReviewCommentsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
       expect(stubs.upsertSummaryCommentCalls).toHaveLength(0)
     })
@@ -866,7 +866,7 @@ describe("orchestrate", () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           hasPriorBotReview: async () => true,
-          fetchReviewComments: async () => [
+          fetchBotReviewComments: async () => [
             existingComment(
               `some comment\n\n<!-- umm-actually:${duplicateAnchor} -->`,
             ),
@@ -907,7 +907,7 @@ describe("orchestrate", () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           hasPriorBotReview: async () => true,
-          fetchReviewComments: async () => existingComments,
+          fetchBotReviewComments: async () => existingComments,
         },
       })
       const logger = createTestLogger()
@@ -944,7 +944,7 @@ describe("orchestrate", () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           hasPriorBotReview: async () => true,
-          fetchReviewComments: async () => [
+          fetchBotReviewComments: async () => [
             existingComment(
               `some comment\n\n<!-- umm-actually:${driftedAnchor} -->`,
             ),
@@ -977,7 +977,7 @@ describe("orchestrate", () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           hasPriorBotReview: async () => true,
-          fetchReviewComments: async () => [
+          fetchBotReviewComments: async () => [
             existingComment(
               `some comment\n\n<!-- umm-actually:${staleAnchor} -->`,
               { line: movedFinding.line, originalLine: movedFinding.line - 50 },
@@ -999,7 +999,7 @@ describe("orchestrate", () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           hasPriorBotReview: async () => true,
-          fetchReviewComments: async () => [
+          fetchBotReviewComments: async () => [
             existingComment(
               "old format\n\n<!-- umm-actually:src/greeter.ts:correctness:ffdf51bc -->",
             ),
@@ -1034,7 +1034,7 @@ describe("orchestrate", () => {
         },
         githubClient: {
           hasPriorBotReview: async () => true,
-          fetchReviewComments: async () => [
+          fetchBotReviewComments: async () => [
             existingComment(
               "body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
             ),
@@ -1071,14 +1071,14 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.hasPriorBotReviewCalls).toHaveLength(0)
-      expect(stubs.fetchReviewCommentsCalls).toHaveLength(0)
+      expect(stubs.fetchBotReviewCommentsCalls).toHaveLength(0)
     })
 
     it("continues without throwing when upsertSummaryComment fails", async () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           hasPriorBotReview: async () => true,
-          fetchReviewComments: async () => [
+          fetchBotReviewComments: async () => [
             existingComment(
               "body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
             ),
@@ -1110,7 +1110,7 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
-      expect(stubs.fetchReviewCommentsCalls).toHaveLength(0)
+      expect(stubs.fetchBotReviewCommentsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
       expect(stubs.upsertSummaryCommentCalls).toHaveLength(0)
     })
@@ -1119,7 +1119,7 @@ describe("orchestrate", () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           hasPriorBotReview: async () => true,
-          fetchReviewComments: async () => {
+          fetchBotReviewComments: async () => {
             throw new Error("network error")
           },
         },

@@ -104,7 +104,7 @@ export type GithubClient = {
      *  rejects the inline anchors. */
     fallbackBody: string
   }) => Promise<SubmitReviewResult>
-  fetchReviewComments: (params: {
+  fetchBotReviewComments: (params: {
     prNumber: number
   }) => Promise<ExistingReviewComment[]>
   hasPriorBotReview: (params: { prNumber: number }) => Promise<boolean>
@@ -333,7 +333,7 @@ export const createGithubClient = (
   /** Only the bot's own comments count: anchors drive dedup, and anyone can
    *  paste an `<!-- umm-actually:... -->` marker into a comment — without the
    *  author filter that would silently suppress a real future finding. */
-  const fetchReviewComments = async ({
+  const fetchBotReviewComments = async ({
     prNumber,
   }: {
     prNumber: number
@@ -372,7 +372,7 @@ export const createGithubClient = (
       }
     }
 
-    logger.info("fetched review comments", {
+    logger.info("fetched bot review comments", {
       prNumber,
       count: allComments.length,
     })
@@ -485,7 +485,7 @@ export const createGithubClient = (
     fetchDiff,
     requestBotReview,
     submitReview,
-    fetchReviewComments,
+    fetchBotReviewComments,
     hasPriorBotReview,
     upsertSummaryComment,
   }

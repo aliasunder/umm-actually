@@ -628,7 +628,7 @@ describe("submitReview", () => {
   })
 })
 
-describe("fetchReviewComments", () => {
+describe("fetchBotReviewComments", () => {
   const viewerResponse = { data: { viewer: { login: "umm-actually" } } }
   const botUser = { user: { login: "umm-actually[bot]" } }
 
@@ -658,7 +658,7 @@ describe("fetchReviewComments", () => {
     })
     const { client } = makeClient(stub)
 
-    const comments = await client.fetchReviewComments({ prNumber: 7 })
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
 
     expect(comments).toEqual([
       { path: "src/a.ts", body: "comment 1", line: 48, originalLine: 42 },
@@ -708,7 +708,7 @@ describe("fetchReviewComments", () => {
     })
     const { client } = makeClient(stub)
 
-    const comments = await client.fetchReviewComments({ prNumber: 7 })
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
 
     expect(comments).toEqual([
       { path: "src/b.ts", body: "real finding", line: 5, originalLine: 5 },
@@ -728,7 +728,7 @@ describe("fetchReviewComments", () => {
     })
     const { client } = makeClient(stub)
 
-    const comments = await client.fetchReviewComments({ prNumber: 7 })
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
 
     expect(comments).toHaveLength(101)
     expect(stub.listReviewCommentsCalls).toEqual([
@@ -762,7 +762,7 @@ describe("fetchReviewComments", () => {
     })
     const { client } = makeClient(stub)
 
-    const comments = await client.fetchReviewComments({ prNumber: 7 })
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
 
     expect(comments).toEqual([
       { path: "src/last.ts", body: "last", line: null, originalLine: null },
@@ -783,7 +783,7 @@ describe("fetchReviewComments", () => {
     })
     const { client, logger } = makeClient(stub)
 
-    const comments = await client.fetchReviewComments({ prNumber: 7 })
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
 
     expect(comments).toHaveLength(1000)
     expect(stub.listReviewCommentsCalls).toHaveLength(10)
@@ -806,7 +806,7 @@ describe("fetchReviewComments", () => {
     })
     const { client } = makeClient(stub)
 
-    const comments = await client.fetchReviewComments({ prNumber: 7 })
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
 
     expect(comments).toEqual([
       {
@@ -825,9 +825,9 @@ describe("fetchReviewComments", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(client.fetchReviewComments({ prNumber: 7 })).rejects.toThrow(
-      "unexpected review comments response shape",
-    )
+    await expect(
+      client.fetchBotReviewComments({ prNumber: 7 }),
+    ).rejects.toThrow("unexpected review comments response shape")
   })
 })
 

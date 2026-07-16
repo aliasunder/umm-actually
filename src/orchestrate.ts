@@ -142,7 +142,7 @@ const fetchExistingAnchors = async (
   logger: Logger,
 ): Promise<AnchorEntry[]> => {
   try {
-    const existingComments = await githubClient.fetchReviewComments({
+    const existingComments = await githubClient.fetchBotReviewComments({
       prNumber,
     })
     return extractAnchors(existingComments)
