@@ -804,8 +804,44 @@ describe("hasPriorBotReview", () => {
     const result = await client.hasPriorBotReview({ prNumber: 7 })
 
     expect(result).toBe(true)
-    expect(stub.listReviewsCalls).toHaveLength(2)
-    expect(stub.listReviewsCalls[1]).toMatchObject({ page: 2 })
+    expect(stub.listReviewsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        per_page: 100,
+        page: 2,
+      },
+    ])
+  })
+
+  it("stops at the page cap and logs a warning", async () => {
+    const fullPage = Array.from({ length: 100 }, () => ({
+      user: { login: "aliasunder" },
+    }))
+    const responses = Array.from({ length: 10 }, () => ({ data: fullPage }))
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewsResponses: responses,
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.hasPriorBotReview({ prNumber: 7 })
+
+    expect(result).toBe(false)
+    expect(stub.listReviewsCalls).toHaveLength(10)
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "reviews page cap reached",
+      data: { prNumber: 7 },
+    })
   })
 
   it("throws on a malformed response", async () => {
@@ -829,6 +865,39 @@ describe("hasPriorBotReview", () => {
     await expect(client.hasPriorBotReview({ prNumber: 7 })).rejects.toThrow(
       "token expired",
     )
+  })
+})
+
+describe("bot login memoization", () => {
+  it("resolves the viewer query only once across requestBotReview and hasPriorBotReview", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually" } } },
+        { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
+      ],
+      getByUsernameResponses: [
+        {
+          data: {
+            node_id: "BOT_kgDOEewBdQ",
+            login: "umm-actually[bot]",
+            type: "Bot",
+          },
+        },
+      ],
+      listReviewsResponses: [{ data: [{ user: { login: "aliasunder" } }] }],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
+    const result = await client.hasPriorBotReview({ prNumber: 7 })
+
+    expect(result).toBe(false)
+    // Only two GraphQL calls: the viewer query (memoized) and the mutation.
+    // A third call would mean the viewer query ran twice.
+    expect(stub.graphqlCalls).toHaveLength(2)
+    expect(stub.graphqlCalls[0]).toEqual({
+      query: "query { viewer { login } }",
+    })
   })
 })
 
