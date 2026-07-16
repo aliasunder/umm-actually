@@ -55,24 +55,23 @@ export const computeAnchorKey = (
   finding: Pick<Finding, "file" | "category" | "line">,
 ): string => `${finding.file}:${finding.category}:${finding.line}`
 
+/** Splits a `file:category:line` key from the right: the file segment may
+ *  itself contain colons, categories never do, and the line must be a
+ *  positive integer — old-format keys (title-hash) fail that last
+ *  requirement and are rejected. */
+const ANCHOR_KEY_PATTERN = /^(?<file>.+):(?<category>[^:]+):(?<line>[1-9]\d*)$/
+
 /** Parses one `file:category:line` anchor key out of a comment body.
- *  Returns null for bodies without an anchor and for old-format keys
- *  (title-hash) that don't end in a numeric line. */
+ *  Returns null for bodies without an anchor and for old-format keys. */
 const parseAnchorKey = (body: string): AnchorEntry | null => {
-  const match = ANCHOR_PATTERN.exec(body)
-  if (!match?.[1]) return null
-  const key = match[1]
-  const lastColon = key.lastIndexOf(":")
-  if (lastColon === -1) return null
-  const line = Number(key.slice(lastColon + 1))
-  if (!Number.isInteger(line) || line <= 0) return null
-  const rest = key.slice(0, lastColon)
-  const categoryColon = rest.lastIndexOf(":")
-  if (categoryColon === -1) return null
+  const key = ANCHOR_PATTERN.exec(body)?.[1]
+  if (!key) return null
+  const segments = ANCHOR_KEY_PATTERN.exec(key)?.groups
+  if (!segments?.file || !segments.category || !segments.line) return null
   return {
-    file: rest.slice(0, categoryColon),
-    category: rest.slice(categoryColon + 1),
-    line,
+    file: segments.file,
+    category: segments.category,
+    line: Number(segments.line),
   }
 }
 
