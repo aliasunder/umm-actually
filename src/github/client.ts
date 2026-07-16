@@ -240,20 +240,22 @@ export const createGithubClient = (
     type: z.literal("Bot"),
   })
 
-  /** The app's own bot login (`<app-slug>[bot]`) — the author of everything
-   *  this client posts. Memoized: the login never changes within a run, and
-   *  every method comparing or resolving authorship needs it. App
-   *  installation tokens resolve `viewer` to the bot user itself, whose
-   *  login already carries the `[bot]` suffix — append it only when absent,
-   *  or the lookup targets a nonexistent `<slug>[bot][bot]` user. */
+  /** The token identity's login — the author of everything this client
+   *  posts. Memoized: the login never changes within a run, and every method
+   *  comparing or resolving authorship needs it. App installation tokens
+   *  resolve `viewer` to a Bot whose login usually already carries the
+   *  `[bot]` suffix — append it only when absent, or the lookup targets a
+   *  nonexistent `<slug>[bot][bot]` user. User tokens (PATs) post as the
+   *  user, so their login gets no suffix at all. */
   let botLoginCache: string | undefined
   const resolveBotLogin = async (): Promise<string> => {
     if (botLoginCache) return botLoginCache
     const viewer = await octokit.graphql<{
-      viewer: { login: string }
-    }>("query { viewer { login } }")
-    const login = viewer.viewer.login
-    botLoginCache = login.endsWith("[bot]") ? login : `${login}[bot]`
+      viewer: { login: string; __typename: string }
+    }>("query { viewer { login __typename } }")
+    const { login, __typename } = viewer.viewer
+    botLoginCache =
+      __typename === "Bot" && !login.endsWith("[bot]") ? `${login}[bot]` : login
     return botLoginCache
   }
 

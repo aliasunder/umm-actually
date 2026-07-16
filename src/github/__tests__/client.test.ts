@@ -303,7 +303,7 @@ describe("requestBotReview", () => {
   it("discovers the bot identity via REST and requests review via GraphQL", async () => {
     const stub = makeOctokitStub({
       graphqlResponses: [
-        { data: { viewer: { login: "umm-actually" } } },
+        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
         { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
       ],
       getByUsernameResponses: [
@@ -321,7 +321,9 @@ describe("requestBotReview", () => {
     await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
 
     expect(stub.graphqlCalls).toHaveLength(2)
-    expect(stub.graphqlCalls[0]?.query).toBe("query { viewer { login } }")
+    expect(stub.graphqlCalls[0]?.query).toBe(
+      "query { viewer { login __typename } }",
+    )
     expect(stub.getByUsernameCalls).toEqual([{ username: "umm-actually[bot]" }])
     expect(stub.graphqlCalls[1]?.parameters).toEqual({
       prId: "PR_kwDOMock7",
@@ -337,7 +339,7 @@ describe("requestBotReview", () => {
   it("does not double-suffix a viewer login that already carries [bot]", async () => {
     const stub = makeOctokitStub({
       graphqlResponses: [
-        { data: { viewer: { login: "umm-actually[bot]" } } },
+        { data: { viewer: { login: "umm-actually[bot]", __typename: "Bot" } } },
         { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
       ],
       getByUsernameResponses: [
@@ -359,7 +361,9 @@ describe("requestBotReview", () => {
 
   it("logs a warning when the bot user response is malformed", async () => {
     const stub = makeOctokitStub({
-      graphqlResponses: [{ data: { viewer: { login: "umm-actually" } } }],
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
+      ],
       getByUsernameResponses: [{ data: { message: "Not Found" } }],
     })
     const { client, logger } = makeClient(stub)
@@ -387,7 +391,9 @@ describe("requestBotReview", () => {
 
   it("propagates errors from the getByUsername REST call", async () => {
     const stub = makeOctokitStub({
-      graphqlResponses: [{ data: { viewer: { login: "umm-actually" } } }],
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
+      ],
       getByUsernameResponses: [{ error: makeStatusError(404) }],
     })
     const { client } = makeClient(stub)
@@ -400,7 +406,7 @@ describe("requestBotReview", () => {
   it("propagates errors from the requestReviews mutation", async () => {
     const stub = makeOctokitStub({
       graphqlResponses: [
-        { data: { viewer: { login: "umm-actually" } } },
+        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
         { error: new Error("insufficient permissions") },
       ],
       getByUsernameResponses: [
@@ -422,7 +428,9 @@ describe("requestBotReview", () => {
 
   it("rejects a non-Bot user type", async () => {
     const stub = makeOctokitStub({
-      graphqlResponses: [{ data: { viewer: { login: "some-app" } } }],
+      graphqlResponses: [
+        { data: { viewer: { login: "some-app", __typename: "Bot" } } },
+      ],
       getByUsernameResponses: [
         {
           data: {
@@ -629,7 +637,9 @@ describe("submitReview", () => {
 })
 
 describe("fetchBotReviewComments", () => {
-  const viewerResponse = { data: { viewer: { login: "umm-actually" } } }
+  const viewerResponse = {
+    data: { viewer: { login: "umm-actually", __typename: "Bot" } },
+  }
   const botUser = { user: { login: "umm-actually[bot]" } }
 
   it("returns path, body, and both line positions from the bot's review comments", async () => {
@@ -863,7 +873,9 @@ describe("fetchBotReviewComments", () => {
 })
 
 describe("hasPriorBotReview", () => {
-  const viewerResponse = { data: { viewer: { login: "umm-actually" } } }
+  const viewerResponse = {
+    data: { viewer: { login: "umm-actually", __typename: "Bot" } },
+  }
 
   it("returns true when the bot has a review on the PR", async () => {
     const stub = makeOctokitStub({
@@ -882,7 +894,9 @@ describe("hasPriorBotReview", () => {
     const result = await client.hasPriorBotReview({ prNumber: 7 })
 
     expect(result).toBe(true)
-    expect(stub.graphqlCalls).toEqual([{ query: "query { viewer { login } }" }])
+    expect(stub.graphqlCalls).toEqual([
+      { query: "query { viewer { login __typename } }" },
+    ])
     expect(stub.listReviewsCalls).toEqual([
       {
         owner: "aliasunder",
@@ -932,10 +946,28 @@ describe("hasPriorBotReview", () => {
     // App installation tokens resolve viewer to the bot user itself — the
     // login must not be suffixed a second time.
     const stub = makeOctokitStub({
-      graphqlResponses: [{ data: { viewer: { login: "umm-actually[bot]" } } }],
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually[bot]", __typename: "Bot" } } },
+      ],
       listReviewsResponses: [
         { data: [{ user: { login: "umm-actually[bot]" } }] },
       ],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.hasPriorBotReview({ prNumber: 7 })
+
+    expect(result).toBe(true)
+  })
+
+  it("matches a plain user login when the token is a PAT", async () => {
+    // A personal access token resolves viewer to a User — reviews are
+    // authored by the bare login, so no [bot] suffix may be appended.
+    const stub = makeOctokitStub({
+      graphqlResponses: [
+        { data: { viewer: { login: "aliasunder", __typename: "User" } } },
+      ],
+      listReviewsResponses: [{ data: [{ user: { login: "aliasunder" } }] }],
     })
     const { client } = makeClient(stub)
 
@@ -1028,7 +1060,7 @@ describe("bot login memoization", () => {
   it("resolves the viewer query only once across requestBotReview and hasPriorBotReview", async () => {
     const stub = makeOctokitStub({
       graphqlResponses: [
-        { data: { viewer: { login: "umm-actually" } } },
+        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
         { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
       ],
       getByUsernameResponses: [
@@ -1052,7 +1084,7 @@ describe("bot login memoization", () => {
     // A third call would mean the viewer query ran twice.
     expect(stub.graphqlCalls).toHaveLength(2)
     expect(stub.graphqlCalls[0]).toEqual({
-      query: "query { viewer { login } }",
+      query: "query { viewer { login __typename } }",
     })
     // hasPriorBotReview must have actually listed reviews — a short-circuited
     // false would leave this empty and still satisfy the assertions above.
