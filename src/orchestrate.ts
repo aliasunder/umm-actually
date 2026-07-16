@@ -136,6 +136,8 @@ type InlinePostOutcome = {
   url: string
   /** Findings whose anchors GitHub rejected — re-routed to issue comments. */
   rerouted: Finding[]
+  /** Inline comments that actually landed — zero when the post failed. */
+  postedCount: number
 }
 
 /** Posts the anchorable findings as one review with an invisible marker
@@ -158,7 +160,7 @@ const postInlineFindings = async (
   },
   logger: Logger,
 ): Promise<InlinePostOutcome> => {
-  if (comments.length === 0) return { url: "", rerouted: [] }
+  if (comments.length === 0) return { url: "", rerouted: [], postedCount: 0 }
   try {
     const result = await githubClient.postFindingsReview({
       prNumber,
@@ -167,19 +169,19 @@ const postInlineFindings = async (
       comments,
     })
     if (result.kind === "rejected") {
-      return { url: "", rerouted: inlineFindings }
+      return { url: "", rerouted: inlineFindings, postedCount: 0 }
     }
     logger.info("findings review posted", {
       reviewUrl: result.url,
       inlineCount: comments.length,
     })
-    return { url: result.url, rerouted: [] }
+    return { url: result.url, rerouted: [], postedCount: comments.length }
   } catch (postError) {
     logger.warn(
       "failed to post findings review — findings will re-report next run",
       { error: describeError(postError) },
     )
-    return { url: "", rerouted: [] }
+    return { url: "", rerouted: [], postedCount: 0 }
   }
 }
 
@@ -380,7 +382,7 @@ export const orchestrate = async (
     (finding) => !bodyFindings.includes(finding),
   )
 
-  const { url: reviewUrl, rerouted } = await postInlineFindings(
+  const inlineOutcome = await postInlineFindings(
     {
       githubClient,
       prNumber: prContext.prNumber,
@@ -391,13 +393,17 @@ export const orchestrate = async (
     logger,
   )
 
-  const standaloneFindings = [...bodyFindings, ...rerouted]
+  const standaloneFindings = [...bodyFindings, ...inlineOutcome.rerouted]
+  // Sequential posting with per-comment fallback is inherently stateful —
+  // each failure drops only its own finding from the posted tally.
+  let postedStandalone = 0
   for (const finding of standaloneFindings) {
     try {
       await githubClient.postIssueComment({
         prNumber: prContext.prNumber,
         body: renderStandaloneFinding(finding),
       })
+      postedStandalone += 1
     } catch (postError) {
       logger.warn(
         "failed to post beyond-diff finding — it will re-report next run",
@@ -409,18 +415,20 @@ export const orchestrate = async (
       )
     }
   }
-  if (standaloneFindings.length > 0) {
-    logger.info("beyond-diff findings posted", {
-      count: standaloneFindings.length,
-    })
+  if (postedStandalone > 0) {
+    logger.info("beyond-diff findings posted", { count: postedStandalone })
   }
 
-  // Step 14: status comment — the always-updated run receipt
+  // Step 14: status comment — the always-updated run receipt. Counts report
+  // what actually landed; unposted findings self-heal next run and the
+  // comment says so rather than claiming they were posted.
+  const postedCount = inlineOutcome.postedCount + postedStandalone
   const statusBody = buildStatusComment({
     sha: prContext.headSha,
     isFirstRun: !issueState.statusCommentExists,
-    newCount: selected.length,
-    totalCount: existingAnchors.length + selected.length,
+    postedCount,
+    unpostedCount: selected.length - postedCount,
+    totalCount: existingAnchors.length + postedCount,
     droppedByCap,
     model: modelUsed,
   })
@@ -437,8 +445,8 @@ export const orchestrate = async (
   }
 
   return {
-    findingsCount: selected.length,
-    reviewUrl,
+    findingsCount: postedCount,
+    reviewUrl: inlineOutcome.url,
     modelUsed,
     skippedReason: "",
     costSummaryMarkdown,

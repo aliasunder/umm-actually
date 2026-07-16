@@ -312,7 +312,8 @@ describe("buildStatusComment", () => {
     const body = buildStatusComment({
       sha: "abc123def456abc123def456abc123def456abc1",
       isFirstRun: true,
-      newCount: 2,
+      postedCount: 2,
+      unpostedCount: 0,
       totalCount: 2,
       droppedByCap: [],
       model: "anthropic/claude-sonnet-4-6",
@@ -327,7 +328,8 @@ describe("buildStatusComment", () => {
     const body = buildStatusComment({
       sha: "abc123def456abc123def456abc123def456abc1",
       isFirstRun: true,
-      newCount: 0,
+      postedCount: 0,
+      unpostedCount: 0,
       totalCount: 0,
       droppedByCap: [],
       model: "anthropic/claude-sonnet-4-6",
@@ -342,7 +344,8 @@ describe("buildStatusComment", () => {
     const body = buildStatusComment({
       sha: "abc123def456abc123def456abc123def456abc1",
       isFirstRun: false,
-      newCount: 1,
+      postedCount: 1,
+      unpostedCount: 0,
       totalCount: 5,
       droppedByCap: [],
       model: "anthropic/claude-sonnet-4-6",
@@ -357,7 +360,8 @@ describe("buildStatusComment", () => {
     const body = buildStatusComment({
       sha: "abc123def456abc123def456abc123def456abc1",
       isFirstRun: false,
-      newCount: 0,
+      postedCount: 0,
+      unpostedCount: 0,
       totalCount: 3,
       droppedByCap: [],
       model: "anthropic/claude-sonnet-4-6",
@@ -368,11 +372,28 @@ describe("buildStatusComment", () => {
     )
   })
 
+  it("reports unposted findings instead of claiming they were posted", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      postedCount: 0,
+      unpostedCount: 3,
+      totalCount: 0,
+      droppedByCap: [],
+      model: "anthropic/claude-sonnet-4-6",
+    })
+
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\nNo new findings posted (0 tracked finding(s) across all runs).\n\n_3 finding(s) could not be posted — they will re-report on the next run._\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+    )
+  })
+
   it("includes the cap note when findings were dropped", () => {
     const body = buildStatusComment({
       sha: "abc123def456abc123def456abc123def456abc1",
       isFirstRun: true,
-      newCount: 1,
+      postedCount: 1,
+      unpostedCount: 0,
       totalCount: 1,
       droppedByCap: [makeFinding({ file: "src/greeter.ts", line: 5 })],
       model: "anthropic/claude-sonnet-4-6",
@@ -623,7 +644,8 @@ describe("buildStatusComment — anchor and sha handling", () => {
     const body = buildStatusComment({
       sha: "0000000999999",
       isFirstRun: true,
-      newCount: 1,
+      postedCount: 1,
+      unpostedCount: 0,
       totalCount: 1,
       droppedByCap: [],
       model: "test/model",
@@ -637,7 +659,8 @@ describe("buildStatusComment — anchor and sha handling", () => {
     const body = buildStatusComment({
       sha: "abc123d",
       isFirstRun: false,
-      newCount: 0,
+      postedCount: 0,
+      unpostedCount: 0,
       totalCount: 0,
       droppedByCap: [],
       model: "test/model",

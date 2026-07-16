@@ -286,18 +286,22 @@ ${finding.description}
 
 /** The single always-upserted status comment — the receipt that a run
  *  happened and the running cross-run state. Never carries finding text;
- *  findings are their own comments. */
+ *  findings are their own comments. Counts reflect what actually landed on
+ *  the PR: findings whose posts failed are called out separately, since they
+ *  carry no anchor and re-report on the next run. */
 export const buildStatusComment = ({
   sha,
   isFirstRun,
-  newCount,
+  postedCount,
+  unpostedCount,
   totalCount,
   droppedByCap,
   model,
 }: {
   sha: string
   isFirstRun: boolean
-  newCount: number
+  postedCount: number
+  unpostedCount: number
   totalCount: number
   droppedByCap: Finding[]
   model: string
@@ -308,9 +312,15 @@ export const buildStatusComment = ({
     ? "No findings above threshold."
     : `No new findings (${totalCount} tracked finding(s) across all runs).`
   const findingsLine =
-    newCount > 0
-      ? `${newCount} new finding(s) posted (${totalCount} tracked finding(s) across all runs).`
-      : zeroLine
+    postedCount > 0
+      ? `${postedCount} new finding(s) posted (${totalCount} tracked finding(s) across all runs).`
+      : unpostedCount > 0
+        ? `No new findings posted (${totalCount} tracked finding(s) across all runs).`
+        : zeroLine
+  const unpostedNote =
+    unpostedCount === 0
+      ? ""
+      : `_${unpostedCount} finding(s) could not be posted — they will re-report on the next run._`
   const capNote =
     droppedByCap.length === 0
       ? ""
@@ -320,6 +330,7 @@ export const buildStatusComment = ({
     STATUS_ANCHOR,
     `**umm-actually** ${verb} at \`${shaShort}\``,
     findingsLine,
+    unpostedNote,
     capNote,
     attribution,
   ]

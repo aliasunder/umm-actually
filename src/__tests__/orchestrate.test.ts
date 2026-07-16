@@ -130,12 +130,14 @@ const expectedFindingsReview = (findings: Finding[]) => {
 /** Full expected upsertSummaryComment params for the status comment. */
 const expectedStatus = ({
   isFirstRun,
-  newCount,
+  postedCount,
+  unpostedCount = 0,
   totalCount,
   droppedByCap = [],
 }: {
   isFirstRun: boolean
-  newCount: number
+  postedCount: number
+  unpostedCount?: number
   totalCount: number
   droppedByCap?: Finding[]
 }) => ({
@@ -144,7 +146,8 @@ const expectedStatus = ({
   body: buildStatusComment({
     sha: fixturePrContext.headSha,
     isFirstRun,
-    newCount,
+    postedCount,
+    unpostedCount,
     totalCount,
     droppedByCap,
     model: "test/model",
@@ -544,7 +547,7 @@ describe("orchestrate", () => {
       expect(stubs.upsertSummaryCommentCalls).toEqual([
         expectedStatus({
           isFirstRun: true,
-          newCount: expectedSelection.selected.length,
+          postedCount: expectedSelection.selected.length,
           totalCount: expectedSelection.selected.length,
         }),
       ])
@@ -679,7 +682,7 @@ describe("orchestrate", () => {
       expect(stubs.postFindingsReviewCalls).toHaveLength(0)
       expect(stubs.postIssueCommentCalls).toHaveLength(0)
       expect(stubs.upsertSummaryCommentCalls).toEqual([
-        expectedStatus({ isFirstRun: true, newCount: 0, totalCount: 0 }),
+        expectedStatus({ isFirstRun: true, postedCount: 0, totalCount: 0 }),
       ])
     })
 
@@ -703,7 +706,7 @@ describe("orchestrate", () => {
       expect(stubs.upsertSummaryCommentCalls).toEqual([
         expectedStatus({
           isFirstRun: true,
-          newCount: 1,
+          postedCount: 1,
           totalCount: 1,
           droppedByCap: expectedCappedSelection.droppedByCap,
         }),
@@ -765,14 +768,26 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.reviewUrl).toBe("")
+      expect(result.findingsCount).toBe(expectedMapped.bodyFindings.length)
       // Unposted findings are NOT re-routed — their missing anchors make the
-      // next run re-report them.
+      // next run re-report them, and the status comment says so instead of
+      // claiming they were posted.
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedMapped.bodyFindings.map((finding) => ({
           prNumber: 7,
           body: renderStandaloneFinding(finding),
         })),
       )
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedMapped.bodyFindings.length,
+          unpostedCount:
+            expectedSelection.selected.length -
+            expectedMapped.bodyFindings.length,
+          totalCount: expectedMapped.bodyFindings.length,
+        }),
+      ])
       expect(logger.messages).toContainEqual({
         level: "warn",
         message:
@@ -800,7 +815,15 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      expect(result.findingsCount).toBe(1)
+      expect(result.findingsCount).toBe(0)
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: 0,
+          unpostedCount: 1,
+          totalCount: 0,
+        }),
+      ])
       expect(logger.messages).toContainEqual({
         level: "warn",
         message:
@@ -946,7 +969,7 @@ describe("orchestrate", () => {
       expect(stubs.upsertSummaryCommentCalls).toEqual([
         expectedStatus({
           isFirstRun: true,
-          newCount: expectedSelection.selected.length,
+          postedCount: expectedSelection.selected.length,
           totalCount: expectedSelection.selected.length,
         }),
       ])
@@ -979,7 +1002,7 @@ describe("orchestrate", () => {
       expect(stubs.upsertSummaryCommentCalls).toEqual([
         expectedStatus({
           isFirstRun: true,
-          newCount: findings.length - 1,
+          postedCount: findings.length - 1,
           totalCount: findings.length,
         }),
       ])
@@ -1108,7 +1131,7 @@ describe("orchestrate", () => {
       expect(stubs.upsertSummaryCommentCalls).toEqual([
         expectedStatus({
           isFirstRun: false,
-          newCount: expectedSelection.selected.length,
+          postedCount: expectedSelection.selected.length,
           totalCount: expectedSelection.selected.length,
         }),
       ])
@@ -1134,7 +1157,7 @@ describe("orchestrate", () => {
       expect(stubs.postFindingsReviewCalls).toHaveLength(0)
       expect(stubs.postIssueCommentCalls).toHaveLength(0)
       expect(stubs.upsertSummaryCommentCalls).toEqual([
-        expectedStatus({ isFirstRun: false, newCount: 0, totalCount: 1 }),
+        expectedStatus({ isFirstRun: false, postedCount: 0, totalCount: 1 }),
       ])
     })
 
@@ -1192,7 +1215,7 @@ describe("orchestrate", () => {
       expect(stubs.upsertSummaryCommentCalls).toEqual([
         expectedStatus({
           isFirstRun: true,
-          newCount: expectedSelection.selected.length,
+          postedCount: expectedSelection.selected.length,
           totalCount: expectedSelection.selected.length,
         }),
       ])
