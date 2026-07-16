@@ -83,7 +83,10 @@ export type UpsertCommentResult = { url: string; created: boolean }
 
 /** An existing inline review comment, with both positions GitHub tracks:
  *  `line` is the current spot on the latest diff (null once the comment goes
- *  outdated); `originalLine` is where it sat when posted. */
+ *  outdated); `originalLine` is where it sat when posted. For multi-line
+ *  comments both carry the START of the range — anchors embed the finding's
+ *  `line`, which is the range start, so dedup must compare like with like
+ *  (GitHub's own `line` field is the range END). */
 export type ExistingReviewComment = {
   path: string
   body: string
@@ -134,6 +137,8 @@ const reviewCommentListSchema = z.array(
     body: z.string(),
     line: z.int().positive().nullish(),
     original_line: z.int().positive().nullish(),
+    start_line: z.int().positive().nullish(),
+    original_start_line: z.int().positive().nullish(),
     user: z.object({ login: z.string() }).nullable(),
   }),
 )
@@ -359,8 +364,9 @@ export const createGithubClient = (
           .map((comment) => ({
             path: comment.path,
             body: comment.body,
-            line: comment.line ?? null,
-            originalLine: comment.original_line ?? null,
+            line: comment.start_line ?? comment.line ?? null,
+            originalLine:
+              comment.original_start_line ?? comment.original_line ?? null,
           })),
       )
       if (parsed.data.length < PER_PAGE) break

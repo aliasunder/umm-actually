@@ -675,6 +675,37 @@ describe("fetchBotReviewComments", () => {
     ])
   })
 
+  it("uses the range start for multi-line comments, matching the anchor's line convention", async () => {
+    // GitHub's `line` is the END of a multi-line range; anchors embed the
+    // finding's line, which is the START — a 10..200 span compared by its
+    // end would blow past LINE_PROXIMITY and re-post as a duplicate.
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewCommentsResponses: [
+        {
+          data: [
+            {
+              path: "src/a.ts",
+              body: "wide finding",
+              line: 200,
+              original_line: 200,
+              start_line: 10,
+              original_start_line: 10,
+              ...botUser,
+            },
+          ],
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
+
+    expect(comments).toEqual([
+      { path: "src/a.ts", body: "wide finding", line: 10, originalLine: 10 },
+    ])
+  })
+
   it("drops comments from other authors, even with a spoofed anchor", async () => {
     const stub = makeOctokitStub({
       graphqlResponses: [viewerResponse],
