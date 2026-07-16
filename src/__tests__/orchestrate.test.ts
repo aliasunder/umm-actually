@@ -195,6 +195,7 @@ type RecordingStubs = {
   requestBotReviewCalls: { prNodeId: string }[]
   submitReviewCalls: SubmitReviewParams[]
   fetchReviewCommentsCalls: { prNumber: number }[]
+  hasPriorBotReviewCalls: { prNumber: number }[]
   upsertSummaryCommentCalls: UpsertSummaryCommentParams[]
   readConventionsCalls: { conventionsFile: string }[]
   readChangedFilesCalls: ReadChangedFilesParams[]
@@ -217,6 +218,7 @@ const makeOrchestrateDeps = (
   const fetchDiffCalls: { prNumber: number }[] = []
   const submitReviewCalls: SubmitReviewParams[] = []
   const fetchReviewCommentsCalls: { prNumber: number }[] = []
+  const hasPriorBotReviewCalls: { prNumber: number }[] = []
   const upsertSummaryCommentCalls: UpsertSummaryCommentParams[] = []
   const readConventionsCalls: { conventionsFile: string }[] = []
   const readChangedFilesCalls: ReadChangedFilesParams[] = []
@@ -254,6 +256,10 @@ const makeOrchestrateDeps = (
     fetchReviewComments: async (params) => {
       fetchReviewCommentsCalls.push(params)
       return []
+    },
+    hasPriorBotReview: async (params) => {
+      hasPriorBotReviewCalls.push(params)
+      return false
     },
     upsertSummaryComment: async (params) => {
       upsertSummaryCommentCalls.push(params)
@@ -302,6 +308,7 @@ const makeOrchestrateDeps = (
     requestBotReviewCalls,
     submitReviewCalls,
     fetchReviewCommentsCalls,
+    hasPriorBotReviewCalls,
     upsertSummaryCommentCalls,
     readConventionsCalls,
     readChangedFilesCalls,
@@ -796,14 +803,25 @@ describe("orchestrate", () => {
   })
 
   describe("cross-run dedup", () => {
-    it("first run — posts normal review, no summary comment", async () => {
+    const existingComment = (
+      body: string,
+      positions: { line?: number | null; originalLine?: number | null } = {},
+    ) => ({
+      path: "src/greeter.ts",
+      body,
+      line: positions.line ?? null,
+      originalLine: positions.originalLine ?? null,
+    })
+
+    it("first run — posts normal review without fetching existing comments", async () => {
       const stubs = makeOrchestrateDeps()
       const logger = createTestLogger()
 
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
-      expect(stubs.fetchReviewCommentsCalls).toHaveLength(1)
+      expect(stubs.hasPriorBotReviewCalls).toEqual([{ prNumber: 7 }])
+      expect(stubs.fetchReviewCommentsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
       expect(stubs.upsertSummaryCommentCalls).toHaveLength(0)
     })
@@ -818,11 +836,11 @@ describe("orchestrate", () => {
 
       const stubs = makeOrchestrateDeps({
         githubClient: {
+          hasPriorBotReview: async () => true,
           fetchReviewComments: async () => [
-            {
-              path: duplicateFinding.file,
-              body: `some comment\n\n<!-- umm-actually:${duplicateAnchor} -->`,
-            },
+            existingComment(
+              `some comment\n\n<!-- umm-actually:${duplicateAnchor} -->`,
+            ),
           ],
         },
       })
@@ -849,13 +867,15 @@ describe("orchestrate", () => {
 
     it("re-run — skips review when all findings are duplicates", async () => {
       const findings = fixtureReviewResponse.findings
-      const existingComments = findings.map((finding) => ({
-        path: finding.file,
-        body: `comment\n\n<!-- umm-actually:${computeAnchorKey(finding)} -->`,
-      }))
+      const existingComments = findings.map((finding) =>
+        existingComment(
+          `comment\n\n<!-- umm-actually:${computeAnchorKey(finding)} -->`,
+        ),
+      )
 
       const stubs = makeOrchestrateDeps({
         githubClient: {
+          hasPriorBotReview: async () => true,
           fetchReviewComments: async () => existingComments,
         },
       })
@@ -879,17 +899,106 @@ describe("orchestrate", () => {
       )
     })
 
-    it("re-run — zero findings from LLM posts summary only", async () => {
+    it("re-run — dedups a finding whose reported line drifted within the window", async () => {
+      const findings = fixtureReviewResponse.findings
+      const driftedFinding = findings[0]
+      if (driftedFinding === undefined) {
+        throw new Error("expected at least one fixture finding")
+      }
+      const driftedAnchor = computeAnchorKey({
+        ...driftedFinding,
+        line: driftedFinding.line + 3,
+      })
+
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          hasPriorBotReview: async () => true,
+          fetchReviewComments: async () => [
+            existingComment(
+              `some comment\n\n<!-- umm-actually:${driftedAnchor} -->`,
+            ),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(findings.length - 1)
+    })
+
+    it("re-run — dedup follows the comment's live position across pushes", async () => {
+      const findings = fixtureReviewResponse.findings
+      const movedFinding = findings[0]
+      if (movedFinding === undefined) {
+        throw new Error("expected at least one fixture finding")
+      }
+      // Anchor was posted 50 lines away from where the finding sits now; the
+      // comment's live position tracked the code as it moved.
+      const staleAnchor = computeAnchorKey({
+        ...movedFinding,
+        line: movedFinding.line - 50,
+      })
+
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          hasPriorBotReview: async () => true,
+          fetchReviewComments: async () => [
+            existingComment(
+              `some comment\n\n<!-- umm-actually:${staleAnchor} -->`,
+              { line: movedFinding.line, originalLine: movedFinding.line - 50 },
+            ),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(findings.length - 1)
+    })
+
+    it("re-run — legacy title-hash anchors don't dedup but the summary still updates", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          hasPriorBotReview: async () => true,
+          fetchReviewComments: async () => [
+            existingComment(
+              "old format\n\n<!-- umm-actually:src/greeter.ts:correctness:ffdf51bc -->",
+            ),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(stubs.submitReviewCalls).toHaveLength(1)
+      expect(stubs.upsertSummaryCommentCalls).toHaveLength(1)
+
+      const summaryCall = first(stubs.upsertSummaryCommentCalls)
+      expect(summaryCall.body).toBe(
+        buildRerunSummary({
+          sha: fixturePrContext.headSha,
+          newCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+          model: "test/model",
+        }),
+      )
+    })
+
+    it("re-run — zero findings from LLM still updates the summary comment", async () => {
       const stubs = makeOrchestrateDeps({
         fixtureResult: {
           review: { analysis: "clean", findings: [] },
         },
         githubClient: {
+          hasPriorBotReview: async () => true,
           fetchReviewComments: async () => [
-            {
-              path: "src/a.ts",
-              body: "body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
-            },
+            existingComment(
+              "body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
+            ),
           ],
         },
       })
@@ -912,7 +1021,7 @@ describe("orchestrate", () => {
       )
     })
 
-    it("does not fetch review comments on skip paths", async () => {
+    it("does not check for prior reviews on skip paths", async () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           fetchDiff: async () => ({ kind: "too_large" as const }),
@@ -922,17 +1031,18 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
+      expect(stubs.hasPriorBotReviewCalls).toHaveLength(0)
       expect(stubs.fetchReviewCommentsCalls).toHaveLength(0)
     })
 
     it("continues without throwing when upsertSummaryComment fails", async () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
+          hasPriorBotReview: async () => true,
           fetchReviewComments: async () => [
-            {
-              path: "src/a.ts",
-              body: "body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
-            },
+            existingComment(
+              "body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
+            ),
           ],
           upsertSummaryComment: async () => {
             throw new Error("API rate limit")
@@ -948,9 +1058,28 @@ describe("orchestrate", () => {
       expect(stubs.submitReviewCalls).toHaveLength(1)
     })
 
-    it("degrades to first run when fetching review comments fails", async () => {
+    it("treats the run as first when the prior-review check fails", async () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
+          hasPriorBotReview: async () => {
+            throw new Error("network error")
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(stubs.fetchReviewCommentsCalls).toHaveLength(0)
+      expect(stubs.submitReviewCalls).toHaveLength(1)
+      expect(stubs.upsertSummaryCommentCalls).toHaveLength(0)
+    })
+
+    it("posts every finding as new when fetching existing comments fails on a re-run", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          hasPriorBotReview: async () => true,
           fetchReviewComments: async () => {
             throw new Error("network error")
           },
@@ -962,7 +1091,7 @@ describe("orchestrate", () => {
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
       expect(stubs.submitReviewCalls).toHaveLength(1)
-      expect(stubs.upsertSummaryCommentCalls).toHaveLength(0)
+      expect(stubs.upsertSummaryCommentCalls).toHaveLength(1)
     })
   })
 })

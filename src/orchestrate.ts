@@ -23,6 +23,7 @@ import {
   isDuplicateFinding,
   mapFindingsToReview,
   RERUN_ANCHOR,
+  type AnchorEntry,
   type ReviewComment,
 } from "./review/comment-mapping.js"
 import { resolveSeverityThreshold, type Finding } from "./review/finding.js"
@@ -110,6 +111,50 @@ const buildReviewPayload = ({
       "Inline comments were unavailable; all findings are listed here:",
   })
   return { body, comments, fallbackBody }
+}
+
+const describeError = (error: unknown): string => {
+  return error instanceof Error
+    ? `[${error.name}]: ${error.message}`
+    : String(error)
+}
+
+/** Whether the bot already posted a review on this PR — the re-run signal.
+ *  Fails open to first-run behavior: a duplicate full review beats silence. */
+const detectRerun = async (
+  githubClient: GithubClient,
+  prNumber: number,
+  logger: Logger,
+): Promise<boolean> => {
+  try {
+    return await githubClient.hasPriorBotReview({ prNumber })
+  } catch (detectError) {
+    logger.warn("failed to check for a prior review — treating as first run", {
+      error: describeError(detectError),
+    })
+    return false
+  }
+}
+
+/** Anchors from the bot's existing inline comments. Empty on fetch failure —
+ *  every finding then posts as new; duplicates beat losing findings. */
+const fetchExistingAnchors = async (
+  githubClient: GithubClient,
+  prNumber: number,
+  logger: Logger,
+): Promise<AnchorEntry[]> => {
+  try {
+    const existingComments = await githubClient.fetchReviewComments({
+      prNumber,
+    })
+    return extractAnchors(existingComments)
+  } catch (fetchError) {
+    logger.warn(
+      "failed to fetch existing comments — treating all findings as new",
+      { error: describeError(fetchError) },
+    )
+    return []
+  }
 }
 
 const SKIPPED_RESULT_BASE: Omit<
@@ -269,42 +314,31 @@ export const orchestrate = async (
     logger.info("filtered non-findings", { droppedAsNonFinding })
   }
 
-  const { selected, droppedByCap } = selectFindings({
-    findings: realFindings,
-    severityThreshold,
-    maxFindings: config.maxFindings,
-  })
-
-  // Step 12.5: cross-run dedup
-  let existingAnchors: { file: string; category: string; line: number }[]
-  try {
-    const existingComments = await githubClient.fetchReviewComments({
-      prNumber: prContext.prNumber,
-    })
-    existingAnchors = extractAnchors(
-      existingComments.map((comment) => comment.body),
-    )
-  } catch (fetchError) {
-    const errorDetail =
-      fetchError instanceof Error
-        ? `[${fetchError.name}]: ${fetchError.message}`
-        : String(fetchError)
-    logger.warn("failed to fetch existing comments — treating as first run", {
-      error: errorDetail,
-    })
-    existingAnchors = []
-  }
-
-  const isRerun = existingAnchors.length > 0
-  const newFindings = isRerun
-    ? selected.filter((f) => !isDuplicateFinding(f, existingAnchors))
-    : selected
+  // Step 12.5: cross-run dedup — before the cap so duplicates don't consume
+  // finding slots. Re-run detection asks GitHub for a prior bot review rather
+  // than inferring from inline anchors, which zero-findings and body-only
+  // first runs never leave behind.
+  const isRerun = await detectRerun(githubClient, prContext.prNumber, logger)
+  const existingAnchors = isRerun
+    ? await fetchExistingAnchors(githubClient, prContext.prNumber, logger)
+    : []
+  const dedupedFindings = isRerun
+    ? realFindings.filter(
+        (finding) => !isDuplicateFinding(finding, existingAnchors),
+      )
+    : realFindings
 
   logger.info("cross-run dedup", {
-    existingAnchorCount: existingAnchors.length,
-    selectedCount: selected.length,
-    newFindingsCount: newFindings.length,
     isRerun,
+    existingAnchorCount: existingAnchors.length,
+    findingsCount: realFindings.length,
+    newFindingsCount: dedupedFindings.length,
+  })
+
+  const { selected, droppedByCap } = selectFindings({
+    findings: dedupedFindings,
+    severityThreshold,
+    maxFindings: config.maxFindings,
   })
 
   // Step 13: post review
@@ -338,7 +372,7 @@ export const orchestrate = async (
     })
 
     return {
-      findingsCount: newFindings.length,
+      findingsCount: selected.length,
       reviewUrl,
       modelUsed,
       skippedReason: "",
@@ -347,14 +381,14 @@ export const orchestrate = async (
   }
 
   // Re-run — post only new findings, upsert summary comment
-  const totalCount = existingAnchors.length + newFindings.length
+  const totalCount = existingAnchors.length + selected.length
   let reviewUrl = ""
 
-  if (newFindings.length > 0) {
+  if (selected.length > 0) {
     const reviewPayload = buildReviewPayload({
-      findings: newFindings,
+      findings: selected,
       commentableByPath,
-      droppedByCap: [],
+      droppedByCap,
       modelUsed,
     })
 
@@ -367,7 +401,7 @@ export const orchestrate = async (
 
     logger.info("re-run review posted", {
       reviewUrl,
-      newFindingsCount: newFindings.length,
+      newFindingsCount: selected.length,
       totalCount,
     })
   } else {
@@ -376,7 +410,7 @@ export const orchestrate = async (
 
   const summaryBody = buildRerunSummary({
     sha: prContext.headSha,
-    newCount: newFindings.length,
+    newCount: selected.length,
     totalCount,
     model: modelUsed,
   })
@@ -387,17 +421,13 @@ export const orchestrate = async (
       anchor: RERUN_ANCHOR,
     })
   } catch (summaryError) {
-    const errorDetail =
-      summaryError instanceof Error
-        ? `[${summaryError.name}]: ${summaryError.message}`
-        : String(summaryError)
     logger.warn("failed to upsert summary comment", {
-      error: errorDetail,
+      error: describeError(summaryError),
     })
   }
 
   return {
-    findingsCount: newFindings.length,
+    findingsCount: selected.length,
     reviewUrl,
     modelUsed,
     skippedReason: "",

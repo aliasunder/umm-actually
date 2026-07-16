@@ -21,6 +21,7 @@ const makeOctokitStub = ({
   getResponses = [],
   createReviewResponses = [],
   listReviewCommentsResponses = [],
+  listReviewsResponses = [],
   listCommentsResponses = [],
   createCommentResponses = [],
   updateCommentResponses = [],
@@ -30,6 +31,7 @@ const makeOctokitStub = ({
   getResponses?: StubResponse[]
   createReviewResponses?: StubResponse[]
   listReviewCommentsResponses?: StubResponse[]
+  listReviewsResponses?: StubResponse[]
   listCommentsResponses?: StubResponse[]
   createCommentResponses?: StubResponse[]
   updateCommentResponses?: StubResponse[]
@@ -39,6 +41,7 @@ const makeOctokitStub = ({
   const getCalls: Record<string, unknown>[] = []
   const createReviewCalls: Record<string, unknown>[] = []
   const listReviewCommentsCalls: Record<string, unknown>[] = []
+  const listReviewsCalls: Record<string, unknown>[] = []
   const listCommentsCalls: Record<string, unknown>[] = []
   const createCommentCalls: Record<string, unknown>[] = []
   const updateCommentCalls: Record<string, unknown>[] = []
@@ -107,6 +110,14 @@ const makeOctokitStub = ({
             "pulls.listReviewComments",
           )
         },
+        listReviews: async (params) => {
+          listReviewsCalls.push(params)
+          return takeNext(
+            listReviewsResponses,
+            listReviewsCalls.length,
+            "pulls.listReviews",
+          )
+        },
       },
       issues: {
         listComments: async (params) => {
@@ -142,6 +153,7 @@ const makeOctokitStub = ({
     getCalls,
     createReviewCalls,
     listReviewCommentsCalls,
+    listReviewsCalls,
     listCommentsCalls,
     createCommentCalls,
     updateCommentCalls,
@@ -594,13 +606,23 @@ describe("submitReview", () => {
 })
 
 describe("fetchReviewComments", () => {
-  it("returns mapped path and body from review comments", async () => {
+  it("returns path, body, and both line positions from review comments", async () => {
     const stub = makeOctokitStub({
       listReviewCommentsResponses: [
         {
           data: [
-            { path: "src/a.ts", body: "comment 1" },
-            { path: "src/b.ts", body: "comment 2" },
+            {
+              path: "src/a.ts",
+              body: "comment 1",
+              line: 48,
+              original_line: 42,
+            },
+            {
+              path: "src/b.ts",
+              body: "comment 2",
+              line: null,
+              original_line: 10,
+            },
           ],
         },
       ],
@@ -610,8 +632,8 @@ describe("fetchReviewComments", () => {
     const comments = await client.fetchReviewComments({ prNumber: 7 })
 
     expect(comments).toEqual([
-      { path: "src/a.ts", body: "comment 1" },
-      { path: "src/b.ts", body: "comment 2" },
+      { path: "src/a.ts", body: "comment 1", line: 48, originalLine: 42 },
+      { path: "src/b.ts", body: "comment 2", line: null, originalLine: 10 },
     ])
     expect(stub.listReviewCommentsCalls).toEqual([
       {
@@ -677,6 +699,26 @@ describe("fetchReviewComments", () => {
     })
   })
 
+  it("maps absent line fields to null", async () => {
+    const stub = makeOctokitStub({
+      listReviewCommentsResponses: [
+        { data: [{ path: "src/a.ts", body: "file-level comment" }] },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchReviewComments({ prNumber: 7 })
+
+    expect(comments).toEqual([
+      {
+        path: "src/a.ts",
+        body: "file-level comment",
+        line: null,
+        originalLine: null,
+      },
+    ])
+  })
+
   it("throws on a malformed response", async () => {
     const stub = makeOctokitStub({
       listReviewCommentsResponses: [{ data: "not an array" }],
@@ -685,6 +727,107 @@ describe("fetchReviewComments", () => {
 
     await expect(client.fetchReviewComments({ prNumber: 7 })).rejects.toThrow(
       "unexpected review comments response shape",
+    )
+  })
+})
+
+describe("hasPriorBotReview", () => {
+  const viewerResponse = { data: { viewer: { login: "umm-actually" } } }
+
+  it("returns true when the bot has a review on the PR", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewsResponses: [
+        {
+          data: [
+            { user: { login: "aliasunder" } },
+            { user: { login: "umm-actually[bot]" } },
+          ],
+        },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.hasPriorBotReview({ prNumber: 7 })
+
+    expect(result).toBe(true)
+    expect(stub.graphqlCalls).toEqual([{ query: "query { viewer { login } }" }])
+    expect(stub.listReviewsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+    ])
+    expect(logger.messages).toContainEqual({
+      level: "info",
+      message: "found prior bot review",
+      data: { prNumber: 7, botLogin: "umm-actually[bot]" },
+    })
+  })
+
+  it("returns false when no review is by the bot, tolerating deleted-user reviews", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewsResponses: [
+        {
+          data: [
+            { user: { login: "aliasunder" } },
+            { user: null },
+            { user: { login: "sourcery-ai[bot]" } },
+          ],
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.hasPriorBotReview({ prNumber: 7 })
+
+    expect(result).toBe(false)
+  })
+
+  it("paginates past a full page of non-bot reviews", async () => {
+    const fullPage = Array.from({ length: 100 }, () => ({
+      user: { login: "aliasunder" },
+    }))
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewsResponses: [
+        { data: fullPage },
+        { data: [{ user: { login: "umm-actually[bot]" } }] },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.hasPriorBotReview({ prNumber: 7 })
+
+    expect(result).toBe(true)
+    expect(stub.listReviewsCalls).toHaveLength(2)
+    expect(stub.listReviewsCalls[1]).toMatchObject({ page: 2 })
+  })
+
+  it("throws on a malformed response", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewsResponses: [{ data: "not an array" }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(client.hasPriorBotReview({ prNumber: 7 })).rejects.toThrow(
+      "unexpected reviews response shape",
+    )
+  })
+
+  it("propagates errors from the viewer query", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [{ error: new Error("token expired") }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(client.hasPriorBotReview({ prNumber: 7 })).rejects.toThrow(
+      "token expired",
     )
   })
 })

@@ -29,56 +29,82 @@ const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->/
 
 /**
  * Findings within this many lines of an existing anchor in the same
- * file+category are treated as duplicates. LLMs drift on the exact
- * line they report for the same conceptual issue across runs.
+ * file+category are treated as duplicates. This only needs to absorb LLM
+ * re-anchoring drift for the same conceptual issue — code motion between
+ * pushes is handled by preferring the comment's live position (which GitHub
+ * keeps updated) over the line embedded at post time. Kept small because a
+ * too-wide window silently suppresses genuinely new findings, while a
+ * too-narrow one merely produces a visible duplicate.
  */
-const LINE_PROXIMITY = 20
+const LINE_PROXIMITY = 5
 
 export type AnchorEntry = { file: string; category: string; line: number }
+
+/** What extractAnchors needs from an existing inline comment: the body
+ *  (carrying the anchor key) plus GitHub's two positions — `line` is the
+ *  current spot on the latest diff (null once outdated), `originalLine` is
+ *  where the comment sat when posted. */
+export type AnchorSource = {
+  body: string
+  line: number | null
+  originalLine: number | null
+}
 
 /** Deterministic dedup key for a finding — file + category + line. */
 export const computeAnchorKey = (
   finding: Pick<Finding, "file" | "category" | "line">,
 ): string => `${finding.file}:${finding.category}:${finding.line}`
 
-/**
- * Parses anchor keys from existing inline comment bodies.
- * Skips old-format keys (title-hash) that don't end in a numeric line.
- */
-export const extractAnchors = (commentBodies: string[]): AnchorEntry[] => {
-  const entries: AnchorEntry[] = []
-  for (const body of commentBodies) {
-    const match = ANCHOR_PATTERN.exec(body)
-    if (!match?.[1]) continue
-    const key = match[1]
-    const lastColon = key.lastIndexOf(":")
-    if (lastColon === -1) continue
-    const lineStr = key.slice(lastColon + 1)
-    const line = Number(lineStr)
-    if (!Number.isInteger(line) || line <= 0) continue
-    const rest = key.slice(0, lastColon)
-    const catColon = rest.lastIndexOf(":")
-    if (catColon === -1) continue
-    entries.push({
-      file: rest.slice(0, catColon),
-      category: rest.slice(catColon + 1),
-      line,
-    })
+/** Parses one `file:category:line` anchor key out of a comment body.
+ *  Returns null for bodies without an anchor and for old-format keys
+ *  (title-hash) that don't end in a numeric line. */
+const parseAnchorKey = (body: string): AnchorEntry | null => {
+  const match = ANCHOR_PATTERN.exec(body)
+  if (!match?.[1]) return null
+  const key = match[1]
+  const lastColon = key.lastIndexOf(":")
+  if (lastColon === -1) return null
+  const line = Number(key.slice(lastColon + 1))
+  if (!Number.isInteger(line) || line <= 0) return null
+  const rest = key.slice(0, lastColon)
+  const categoryColon = rest.lastIndexOf(":")
+  if (categoryColon === -1) return null
+  return {
+    file: rest.slice(0, categoryColon),
+    category: rest.slice(categoryColon + 1),
+    line,
   }
-  return entries
+}
+
+/**
+ * Parses anchor entries from existing inline comments. The anchor key
+ * provides file and category; for position, the comment's live line is
+ * preferred over the line embedded at post time, so dedup follows code
+ * motion across pushes. Falls back to `originalLine`, then the anchor's
+ * own line, when the comment has gone outdated.
+ */
+export const extractAnchors = (comments: AnchorSource[]): AnchorEntry[] => {
+  return comments.flatMap((comment) => {
+    const anchor = parseAnchorKey(comment.body)
+    if (anchor === null) return []
+    const line = comment.line ?? comment.originalLine ?? anchor.line
+    return [{ ...anchor, line }]
+  })
 }
 
 /** True when a finding is within LINE_PROXIMITY of an existing anchor. */
 export const isDuplicateFinding = (
   finding: Pick<Finding, "file" | "category" | "line">,
   anchors: AnchorEntry[],
-): boolean =>
-  anchors.some(
-    (a) =>
-      a.file === finding.file &&
-      a.category === finding.category &&
-      Math.abs(a.line - finding.line) <= LINE_PROXIMITY,
-  )
+): boolean => {
+  return anchors.some((anchor) => {
+    return (
+      anchor.file === finding.file &&
+      anchor.category === finding.category &&
+      Math.abs(anchor.line - finding.line) <= LINE_PROXIMITY
+    )
+  })
+}
 
 const findingTag = (finding: Finding): string =>
   `**[${finding.severity}/${finding.category}]** ${finding.title}`

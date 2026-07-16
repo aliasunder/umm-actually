@@ -9,6 +9,7 @@ import {
   isDuplicateFinding,
   mapFindingsToReview,
   RERUN_ANCHOR,
+  type AnchorSource,
 } from "../comment-mapping.js"
 import { makeFinding } from "./make-finding.js"
 
@@ -383,42 +384,115 @@ describe("computeAnchorKey", () => {
   })
 })
 
+const anchorSource = (
+  body: string,
+  positions: { line?: number | null; originalLine?: number | null } = {},
+): AnchorSource => ({
+  body,
+  line: positions.line ?? null,
+  originalLine: positions.originalLine ?? null,
+})
+
 describe("extractAnchors", () => {
-  it("parses line-based anchor keys from comment bodies", () => {
-    const bodies = [
-      "Some comment body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
-      "Another body\n\n<!-- umm-actually:src/b.ts:security:100 -->",
+  it("prefers the comment's live line over the anchor's embedded line", () => {
+    const comments = [
+      anchorSource(
+        "Some comment body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
+        { line: 48, originalLine: 42 },
+      ),
+      anchorSource(
+        "Another body\n\n<!-- umm-actually:src/b.ts:security:100 -->",
+        { line: 100, originalLine: 100 },
+      ),
     ]
 
-    const anchors = extractAnchors(bodies)
+    const anchors = extractAnchors(comments)
 
     expect(anchors).toEqual([
-      { file: "src/a.ts", category: "correctness", line: 42 },
+      { file: "src/a.ts", category: "correctness", line: 48 },
       { file: "src/b.ts", category: "security", line: 100 },
     ])
   })
 
-  it("skips old-format title-hash keys", () => {
-    const bodies = [
-      "Old format\n\n<!-- umm-actually:src/a.ts:correctness:abcd1234 -->",
-      "New format\n\n<!-- umm-actually:src/b.ts:security:55 -->",
+  it("falls back to originalLine when the comment has gone outdated", () => {
+    const comments = [
+      anchorSource("Body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->", {
+        line: null,
+        originalLine: 40,
+      }),
     ]
 
-    const anchors = extractAnchors(bodies)
+    const anchors = extractAnchors(comments)
+
+    expect(anchors).toEqual([
+      { file: "src/a.ts", category: "correctness", line: 40 },
+    ])
+  })
+
+  it("falls back to the anchor's embedded line when both positions are null", () => {
+    const comments = [
+      anchorSource("Body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->"),
+    ]
+
+    const anchors = extractAnchors(comments)
+
+    expect(anchors).toEqual([
+      { file: "src/a.ts", category: "correctness", line: 42 },
+    ])
+  })
+
+  it("skips old-format title-hash keys", () => {
+    const comments = [
+      anchorSource(
+        "Old format\n\n<!-- umm-actually:src/a.ts:correctness:abcd1234 -->",
+      ),
+      anchorSource("New format\n\n<!-- umm-actually:src/b.ts:security:55 -->"),
+    ]
+
+    const anchors = extractAnchors(comments)
 
     expect(anchors).toEqual([
       { file: "src/b.ts", category: "security", line: 55 },
     ])
   })
 
-  it("ignores bodies without anchors", () => {
-    const bodies = [
-      "A comment from a human reviewer",
-      "CodeRabbit: some finding here",
-      "Body with\n\n<!-- umm-actually:src/a.ts:correctness:10 -->",
+  it.each([
+    { name: "no colons", key: "garbage" },
+    { name: "missing category segment", key: "42" },
+    { name: "non-integer line", key: "src/a.ts:correctness:4.2" },
+    { name: "zero line", key: "src/a.ts:correctness:0" },
+    { name: "negative line", key: "src/a.ts:correctness:-5" },
+    { name: "empty line segment", key: "src/a.ts:correctness:" },
+  ])("skips a malformed key ($name)", ({ key }) => {
+    const comments = [anchorSource(`Body\n\n<!-- umm-actually:${key} -->`)]
+
+    expect(extractAnchors(comments)).toEqual([])
+  })
+
+  it("uses only the first anchor when a body contains several", () => {
+    const comments = [
+      anchorSource(
+        "Body\n\n<!-- umm-actually:src/a.ts:correctness:10 -->\n<!-- umm-actually:src/b.ts:security:20 -->",
+      ),
     ]
 
-    const anchors = extractAnchors(bodies)
+    const anchors = extractAnchors(comments)
+
+    expect(anchors).toEqual([
+      { file: "src/a.ts", category: "correctness", line: 10 },
+    ])
+  })
+
+  it("ignores bodies without anchors", () => {
+    const comments = [
+      anchorSource("A comment from a human reviewer"),
+      anchorSource("CodeRabbit: some finding here"),
+      anchorSource(
+        "Body with\n\n<!-- umm-actually:src/a.ts:correctness:10 -->",
+      ),
+    ]
+
+    const anchors = extractAnchors(comments)
 
     expect(anchors).toEqual([
       { file: "src/a.ts", category: "correctness", line: 10 },
@@ -442,18 +516,18 @@ describe("isDuplicateFinding", () => {
     ).toBe(true)
   })
 
-  it("matches a finding within LINE_PROXIMITY (20) lines", () => {
+  it("matches a finding within LINE_PROXIMITY (5) lines", () => {
     const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
 
     expect(
       isDuplicateFinding(
-        { file: "src/a.ts", category: "correctness", line: 65 },
+        { file: "src/a.ts", category: "correctness", line: 55 },
         anchors,
       ),
     ).toBe(true)
     expect(
       isDuplicateFinding(
-        { file: "src/a.ts", category: "correctness", line: 35 },
+        { file: "src/a.ts", category: "correctness", line: 45 },
         anchors,
       ),
     ).toBe(true)
@@ -464,7 +538,13 @@ describe("isDuplicateFinding", () => {
 
     expect(
       isDuplicateFinding(
-        { file: "src/a.ts", category: "correctness", line: 71 },
+        { file: "src/a.ts", category: "correctness", line: 56 },
+        anchors,
+      ),
+    ).toBe(false)
+    expect(
+      isDuplicateFinding(
+        { file: "src/a.ts", category: "correctness", line: 44 },
         anchors,
       ),
     ).toBe(false)

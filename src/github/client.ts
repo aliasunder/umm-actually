@@ -43,6 +43,13 @@ export type OctokitLike = {
         per_page?: number
         page?: number
       }): Promise<{ data: unknown }>
+      listReviews(params: {
+        owner: string
+        repo: string
+        pull_number: number
+        per_page?: number
+        page?: number
+      }): Promise<{ data: unknown }>
     }
     issues: {
       listComments(params: {
@@ -74,6 +81,16 @@ export type SubmitReviewResult = { url: string; usedFallbackBody: boolean }
 
 export type UpsertCommentResult = { url: string; created: boolean }
 
+/** An existing inline review comment, with both positions GitHub tracks:
+ *  `line` is the current spot on the latest diff (null once the comment goes
+ *  outdated); `originalLine` is where it sat when posted. */
+export type ExistingReviewComment = {
+  path: string
+  body: string
+  line: number | null
+  originalLine: number | null
+}
+
 export type GithubClient = {
   fetchPullRequest: (params: { prNumber: number }) => Promise<PrContext>
   fetchDiff: (params: { prNumber: number }) => Promise<DiffFetchResult>
@@ -89,7 +106,8 @@ export type GithubClient = {
   }) => Promise<SubmitReviewResult>
   fetchReviewComments: (params: {
     prNumber: number
-  }) => Promise<{ path: string; body: string }[]>
+  }) => Promise<ExistingReviewComment[]>
+  hasPriorBotReview: (params: { prNumber: number }) => Promise<boolean>
   upsertSummaryComment: (params: {
     prNumber: number
     body: string
@@ -111,7 +129,16 @@ const prResponseSchema = z.object({
 const urlResponseSchema = z.object({ html_url: z.string() })
 
 const reviewCommentListSchema = z.array(
-  z.object({ path: z.string(), body: z.string() }),
+  z.object({
+    path: z.string(),
+    body: z.string(),
+    line: z.int().positive().nullish(),
+    original_line: z.int().positive().nullish(),
+  }),
+)
+
+const reviewListSchema = z.array(
+  z.object({ user: z.object({ login: z.string() }).nullable() }),
 )
 
 const issueCommentListSchema = z.array(
@@ -207,15 +234,21 @@ export const createGithubClient = (
     type: z.literal("Bot"),
   })
 
+  /** The app's own bot login (`<app-slug>[bot]`) — the author of everything
+   *  this client posts. */
+  const resolveBotLogin = async (): Promise<string> => {
+    const viewer = await octokit.graphql<{
+      viewer: { login: string }
+    }>("query { viewer { login } }")
+    return `${viewer.viewer.login}[bot]`
+  }
+
   const requestBotReview = async ({
     prNodeId,
   }: {
     prNodeId: string
   }): Promise<void> => {
-    const viewer = await octokit.graphql<{
-      viewer: { login: string }
-    }>("query { viewer { login } }")
-    const botLogin = `${viewer.viewer.login}[bot]`
+    const botLogin = await resolveBotLogin()
 
     const response = await octokit.rest.users.getByUsername({
       username: botLogin,
@@ -292,8 +325,8 @@ export const createGithubClient = (
     prNumber,
   }: {
     prNumber: number
-  }): Promise<{ path: string; body: string }[]> => {
-    const allComments: { path: string; body: string }[] = []
+  }): Promise<ExistingReviewComment[]> => {
+    const allComments: ExistingReviewComment[] = []
 
     for (let page = 1; page <= MAX_PAGES; page++) {
       const response = await octokit.rest.pulls.listReviewComments({
@@ -307,7 +340,14 @@ export const createGithubClient = (
       if (!parsed.success) {
         throw new Error("unexpected review comments response shape")
       }
-      allComments.push(...parsed.data)
+      allComments.push(
+        ...parsed.data.map((comment) => ({
+          path: comment.path,
+          body: comment.body,
+          line: comment.line ?? null,
+          originalLine: comment.original_line ?? null,
+        })),
+      )
       if (parsed.data.length < PER_PAGE) break
       if (page === MAX_PAGES) {
         logger.warn("review comments page cap reached", {
@@ -322,6 +362,41 @@ export const createGithubClient = (
       count: allComments.length,
     })
     return allComments
+  }
+
+  /** Whether this bot has already posted any review on the PR — the re-run
+   *  signal. Inline anchors can't serve here: zero-findings and body-only
+   *  first runs leave none. */
+  const hasPriorBotReview = async ({
+    prNumber,
+  }: {
+    prNumber: number
+  }): Promise<boolean> => {
+    const botLogin = await resolveBotLogin()
+
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const response = await octokit.rest.pulls.listReviews({
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: PER_PAGE,
+        page,
+      })
+      const parsed = reviewListSchema.safeParse(response.data)
+      if (!parsed.success) {
+        throw new Error("unexpected reviews response shape")
+      }
+      if (parsed.data.some((review) => review.user?.login === botLogin)) {
+        logger.info("found prior bot review", { prNumber, botLogin })
+        return true
+      }
+      if (parsed.data.length < PER_PAGE) break
+      if (page === MAX_PAGES) {
+        logger.warn("reviews page cap reached", { prNumber })
+      }
+    }
+
+    return false
   }
 
   const upsertSummaryComment = async ({
@@ -396,6 +471,7 @@ export const createGithubClient = (
     requestBotReview,
     submitReview,
     fetchReviewComments,
+    hasPriorBotReview,
     upsertSummaryComment,
   }
 }
