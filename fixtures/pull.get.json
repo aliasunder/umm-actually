@@ -1,5 +1,6 @@
 {
   "number": 7,
+  "node_id": "PR_kwDOMock7",
   "state": "open",
   "title": "feat: trim names before greeting",
   "body": "Trims whitespace from names and validates registry keys.",

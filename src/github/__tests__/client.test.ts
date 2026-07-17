@@ -15,6 +15,8 @@ const pullGetResponse: Record<string, unknown> = JSON.parse(
 type StubResponse = { data: unknown } | { error: unknown }
 
 /** Records every call; replays queued responses in order, throwing queued errors. */
+type GraphqlResponse = { data: unknown } | { error: unknown }
+
 const makeOctokitStub = ({
   getResponses = [],
   createReviewResponses = [],
@@ -22,6 +24,8 @@ const makeOctokitStub = ({
   listCommentsResponses = [],
   createCommentResponses = [],
   updateCommentResponses = [],
+  getByUsernameResponses = [],
+  graphqlResponses = [],
 }: {
   getResponses?: StubResponse[]
   createReviewResponses?: StubResponse[]
@@ -29,6 +33,8 @@ const makeOctokitStub = ({
   listCommentsResponses?: StubResponse[]
   createCommentResponses?: StubResponse[]
   updateCommentResponses?: StubResponse[]
+  getByUsernameResponses?: StubResponse[]
+  graphqlResponses?: GraphqlResponse[]
 } = {}) => {
   const getCalls: Record<string, unknown>[] = []
   const createReviewCalls: Record<string, unknown>[] = []
@@ -36,6 +42,11 @@ const makeOctokitStub = ({
   const listCommentsCalls: Record<string, unknown>[] = []
   const createCommentCalls: Record<string, unknown>[] = []
   const updateCommentCalls: Record<string, unknown>[] = []
+  const getByUsernameCalls: Record<string, unknown>[] = []
+  const graphqlCalls: {
+    query: string
+    parameters?: Record<string, unknown>
+  }[] = []
 
   const takeNext = (
     queue: StubResponse[],
@@ -51,7 +62,30 @@ const makeOctokitStub = ({
   }
 
   const octokit: OctokitLike = {
+    graphql: <T = unknown>(
+      query: string,
+      parameters?: Record<string, unknown>,
+    ): Promise<T> => {
+      graphqlCalls.push({ query, ...(parameters ? { parameters } : {}) })
+      const next = graphqlResponses[graphqlCalls.length - 1]
+      if (next === undefined) {
+        throw new Error(`stub: unexpected graphql call #${graphqlCalls.length}`)
+      }
+      if ("error" in next) return Promise.reject(next.error)
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- test stub must satisfy the generic signature
+      return Promise.resolve(next.data as T)
+    },
     rest: {
+      users: {
+        getByUsername: async (params: Record<string, unknown>) => {
+          getByUsernameCalls.push(params)
+          return takeNext(
+            getByUsernameResponses,
+            getByUsernameCalls.length,
+            "users.getByUsername",
+          )
+        },
+      },
       pulls: {
         get: async (params) => {
           getCalls.push(params)
@@ -111,6 +145,8 @@ const makeOctokitStub = ({
     listCommentsCalls,
     createCommentCalls,
     updateCommentCalls,
+    getByUsernameCalls,
+    graphqlCalls,
   }
 }
 
@@ -154,6 +190,7 @@ describe("fetchPullRequest", () => {
     ])
     expect(prContext).toEqual({
       prNumber: 7,
+      nodeId: "PR_kwDOMock7",
       title: "feat: trim names before greeting",
       body: "Trims whitespace from names and validates registry keys.",
       headSha: "abc123def456abc123def456abc123def456abc1",
@@ -247,6 +284,130 @@ describe("fetchDiff", () => {
     await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow(
       "expected a unified diff string from the diff media type",
     )
+  })
+})
+
+describe("requestBotReview", () => {
+  it("discovers the bot identity via REST and requests review via GraphQL", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually" } } },
+        { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
+      ],
+      getByUsernameResponses: [
+        {
+          data: {
+            node_id: "BOT_kgDOEewBdQ",
+            login: "umm-actually[bot]",
+            type: "Bot",
+          },
+        },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
+
+    expect(stub.graphqlCalls).toHaveLength(2)
+    expect(stub.graphqlCalls[0]?.query).toBe("query { viewer { login } }")
+    expect(stub.getByUsernameCalls).toEqual([{ username: "umm-actually[bot]" }])
+    expect(stub.graphqlCalls[1]?.parameters).toEqual({
+      prId: "PR_kwDOMock7",
+      botIds: ["BOT_kgDOEewBdQ"],
+    })
+    expect(logger.messages).toContainEqual({
+      level: "info",
+      message: "requested bot review",
+      data: { login: "umm-actually[bot]" },
+    })
+  })
+
+  it("logs a warning when the bot user response is malformed", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [{ data: { viewer: { login: "umm-actually" } } }],
+      getByUsernameResponses: [{ data: { message: "Not Found" } }],
+    })
+    const { client, logger } = makeClient(stub)
+
+    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
+
+    expect(stub.graphqlCalls).toHaveLength(1)
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "could not resolve bot user for review request",
+      data: { botLogin: "umm-actually[bot]" },
+    })
+  })
+
+  it("propagates errors from the viewer query", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [{ error: new Error("token expired") }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.requestBotReview({ prNodeId: "PR_kwDOMock7" }),
+    ).rejects.toThrow("token expired")
+  })
+
+  it("propagates errors from the getByUsername REST call", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [{ data: { viewer: { login: "umm-actually" } } }],
+      getByUsernameResponses: [{ error: makeStatusError(404) }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.requestBotReview({ prNodeId: "PR_kwDOMock7" }),
+    ).rejects.toThrow("HTTP 404")
+  })
+
+  it("propagates errors from the requestReviews mutation", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually" } } },
+        { error: new Error("insufficient permissions") },
+      ],
+      getByUsernameResponses: [
+        {
+          data: {
+            node_id: "BOT_kgDOEewBdQ",
+            login: "umm-actually[bot]",
+            type: "Bot",
+          },
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.requestBotReview({ prNodeId: "PR_kwDOMock7" }),
+    ).rejects.toThrow("insufficient permissions")
+  })
+
+  it("rejects a non-Bot user type", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [{ data: { viewer: { login: "some-app" } } }],
+      getByUsernameResponses: [
+        {
+          data: {
+            node_id: "MDQ6VXNlcjEyMzQ=",
+            login: "some-app[bot]",
+            type: "User",
+          },
+        },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
+
+    expect(stub.graphqlCalls).toHaveLength(1)
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "could not resolve bot user for review request",
+      data: { botLogin: "some-app[bot]" },
+    })
   })
 })
 
