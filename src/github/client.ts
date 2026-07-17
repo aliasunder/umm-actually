@@ -17,9 +17,6 @@ export type OctokitLike = {
     parameters?: Record<string, unknown>,
   ): Promise<T>
   rest: {
-    users: {
-      getByUsername(params: { username: string }): Promise<{ data: unknown }>
-    }
     pulls: {
       get(params: {
         owner: string
@@ -95,7 +92,6 @@ export type FindingsReviewResult =
 export type GithubClient = {
   fetchPullRequest: (params: { prNumber: number }) => Promise<PrContext>
   fetchDiff: (params: { prNumber: number }) => Promise<DiffFetchResult>
-  requestBotReview: (params: { prNodeId: string }) => Promise<void>
   submitReview: (params: {
     prNumber: number
     commitId: string
@@ -128,7 +124,6 @@ export type GithubClient = {
  *  pulls.get response must provide to build a PrContext. */
 const prResponseSchema = z.object({
   number: z.int().positive(),
-  node_id: z.string(),
   title: z.string(),
   body: z.string().nullable(),
   head: z.object({ sha: z.string(), ref: z.string() }),
@@ -200,7 +195,6 @@ export const createGithubClient = (
     const pullRequest = parsed.data
     return {
       prNumber: pullRequest.number,
-      nodeId: pullRequest.node_id,
       title: pullRequest.title,
       body: pullRequest.body,
       headSha: pullRequest.head.sha,
@@ -237,12 +231,6 @@ export const createGithubClient = (
     }
   }
 
-  const botNodeIdSchema = z.object({
-    node_id: z.string().min(1),
-    login: z.string().min(1),
-    type: z.literal("Bot"),
-  })
-
   /** The token identity's login — the author of everything this client
    *  posts. Memoized: the login never changes within a run, and every method
    *  comparing or resolving authorship needs it. App installation tokens
@@ -260,33 +248,6 @@ export const createGithubClient = (
     botLoginCache =
       __typename === "Bot" && !login.endsWith("[bot]") ? `${login}[bot]` : login
     return botLoginCache
-  }
-
-  const requestBotReview = async ({
-    prNodeId,
-  }: {
-    prNodeId: string
-  }): Promise<void> => {
-    const botLogin = await resolveBotLogin()
-
-    const response = await octokit.rest.users.getByUsername({
-      username: botLogin,
-    })
-    const parsed = botNodeIdSchema.safeParse(response.data)
-    if (!parsed.success) {
-      logger.warn("could not resolve bot user for review request", { botLogin })
-      return
-    }
-
-    await octokit.graphql(
-      `mutation($prId: ID!, $botIds: [ID!]!) {
-        requestReviews(input: { pullRequestId: $prId, botIds: $botIds }) {
-          pullRequest { id }
-        }
-      }`,
-      { prId: prNodeId, botIds: [parsed.data.node_id] },
-    )
-    logger.info("requested bot review", { login: parsed.data.login })
   }
 
   /** Body-only review — the vehicle for skip notices. */
@@ -531,7 +492,6 @@ export const createGithubClient = (
   return {
     fetchPullRequest,
     fetchDiff,
-    requestBotReview,
     submitReview,
     postFindingsReview,
     postIssueComment,

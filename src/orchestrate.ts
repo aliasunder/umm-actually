@@ -236,15 +236,6 @@ export const orchestrate = async (
           prNumber: resolvedEvent.prNumber,
         })
 
-  // Step 3.5: request the bot as a PR reviewer (best-effort)
-  try {
-    await githubClient.requestBotReview({ prNodeId: prContext.nodeId })
-  } catch (requestError) {
-    logger.warn("failed to request bot review", {
-      error: describeError(requestError),
-    })
-  }
-
   const postSkipReview = async (reason: string): Promise<OrchestrateResult> => {
     const body = buildSkipBody(reason)
     const { url } = await githubClient.submitReview({
