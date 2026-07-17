@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto"
 import type { CommentableFile } from "../diff/commentable-lines.js"
 import type { Finding } from "./finding.js"
 
@@ -25,30 +24,101 @@ export type MappedReview = {
  */
 const SNAP_DISTANCE = 3
 
-/** Matches `<!-- umm-actually:KEY -->` -- the hidden HTML anchor in each inline finding. Group 1 is the dedup key. */
-const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->/
+/** Matches `<!-- umm-actually:KEY -->` only at the end of a body — the
+ *  genuine anchor is always the last thing the bot appends. An
+ *  anchor-shaped string earlier in the body (e.g. model text quoting one)
+ *  must not win the extraction, or it would suppress future findings at
+ *  whatever location it names. Group 1 is the dedup key. */
+const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->\s*$/
 
-/** Deterministic dedup key for a finding — file + category + 8-char title hash. */
-export const computeAnchorKey = (
-  finding: Pick<Finding, "file" | "category" | "title">,
-): string => {
-  const titleHash = createHash("sha256")
-    .update(finding.title)
-    .digest("hex")
-    .slice(0, 8)
-  return `${finding.file}:${finding.category}:${titleHash}`
+/**
+ * Findings within this many lines of an existing anchor in the same
+ * file+category are treated as duplicates. This only needs to absorb LLM
+ * re-anchoring drift for the same conceptual issue — code motion between
+ * pushes is handled by preferring the comment's live position (which GitHub
+ * keeps updated) over the line embedded at post time. Kept small because a
+ * too-wide window silently suppresses genuinely new findings, while a
+ * too-narrow one merely produces a visible duplicate.
+ */
+const LINE_PROXIMITY = 5
+
+export type AnchorEntry = { file: string; category: string; line: number }
+
+/** What extractAnchors needs from an existing inline comment: the body
+ *  (carrying the anchor key) plus GitHub's two positions — `line` is the
+ *  current spot on the latest diff (null once outdated), `originalLine` is
+ *  where the comment sat when posted. */
+export type AnchorSource = {
+  body: string
+  line: number | null
+  originalLine: number | null
 }
 
-/** Extracts dedup keys from existing inline comment bodies. */
-export const extractAnchorKeys = (commentBodies: string[]): Set<string> => {
-  const keys = new Set<string>()
-  for (const body of commentBodies) {
-    const match = ANCHOR_PATTERN.exec(body)
-    if (match?.[1]) {
-      keys.add(match[1])
-    }
+/** Deterministic dedup key for a finding — file + category + line. */
+export const computeAnchorKey = (
+  finding: Pick<Finding, "file" | "category" | "line">,
+): string => `${finding.file}:${finding.category}:${finding.line}`
+
+/** Splits a `file:category:line` key from the right: the file segment may
+ *  itself contain colons, categories never do, and the line must be a
+ *  positive integer — old-format keys (title-hash) fail that last
+ *  requirement and are rejected. */
+const ANCHOR_KEY_PATTERN = /^(?<file>.+):(?<category>[^:]+):(?<line>[1-9]\d*)$/
+
+/** Parses one `file:category:line` anchor key out of a comment body.
+ *  Returns null for bodies without an anchor and for old-format keys. */
+const parseAnchorKey = (body: string): AnchorEntry | null => {
+  const key = ANCHOR_PATTERN.exec(body)?.[1]
+  if (!key) return null
+  const segments = ANCHOR_KEY_PATTERN.exec(key)?.groups
+  if (!segments?.file || !segments.category || !segments.line) return null
+  return {
+    file: segments.file,
+    category: segments.category,
+    line: Number(segments.line),
   }
-  return keys
+}
+
+/**
+ * Parses anchor entries from existing inline comments. The anchor key
+ * provides file and category; for position, the comment's live line is
+ * preferred over the line embedded at post time, so dedup follows code
+ * motion across pushes. Falls back to `originalLine`, then the anchor's
+ * own line, when the comment has gone outdated.
+ */
+export const extractAnchors = (comments: AnchorSource[]): AnchorEntry[] => {
+  return comments.flatMap((comment) => {
+    const anchor = parseAnchorKey(comment.body)
+    if (anchor === null) return []
+    const line = comment.line ?? comment.originalLine ?? anchor.line
+    return [{ ...anchor, line }]
+  })
+}
+
+/** True when a finding is within LINE_PROXIMITY of an existing anchor.
+ *  Takes any anchor-shaped location — a Finding satisfies it, and so does
+ *  another AnchorEntry (coalesceAnchors compares anchors to anchors). */
+export const isDuplicateFinding = (
+  finding: AnchorEntry,
+  anchors: AnchorEntry[],
+): boolean => {
+  return anchors.some((anchor) => {
+    return (
+      anchor.file === finding.file &&
+      anchor.category === finding.category &&
+      Math.abs(anchor.line - finding.line) <= LINE_PROXIMITY
+    )
+  })
+}
+
+/** Collapses anchors the proximity rule would treat as one finding. A
+ *  fail-open fetch can repost an already-anchored finding, leaving two
+ *  anchors for it — the status comment counts findings, not anchors. */
+export const coalesceAnchors = (anchors: AnchorEntry[]): AnchorEntry[] => {
+  return anchors.reduce<AnchorEntry[]>((kept, anchor) => {
+    if (isDuplicateFinding(anchor, kept)) return kept
+    return [...kept, anchor]
+  }, [])
 }
 
 const findingTag = (finding: Finding): string =>
@@ -72,10 +142,9 @@ const renderCommentBody = (
   finding: Finding,
   snappedFromLine?: number,
 ): string => {
-  const snapNote =
-    snappedFromLine === undefined
-      ? ""
-      : `\n\n_Anchored near line ${snappedFromLine} (the reported line is not part of the diff)._`
+  const snapNote = snappedFromLine
+    ? `\n\n_Anchored near line ${snappedFromLine} (the reported line is not part of the diff)._`
+    : ""
   const anchor = `\n\n<!-- umm-actually:${computeAnchorKey(finding)} -->`
   return `${findingTag(finding)} _(confidence: ${finding.confidence})_
 
@@ -142,32 +211,31 @@ const classifyFinding = (
   commentableByPath: Map<string, CommentableFile>,
 ): { comment?: ReviewComment; bodyFinding?: Finding } => {
   const commentable = commentableByPath.get(finding.file)
-  if (commentable === undefined) return { bodyFinding: finding }
+  if (!commentable) return { bodyFinding: finding }
 
   if (commentable.rightLines.has(finding.line)) {
     const endLine = multiLineEnd(finding, commentable)
     // GitHub's API: `line` is the LAST line of a multi-line range, `start_line` the first
-    const comment: ReviewComment =
-      endLine === undefined
-        ? {
-            path: finding.file,
-            line: finding.line,
-            side: "RIGHT",
-            body: renderCommentBody(finding),
-          }
-        : {
-            path: finding.file,
-            line: endLine,
-            side: "RIGHT",
-            start_line: finding.line,
-            start_side: "RIGHT",
-            body: renderCommentBody(finding),
-          }
+    const comment: ReviewComment = !endLine
+      ? {
+          path: finding.file,
+          line: finding.line,
+          side: "RIGHT",
+          body: renderCommentBody(finding),
+        }
+      : {
+          path: finding.file,
+          line: endLine,
+          side: "RIGHT",
+          start_line: finding.line,
+          start_side: "RIGHT",
+          body: renderCommentBody(finding),
+        }
     return { comment }
   }
 
   const snappedLine = nearestCommentableLine(finding.line, commentable)
-  if (snappedLine !== undefined) {
+  if (snappedLine) {
     return {
       comment: {
         path: finding.file,
@@ -184,9 +252,9 @@ const classifyFinding = (
 /**
  * Splits findings into inline review comments (anchored to commentable diff
  * lines) and body findings (traced regressions / pre-existing bugs outside
- * the diff — expected output, rendered in the review body). GitHub rejects
- * the whole review on one bad anchor, so anything not verifiably anchorable
- * goes to the body.
+ * the diff — expected output, posted as individual issue comments). GitHub
+ * rejects the whole review on one bad anchor, so anything not verifiably
+ * anchorable is kept out of the inline batch.
  */
 export const mapFindingsToReview = ({
   findings,
@@ -200,85 +268,88 @@ export const mapFindingsToReview = ({
   )
 
   const comments = mapped.flatMap((entry) =>
-    entry.comment === undefined ? [] : [entry.comment],
+    entry.comment ? [entry.comment] : [],
   )
   const bodyFindings = mapped.flatMap((entry) =>
-    entry.bodyFinding === undefined ? [] : [entry.bodyFinding],
+    entry.bodyFinding ? [entry.bodyFinding] : [],
   )
   return { comments, bodyFindings }
 }
 
-const renderBodyFinding = (finding: Finding): string =>
-  `- ${findingTag(finding)} — \`${finding.file}:${finding.line}\` _(confidence: ${finding.confidence})_
-  ${finding.description}
-  **Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}`
+/** Invisible body for the review that carries inline findings — the review
+ *  exists purely as the batching vehicle (one notification, no timeline
+ *  prose); all narration lives in the status comment. An HTML comment
+ *  satisfies GitHub's body requirement while rendering as nothing. */
+export const REVIEW_MARKER = "<!-- umm-actually-review -->"
 
-/** The review's top-level body: summary, body findings section, cap note, attribution. */
-export const buildReviewBody = ({
-  bodyFindings,
+/** Identifies the single updatable status comment. */
+export const STATUS_ANCHOR = "<!-- umm-actually-status -->"
+
+/** A beyond-diff finding posted as its own issue comment — a new comment is
+ *  a visible event to PR watchers, unlike an in-place status update. Carries
+ *  its dedup anchor like any inline comment. */
+export const renderStandaloneFinding = (finding: Finding): string => {
+  return `${findingTag(finding)} _(confidence: ${finding.confidence})_
+
+\`${finding.file}:${finding.line}\` — beyond the diff's line ranges, in code the changes touch or depend on.
+
+${finding.description}
+
+**Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}
+
+<!-- umm-actually:${computeAnchorKey(finding)} -->`
+}
+
+/** The single always-upserted status comment — the receipt that a run
+ *  happened and the running cross-run state. Never carries finding text;
+ *  findings are their own comments. Counts reflect what actually landed on
+ *  the PR: findings whose posts failed are called out separately, since they
+ *  carry no anchor and re-report on the next run. */
+export const buildStatusComment = ({
+  sha,
+  isFirstRun,
+  postedCount,
+  unpostedCount,
+  totalCount,
   droppedByCap,
   model,
-  inlineCommentCount = 0,
-  bodyFindingsHeading = "Findings beyond the diff",
-  bodyFindingsDescription = "These are in code the changes touch or depend on, outside the diff's line ranges:",
 }: {
-  bodyFindings: Finding[]
+  sha: string
+  isFirstRun: boolean
+  postedCount: number
+  unpostedCount: number
+  totalCount: number
   droppedByCap: Finding[]
   model: string
-  inlineCommentCount?: number
-  bodyFindingsHeading?: string
-  bodyFindingsDescription?: string
 }): string => {
-  const summaryLine =
-    inlineCommentCount > 0 && bodyFindings.length === 0
-      ? `Reviewed — ${inlineCommentCount} finding(s) posted as inline comments.`
-      : ""
-
-  const beyondDiffSection =
-    bodyFindings.length === 0
+  const shaShort = sha.slice(0, 7)
+  const verb = isFirstRun ? "reviewed" : "re-reviewed"
+  const zeroLine = isFirstRun
+    ? "No findings above threshold."
+    : `No new findings (${totalCount} tracked finding(s) across all runs).`
+  const findingsLine =
+    postedCount > 0
+      ? `${postedCount} new finding(s) posted (${totalCount} tracked finding(s) across all runs).`
+      : unpostedCount > 0
+        ? `No new findings posted (${totalCount} tracked finding(s) across all runs).`
+        : zeroLine
+  const unpostedNote =
+    unpostedCount === 0
       ? ""
-      : `### ${bodyFindingsHeading}\n\n${bodyFindingsDescription}\n\n${bodyFindings.map(renderBodyFinding).join("\n\n")}`
-
+      : `_${unpostedCount} finding(s) could not be posted — they will re-report on the next run._`
   const capNote =
     droppedByCap.length === 0
       ? ""
       : `_${droppedByCap.length} lower-severity finding(s) omitted by the max_findings cap: ${droppedByCap.map((finding) => `\`${finding.file}:${finding.line}\``).join(", ")}_`
-
-  const attribution = `---\n*umm-actually · ${model}*`
-
-  return [summaryLine, beyondDiffSection, capNote, attribution]
-    .filter((section) => section !== "")
-    .join("\n\n")
-}
-
-/** Body for the confirmation review posted when nothing crossed the threshold. */
-export const buildZeroFindingsBody = ({ model }: { model: string }): string =>
-  `Reviewed — no findings above threshold.\n\n---\n*umm-actually · ${model}*`
-
-export const RERUN_ANCHOR = "<!-- umm-actually-rerun -->"
-
-/** Body for the updatable issue comment posted on re-runs. */
-export const buildRerunSummary = ({
-  sha,
-  newCount,
-  totalCount,
-  model,
-}: {
-  sha: string
-  newCount: number
-  totalCount: number
-  model: string
-}): string => {
-  const shaShort = sha.slice(0, 7)
-  const findingsLine =
-    newCount > 0
-      ? `${newCount} new finding(s) posted as inline comments (${totalCount} total across all reviews).`
-      : `No new findings (${totalCount} finding(s) from prior reviews).`
   const attribution = `---\n*umm-actually · ${model}*`
   return [
-    RERUN_ANCHOR,
-    `**umm-actually** re-reviewed at \`${shaShort}\``,
+    STATUS_ANCHOR,
+    `**umm-actually** ${verb} at \`${shaShort}\``,
     findingsLine,
+    unpostedNote,
+    capNote,
     attribution,
-  ].join("\n\n")
+  ]
+    .filter(Boolean)
+    .join("\n\n")
 }

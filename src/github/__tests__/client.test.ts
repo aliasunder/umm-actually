@@ -291,7 +291,7 @@ describe("requestBotReview", () => {
   it("discovers the bot identity via REST and requests review via GraphQL", async () => {
     const stub = makeOctokitStub({
       graphqlResponses: [
-        { data: { viewer: { login: "umm-actually" } } },
+        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
         { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
       ],
       getByUsernameResponses: [
@@ -309,7 +309,9 @@ describe("requestBotReview", () => {
     await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
 
     expect(stub.graphqlCalls).toHaveLength(2)
-    expect(stub.graphqlCalls[0]?.query).toBe("query { viewer { login } }")
+    expect(stub.graphqlCalls[0]?.query).toBe(
+      "query { viewer { login __typename } }",
+    )
     expect(stub.getByUsernameCalls).toEqual([{ username: "umm-actually[bot]" }])
     expect(stub.graphqlCalls[1]?.parameters).toEqual({
       prId: "PR_kwDOMock7",
@@ -322,9 +324,34 @@ describe("requestBotReview", () => {
     })
   })
 
+  it("does not double-suffix a viewer login that already carries [bot]", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually[bot]", __typename: "Bot" } } },
+        { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
+      ],
+      getByUsernameResponses: [
+        {
+          data: {
+            node_id: "BOT_kgDOEewBdQ",
+            login: "umm-actually[bot]",
+            type: "Bot",
+          },
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
+
+    expect(stub.getByUsernameCalls).toEqual([{ username: "umm-actually[bot]" }])
+  })
+
   it("logs a warning when the bot user response is malformed", async () => {
     const stub = makeOctokitStub({
-      graphqlResponses: [{ data: { viewer: { login: "umm-actually" } } }],
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
+      ],
       getByUsernameResponses: [{ data: { message: "Not Found" } }],
     })
     const { client, logger } = makeClient(stub)
@@ -352,7 +379,9 @@ describe("requestBotReview", () => {
 
   it("propagates errors from the getByUsername REST call", async () => {
     const stub = makeOctokitStub({
-      graphqlResponses: [{ data: { viewer: { login: "umm-actually" } } }],
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
+      ],
       getByUsernameResponses: [{ error: makeStatusError(404) }],
     })
     const { client } = makeClient(stub)
@@ -365,7 +394,7 @@ describe("requestBotReview", () => {
   it("propagates errors from the requestReviews mutation", async () => {
     const stub = makeOctokitStub({
       graphqlResponses: [
-        { data: { viewer: { login: "umm-actually" } } },
+        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
         { error: new Error("insufficient permissions") },
       ],
       getByUsernameResponses: [
@@ -387,7 +416,9 @@ describe("requestBotReview", () => {
 
   it("rejects a non-Bot user type", async () => {
     const stub = makeOctokitStub({
-      graphqlResponses: [{ data: { viewer: { login: "some-app" } } }],
+      graphqlResponses: [
+        { data: { viewer: { login: "some-app", __typename: "Bot" } } },
+      ],
       getByUsernameResponses: [
         {
           data: {
@@ -415,7 +446,7 @@ describe("submitReview", () => {
   const reviewUrl =
     "https://github.com/aliasunder/fixture/pull/7#pullrequestreview-1"
 
-  it("posts body and comments and returns the review url", async () => {
+  it("posts a body-only review and returns the review url", async () => {
     const stub = makeOctokitStub({
       createReviewResponses: [{ data: { html_url: reviewUrl } }],
     })
@@ -424,41 +455,10 @@ describe("submitReview", () => {
     const result = await client.submitReview({
       prNumber: 7,
       commitId: "abc123",
-      body: "review body",
-      comments: [inlineComment],
-      fallbackBody: "fallback body",
+      body: "skip notice",
     })
 
-    expect(stub.createReviewCalls).toEqual([
-      {
-        owner: "aliasunder",
-        repo: "fixture",
-        pull_number: 7,
-        commit_id: "abc123",
-        event: "COMMENT",
-        body: "review body",
-        comments: [inlineComment],
-      },
-    ])
-    expect(result).toEqual({ url: reviewUrl, usedFallbackBody: false })
-  })
-
-  it("omits the comments key entirely on a zero-comment review", async () => {
-    const stub = makeOctokitStub({
-      createReviewResponses: [{ data: { html_url: reviewUrl } }],
-    })
-    const { client } = makeClient(stub)
-
-    await client.submitReview({
-      prNumber: 7,
-      commitId: "abc123",
-      body: "zero findings",
-      comments: [],
-      fallbackBody: "fallback body",
-    })
-
-    // toStrictEqual: toEqual ignores undefined-valued keys, so it cannot
-    // tell `comments` absent apart from `comments: undefined`
+    // toStrictEqual: proves no comments key rides along
     expect(stub.createReviewCalls).toStrictEqual([
       {
         owner: "aliasunder",
@@ -466,77 +466,13 @@ describe("submitReview", () => {
         pull_number: 7,
         commit_id: "abc123",
         event: "COMMENT",
-        body: "zero findings",
+        body: "skip notice",
       },
     ])
+    expect(result).toEqual({ url: reviewUrl })
   })
 
-  it("falls back to a body-only review when inline comments are rejected with 422", async () => {
-    const stub = makeOctokitStub({
-      createReviewResponses: [
-        { error: makeStatusError(422) },
-        { data: { html_url: reviewUrl } },
-      ],
-    })
-    const { client, logger } = makeClient(stub)
-
-    const result = await client.submitReview({
-      prNumber: 7,
-      commitId: "abc123",
-      body: "review body",
-      comments: [inlineComment],
-      fallbackBody: "fallback body",
-    })
-
-    // Whole-array assert: proves the first call carried the inline comments,
-    // the retry dropped them (strictly — no `comments: undefined` residue),
-    // and no third attempt followed
-    expect(stub.createReviewCalls).toStrictEqual([
-      {
-        owner: "aliasunder",
-        repo: "fixture",
-        pull_number: 7,
-        commit_id: "abc123",
-        event: "COMMENT",
-        body: "review body",
-        comments: [inlineComment],
-      },
-      {
-        owner: "aliasunder",
-        repo: "fixture",
-        pull_number: 7,
-        commit_id: "abc123",
-        event: "COMMENT",
-        body: "fallback body",
-      },
-    ])
-    expect(result).toEqual({ url: reviewUrl, usedFallbackBody: true })
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "inline comments rejected (422) — posting body-only fallback",
-      data: { prNumber: 7, rejectedCommentCount: 1 },
-    })
-  })
-
-  it("rethrows a 422 on a zero-comment review without a second attempt", async () => {
-    const stub = makeOctokitStub({
-      createReviewResponses: [{ error: makeStatusError(422) }],
-    })
-    const { client } = makeClient(stub)
-
-    await expect(
-      client.submitReview({
-        prNumber: 7,
-        commitId: "abc123",
-        body: "zero findings",
-        comments: [],
-        fallbackBody: "fallback body",
-      }),
-    ).rejects.toThrow("HTTP 422")
-    expect(stub.createReviewCalls).toHaveLength(1)
-  })
-
-  it("rethrows a non-422 error without a second attempt", async () => {
+  it("propagates errors without a retry", async () => {
     const stub = makeOctokitStub({
       createReviewResponses: [{ error: makeStatusError(403) }],
     })
@@ -546,33 +482,10 @@ describe("submitReview", () => {
       client.submitReview({
         prNumber: 7,
         commitId: "abc123",
-        body: "review body",
-        comments: [inlineComment],
-        fallbackBody: "fallback body",
+        body: "skip notice",
       }),
     ).rejects.toThrow("HTTP 403")
     expect(stub.createReviewCalls).toHaveLength(1)
-  })
-
-  it("rethrows a 422 on the fallback attempt without a third attempt", async () => {
-    const stub = makeOctokitStub({
-      createReviewResponses: [
-        { error: makeStatusError(422) },
-        { error: makeStatusError(422) },
-      ],
-    })
-    const { client } = makeClient(stub)
-
-    await expect(
-      client.submitReview({
-        prNumber: 7,
-        commitId: "abc123",
-        body: "review body",
-        comments: [inlineComment],
-        fallbackBody: "fallback body",
-      }),
-    ).rejects.toThrow("HTTP 422")
-    expect(stub.createReviewCalls).toHaveLength(2)
   })
 
   it("throws when the review response has no html_url", async () => {
@@ -585,33 +498,185 @@ describe("submitReview", () => {
       client.submitReview({
         prNumber: 7,
         commitId: "abc123",
-        body: "review body",
-        comments: [inlineComment],
-        fallbackBody: "fallback body",
+        body: "skip notice",
       }),
     ).rejects.toThrow("unexpected review response shape")
   })
 })
 
-describe("fetchReviewComments", () => {
-  it("returns mapped path and body from review comments", async () => {
+describe("postFindingsReview", () => {
+  const reviewUrl =
+    "https://github.com/aliasunder/fixture/pull/7#pullrequestreview-1"
+  const markerBody = "<!-- umm-actually-review -->"
+
+  it("posts the marker body with comments and returns ok with the url", async () => {
     const stub = makeOctokitStub({
+      createReviewResponses: [{ data: { html_url: reviewUrl } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.postFindingsReview({
+      prNumber: 7,
+      commitId: "abc123",
+      body: markerBody,
+      comments: [inlineComment],
+    })
+
+    expect(stub.createReviewCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        pull_number: 7,
+        commit_id: "abc123",
+        event: "COMMENT",
+        body: markerBody,
+        comments: [inlineComment],
+      },
+    ])
+    expect(result).toEqual({ kind: "ok", url: reviewUrl })
+  })
+
+  it("reports rejected on a 422 without retrying", async () => {
+    const stub = makeOctokitStub({
+      createReviewResponses: [{ error: makeStatusError(422) }],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.postFindingsReview({
+      prNumber: 7,
+      commitId: "abc123",
+      body: markerBody,
+      comments: [inlineComment],
+    })
+
+    expect(result).toEqual({ kind: "rejected" })
+    expect(stub.createReviewCalls).toHaveLength(1)
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "inline comment anchors rejected (422)",
+      data: { prNumber: 7, rejectedCommentCount: 1 },
+    })
+  })
+
+  it("propagates non-422 errors", async () => {
+    const stub = makeOctokitStub({
+      createReviewResponses: [{ error: makeStatusError(403) }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.postFindingsReview({
+        prNumber: 7,
+        commitId: "abc123",
+        body: markerBody,
+        comments: [inlineComment],
+      }),
+    ).rejects.toThrow("HTTP 403")
+  })
+
+  it("throws when the review response has no html_url", async () => {
+    const stub = makeOctokitStub({
+      createReviewResponses: [{ data: { id: 1 } }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.postFindingsReview({
+        prNumber: 7,
+        commitId: "abc123",
+        body: markerBody,
+        comments: [inlineComment],
+      }),
+    ).rejects.toThrow("unexpected review response shape")
+  })
+})
+
+describe("postIssueComment", () => {
+  const commentUrl =
+    "https://github.com/aliasunder/fixture/pull/7#issuecomment-9"
+
+  it("posts the body and returns the comment url", async () => {
+    const stub = makeOctokitStub({
+      createCommentResponses: [{ data: { html_url: commentUrl } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.postIssueComment({
+      prNumber: 7,
+      body: "beyond-diff finding",
+    })
+
+    expect(stub.createCommentCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        body: "beyond-diff finding",
+      },
+    ])
+    expect(result).toEqual({ url: commentUrl })
+  })
+
+  it("throws on a malformed response", async () => {
+    const stub = makeOctokitStub({
+      createCommentResponses: [{ data: { id: 1 } }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.postIssueComment({ prNumber: 7, body: "finding" }),
+    ).rejects.toThrow("unexpected issue comment response shape")
+  })
+
+  it("propagates errors", async () => {
+    const stub = makeOctokitStub({
+      createCommentResponses: [{ error: makeStatusError(403) }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.postIssueComment({ prNumber: 7, body: "finding" }),
+    ).rejects.toThrow("HTTP 403")
+  })
+})
+
+describe("fetchBotReviewComments", () => {
+  const viewerResponse = {
+    data: { viewer: { login: "umm-actually", __typename: "Bot" } },
+  }
+  const botUser = { user: { login: "umm-actually[bot]" } }
+
+  it("returns path, body, and both line positions from the bot's review comments", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listReviewCommentsResponses: [
         {
           data: [
-            { path: "src/a.ts", body: "comment 1" },
-            { path: "src/b.ts", body: "comment 2" },
+            {
+              path: "src/a.ts",
+              body: "comment 1",
+              line: 48,
+              original_line: 42,
+              ...botUser,
+            },
+            {
+              path: "src/b.ts",
+              body: "comment 2",
+              line: null,
+              original_line: 10,
+              ...botUser,
+            },
           ],
         },
       ],
     })
     const { client } = makeClient(stub)
 
-    const comments = await client.fetchReviewComments({ prNumber: 7 })
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
 
     expect(comments).toEqual([
-      { path: "src/a.ts", body: "comment 1" },
-      { path: "src/b.ts", body: "comment 2" },
+      { path: "src/a.ts", body: "comment 1", line: 48, originalLine: 42 },
+      { path: "src/b.ts", body: "comment 2", line: null, originalLine: 10 },
     ])
     expect(stub.listReviewCommentsCalls).toEqual([
       {
@@ -624,18 +689,91 @@ describe("fetchReviewComments", () => {
     ])
   })
 
+  it("uses the range start for multi-line comments, matching the anchor's line convention", async () => {
+    // GitHub's `line` is the END of a multi-line range; anchors embed the
+    // finding's line, which is the START — a 10..200 span compared by its
+    // end would blow past LINE_PROXIMITY and re-post as a duplicate.
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewCommentsResponses: [
+        {
+          data: [
+            {
+              path: "src/a.ts",
+              body: "wide finding",
+              line: 200,
+              original_line: 200,
+              start_line: 10,
+              original_start_line: 10,
+              ...botUser,
+            },
+          ],
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
+
+    expect(comments).toEqual([
+      { path: "src/a.ts", body: "wide finding", line: 10, originalLine: 10 },
+    ])
+  })
+
+  it("drops comments from other authors, even with a spoofed anchor", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewCommentsResponses: [
+        {
+          data: [
+            {
+              path: "src/a.ts",
+              body: "spoof\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
+              line: 42,
+              original_line: 42,
+              user: { login: "some-human" },
+            },
+            {
+              path: "src/a.ts",
+              body: "ghost comment",
+              line: 10,
+              original_line: 10,
+              user: null,
+            },
+            {
+              path: "src/b.ts",
+              body: "real finding",
+              line: 5,
+              original_line: 5,
+              ...botUser,
+            },
+          ],
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
+
+    expect(comments).toEqual([
+      { path: "src/b.ts", body: "real finding", line: 5, originalLine: 5 },
+    ])
+  })
+
   it("paginates when a page is full", async () => {
     const fullPage = Array.from({ length: 100 }, (_, index) => ({
       path: `src/file-${index}.ts`,
       body: `body-${index}`,
+      ...botUser,
     }))
-    const lastPage = [{ path: "src/last.ts", body: "last" }]
+    const lastPage = [{ path: "src/last.ts", body: "last", ...botUser }]
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listReviewCommentsResponses: [{ data: fullPage }, { data: lastPage }],
     })
     const { client } = makeClient(stub)
 
-    const comments = await client.fetchReviewComments({ prNumber: 7 })
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
 
     expect(comments).toHaveLength(101)
     expect(stub.listReviewCommentsCalls).toEqual([
@@ -656,16 +794,41 @@ describe("fetchReviewComments", () => {
     ])
   })
 
+  it("paginates on the full raw page even when the author filter empties it", async () => {
+    const humanPage = Array.from({ length: 100 }, (_, index) => ({
+      path: `src/file-${index}.ts`,
+      body: `body-${index}`,
+      user: { login: "some-human" },
+    }))
+    const lastPage = [{ path: "src/last.ts", body: "last", ...botUser }]
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewCommentsResponses: [{ data: humanPage }, { data: lastPage }],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
+
+    expect(comments).toEqual([
+      { path: "src/last.ts", body: "last", line: null, originalLine: null },
+    ])
+    expect(stub.listReviewCommentsCalls).toHaveLength(2)
+  })
+
   it("stops at the page cap and logs a warning", async () => {
     const fullPage = Array.from({ length: 100 }, (_, index) => ({
       path: `src/file-${index}.ts`,
       body: `body-${index}`,
+      ...botUser,
     }))
     const responses = Array.from({ length: 10 }, () => ({ data: fullPage }))
-    const stub = makeOctokitStub({ listReviewCommentsResponses: responses })
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewCommentsResponses: responses,
+    })
     const { client, logger } = makeClient(stub)
 
-    const comments = await client.fetchReviewComments({ prNumber: 7 })
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
 
     expect(comments).toHaveLength(1000)
     expect(stub.listReviewCommentsCalls).toHaveLength(10)
@@ -677,30 +840,308 @@ describe("fetchReviewComments", () => {
     })
   })
 
+  it("maps absent line fields to null", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listReviewCommentsResponses: [
+        {
+          data: [{ path: "src/a.ts", body: "file-level comment", ...botUser }],
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchBotReviewComments({ prNumber: 7 })
+
+    expect(comments).toEqual([
+      {
+        path: "src/a.ts",
+        body: "file-level comment",
+        line: null,
+        originalLine: null,
+      },
+    ])
+  })
+
   it("throws on a malformed response", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listReviewCommentsResponses: [{ data: "not an array" }],
     })
     const { client } = makeClient(stub)
 
-    await expect(client.fetchReviewComments({ prNumber: 7 })).rejects.toThrow(
-      "unexpected review comments response shape",
+    await expect(
+      client.fetchBotReviewComments({ prNumber: 7 }),
+    ).rejects.toThrow("unexpected review comments response shape")
+  })
+})
+
+describe("fetchBotIssueComments", () => {
+  const viewerResponse = {
+    data: { viewer: { login: "umm-actually", __typename: "Bot" } },
+  }
+  const botComment = (id: number, body: string) => ({
+    id,
+    body,
+    html_url: `https://example.com/${id}`,
+    user: { login: "umm-actually[bot]" },
+  })
+
+  it("returns only the bot's comment bodies, tolerating deleted users", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listCommentsResponses: [
+        {
+          data: [
+            botComment(1, "<!-- umm-actually-status -->\n\nstatus"),
+            {
+              id: 2,
+              body: "human comment",
+              html_url: "https://example.com/2",
+              user: { login: "aliasunder" },
+            },
+            {
+              id: 3,
+              body: "ghost comment",
+              html_url: "https://example.com/3",
+              user: null,
+            },
+            botComment(4, "beyond-diff finding"),
+          ],
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchBotIssueComments({ prNumber: 7 })
+
+    expect(comments).toEqual([
+      { body: "<!-- umm-actually-status -->\n\nstatus" },
+      { body: "beyond-diff finding" },
+    ])
+    expect(stub.listCommentsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+    ])
+  })
+
+  it("drops a spoofed anchor from another author", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listCommentsResponses: [
+        {
+          data: [
+            {
+              id: 5,
+              body: "spoof\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
+              html_url: "https://example.com/5",
+              user: { login: "some-human" },
+            },
+          ],
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchBotIssueComments({ prNumber: 7 })
+
+    expect(comments).toEqual([])
+  })
+
+  it("matches a plain user login when the token is a PAT", async () => {
+    // A personal access token resolves viewer to a User — comments are
+    // authored by the bare login, so no [bot] suffix may be appended.
+    const stub = makeOctokitStub({
+      graphqlResponses: [
+        { data: { viewer: { login: "aliasunder", __typename: "User" } } },
+      ],
+      listCommentsResponses: [
+        {
+          data: [
+            {
+              id: 6,
+              body: "finding",
+              html_url: "https://example.com/6",
+              user: { login: "aliasunder" },
+            },
+          ],
+        },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchBotIssueComments({ prNumber: 7 })
+
+    expect(comments).toEqual([{ body: "finding" }])
+  })
+
+  it("paginates on the full raw page even when the author filter empties it", async () => {
+    const humanPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      body: `human-${index}`,
+      html_url: `https://example.com/${index + 1}`,
+      user: { login: "some-human" },
+    }))
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listCommentsResponses: [
+        { data: humanPage },
+        { data: [botComment(200, "bot finding")] },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchBotIssueComments({ prNumber: 7 })
+
+    expect(comments).toEqual([{ body: "bot finding" }])
+    // Exact page sequence: the stub serves responses by call count, so a
+    // length check alone would pass even if page 1 were requested twice.
+    expect(stub.listCommentsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 2,
+      },
+    ])
+  })
+
+  it("stops at the page cap and logs a warning", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      body: `human-${index}`,
+      html_url: `https://example.com/${index + 1}`,
+      user: { login: "some-human" },
+    }))
+    const responses = Array.from({ length: 10 }, () => ({ data: fullPage }))
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listCommentsResponses: responses,
+    })
+    const { client, logger } = makeClient(stub)
+
+    const comments = await client.fetchBotIssueComments({ prNumber: 7 })
+
+    expect(comments).toEqual([])
+    // Pages 1 through 10 exactly — not the same page requested ten times.
+    expect(stub.listCommentsCalls).toEqual(
+      Array.from({ length: 10 }, (_, index) => ({
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: index + 1,
+      })),
     )
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "issue comments page cap reached",
+      data: { prNumber: 7 },
+    })
+  })
+
+  it("throws on a malformed response", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listCommentsResponses: [{ data: "not an array" }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(client.fetchBotIssueComments({ prNumber: 7 })).rejects.toThrow(
+      "unexpected issue comments response shape",
+    )
+  })
+
+  it("propagates errors from the viewer query", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [{ error: new Error("token expired") }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(client.fetchBotIssueComments({ prNumber: 7 })).rejects.toThrow(
+      "token expired",
+    )
+  })
+})
+
+describe("bot login memoization", () => {
+  it("resolves the viewer query only once across requestBotReview and fetchBotIssueComments", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
+        { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
+      ],
+      getByUsernameResponses: [
+        {
+          data: {
+            node_id: "BOT_kgDOEewBdQ",
+            login: "umm-actually[bot]",
+            type: "Bot",
+          },
+        },
+      ],
+      listCommentsResponses: [{ data: [] }],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
+    const comments = await client.fetchBotIssueComments({ prNumber: 7 })
+
+    expect(comments).toEqual([])
+    // Only two GraphQL calls: the viewer query (memoized) and the mutation.
+    // A third call would mean the viewer query ran twice.
+    expect(stub.graphqlCalls).toHaveLength(2)
+    expect(stub.graphqlCalls[0]).toEqual({
+      query: "query { viewer { login __typename } }",
+    })
+    // fetchBotIssueComments must have actually listed comments — a
+    // short-circuited empty result would leave this empty too.
+    expect(stub.listCommentsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+    ])
   })
 })
 
 describe("upsertSummaryComment", () => {
   const commentUrl =
     "https://github.com/aliasunder/fixture/pull/7#issuecomment-1"
-  const anchor = "<!-- umm-actually-rerun -->"
+  const anchor = "<!-- umm-actually-status -->"
+  const viewerResponse = {
+    data: { viewer: { login: "umm-actually", __typename: "Bot" } },
+  }
   const body = `${anchor}\n\n**umm-actually** re-reviewed`
 
   it("creates a new comment when no matching anchor exists", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [
         {
           data: [
-            { id: 99, body: "human comment", html_url: "https://example.com" },
+            {
+              id: 99,
+              body: "human comment",
+              html_url: "https://example.com",
+              user: { login: "aliasunder" },
+            },
           ],
         },
       ],
@@ -726,8 +1167,48 @@ describe("upsertSummaryComment", () => {
     expect(stub.updateCommentCalls).toHaveLength(0)
   })
 
+  it("does not update a finding comment quoting the anchor mid-body", async () => {
+    // Finding bodies carry model-generated text; one quoting the status
+    // marker must not become the upsert target and get overwritten.
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listCommentsResponses: [
+        {
+          data: [
+            {
+              id: 55,
+              body: `finding text quoting ${anchor} mid-body`,
+              html_url: "https://example.com/55",
+              user: { login: "umm-actually[bot]" },
+            },
+          ],
+        },
+      ],
+      createCommentResponses: [{ data: { html_url: commentUrl } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.upsertSummaryComment({
+      prNumber: 7,
+      body,
+      anchor,
+    })
+
+    expect(result).toEqual({ url: commentUrl, created: true })
+    expect(stub.updateCommentCalls).toHaveLength(0)
+    expect(stub.createCommentCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        body,
+      },
+    ])
+  })
+
   it("updates an existing comment when the anchor is found", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [
         {
           data: [
@@ -735,6 +1216,7 @@ describe("upsertSummaryComment", () => {
               id: 42,
               body: `${anchor}\n\nold summary`,
               html_url: commentUrl,
+              user: { login: "umm-actually[bot]" },
             },
           ],
         },
@@ -766,8 +1248,10 @@ describe("upsertSummaryComment", () => {
       id: index + 1,
       body: `comment ${index}`,
       html_url: `https://example.com/${index}`,
+      user: { login: "aliasunder" },
     }))
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [
         { data: fullPage },
         {
@@ -776,6 +1260,7 @@ describe("upsertSummaryComment", () => {
               id: 200,
               body: `${anchor}\n\nold summary`,
               html_url: commentUrl,
+              user: { login: "umm-actually[bot]" },
             },
           ],
         },
@@ -791,7 +1276,22 @@ describe("upsertSummaryComment", () => {
     })
 
     expect(result).toEqual({ url: commentUrl, created: false })
-    expect(stub.listCommentsCalls).toHaveLength(2)
+    expect(stub.listCommentsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 2,
+      },
+    ])
     expect(stub.updateCommentCalls).toEqual([
       { owner: "aliasunder", repo: "fixture", comment_id: 200, body },
     ])
@@ -799,6 +1299,7 @@ describe("upsertSummaryComment", () => {
 
   it("throws on a malformed issue comments response", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [{ data: "not an array" }],
     })
     const { client } = makeClient(stub)
@@ -810,6 +1311,7 @@ describe("upsertSummaryComment", () => {
 
   it("throws when the create response has no html_url", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [{ data: [] }],
       createCommentResponses: [{ data: { id: 1 } }],
     })
@@ -822,6 +1324,7 @@ describe("upsertSummaryComment", () => {
 
   it("throws when the update response has no html_url", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [
         {
           data: [
@@ -829,6 +1332,7 @@ describe("upsertSummaryComment", () => {
               id: 42,
               body: `${anchor}\n\nold summary`,
               html_url: commentUrl,
+              user: { login: "umm-actually[bot]" },
             },
           ],
         },
@@ -842,8 +1346,38 @@ describe("upsertSummaryComment", () => {
     ).rejects.toThrow("unexpected issue comment response shape")
   })
 
+  it("creates a new comment instead of updating a spoofed anchor from another author", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listCommentsResponses: [
+        {
+          data: [
+            {
+              id: 66,
+              body: `${anchor}\n\nspoofed receipt`,
+              html_url: "https://example.com/66",
+              user: { login: "some-human" },
+            },
+          ],
+        },
+      ],
+      createCommentResponses: [{ data: { html_url: commentUrl } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.upsertSummaryComment({
+      prNumber: 7,
+      body,
+      anchor,
+    })
+
+    expect(result).toEqual({ url: commentUrl, created: true })
+    expect(stub.updateCommentCalls).toHaveLength(0)
+  })
+
   it("creates when the issue comments list is empty", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [{ data: [] }],
       createCommentResponses: [{ data: { html_url: commentUrl } }],
     })

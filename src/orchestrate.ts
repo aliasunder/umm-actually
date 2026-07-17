@@ -3,7 +3,6 @@ import type { ActionConfig } from "./config.js"
 import {
   computeCommentableLines,
   newFilePath,
-  type CommentableFile,
 } from "./diff/commentable-lines.js"
 import { annotateDiff } from "./diff/annotate-diff.js"
 import type { Logger } from "./logger.js"
@@ -16,13 +15,15 @@ import type {
 import { renderCostSummary } from "./openrouter/cost-summary.js"
 import type { ContextReader } from "./context/workspace.js"
 import {
-  buildRerunSummary,
-  buildReviewBody,
-  buildZeroFindingsBody,
-  computeAnchorKey,
-  extractAnchorKeys,
+  buildStatusComment,
+  coalesceAnchors,
+  extractAnchors,
+  isDuplicateFinding,
   mapFindingsToReview,
-  RERUN_ANCHOR,
+  renderStandaloneFinding,
+  REVIEW_MARKER,
+  STATUS_ANCHOR,
+  type AnchorEntry,
   type ReviewComment,
 } from "./review/comment-mapping.js"
 import { resolveSeverityThreshold, type Finding } from "./review/finding.js"
@@ -71,45 +72,120 @@ export type OrchestrateDeps = {
 const buildSkipBody = (reason: string): string =>
   `**umm-actually** — review skipped\n\n${reason}\n\n---\n*umm-actually*`
 
-type ReviewPayload = {
-  body: string
-  comments: ReviewComment[]
-  fallbackBody: string
+const describeError = (error: unknown): string => {
+  return error instanceof Error
+    ? `[${error.name}]: ${error.message}`
+    : String(error)
 }
 
-/** Separates findings into inline comments and body-only findings, then
- *  builds a fallback body that includes all findings in case GitHub rejects
- *  the inline anchors. */
-const buildReviewPayload = ({
-  findings,
-  commentableByPath,
-  droppedByCap,
-  modelUsed,
-}: {
-  findings: Finding[]
-  commentableByPath: Map<string, CommentableFile>
-  droppedByCap: Finding[]
-  modelUsed: string
-}): ReviewPayload => {
-  const { comments, bodyFindings } = mapFindingsToReview({
-    findings,
-    commentableByPath,
-  })
-  const body = buildReviewBody({
-    bodyFindings,
-    droppedByCap,
-    model: modelUsed,
-    inlineCommentCount: comments.length,
-  })
-  const fallbackBody = buildReviewBody({
-    bodyFindings: findings,
-    droppedByCap,
-    model: modelUsed,
-    bodyFindingsHeading: "Findings",
-    bodyFindingsDescription:
-      "Inline comments were unavailable; all findings are listed here:",
-  })
-  return { body, comments, fallbackBody }
+/** Anchors from the bot's inline review comments (live positions). Empty on
+ *  fetch failure — findings then post as new; duplicates beat losing them. */
+const fetchInlineAnchors = async (
+  { githubClient, prNumber }: { githubClient: GithubClient; prNumber: number },
+  logger: Logger,
+): Promise<AnchorEntry[]> => {
+  try {
+    const existingComments = await githubClient.fetchBotReviewComments({
+      prNumber,
+    })
+    return extractAnchors(existingComments)
+  } catch (fetchError) {
+    logger.warn(
+      "failed to fetch inline comments — treating their findings as new",
+      { error: describeError(fetchError) },
+    )
+    return []
+  }
+}
+
+type IssueCommentState = {
+  statusCommentExists: boolean
+  anchors: AnchorEntry[]
+}
+
+/** The bot's issue comments carry the rest of the cross-run state: the
+ *  status comment's presence (the first-run signal) and dedup anchors from
+ *  beyond-diff finding comments (anchor-line positions — issue comments
+ *  aren't line-tracked). Fails open to a first run. */
+const fetchIssueCommentState = async (
+  { githubClient, prNumber }: { githubClient: GithubClient; prNumber: number },
+  logger: Logger,
+): Promise<IssueCommentState> => {
+  try {
+    const comments = await githubClient.fetchBotIssueComments({ prNumber })
+    return {
+      // startsWith, not includes: a finding comment's model-generated text
+      // could quote the marker mid-body and misclassify the run as a re-run.
+      statusCommentExists: comments.some((comment) =>
+        comment.body.startsWith(STATUS_ANCHOR),
+      ),
+      anchors: extractAnchors(
+        comments.map((comment) => ({
+          body: comment.body,
+          line: null,
+          originalLine: null,
+        })),
+      ),
+    }
+  } catch (fetchError) {
+    logger.warn("failed to fetch issue comments — treating as a first run", {
+      error: describeError(fetchError),
+    })
+    return { statusCommentExists: false, anchors: [] }
+  }
+}
+
+type InlinePostOutcome = {
+  url: string
+  /** Findings whose anchors GitHub rejected — re-routed to issue comments. */
+  rerouted: Finding[]
+  /** Inline comments that actually landed — zero when the post failed. */
+  postedCount: number
+}
+
+/** Posts the anchorable findings as one review with an invisible marker
+ *  body — the batching vehicle, not a narrative surface. A 422 re-routes
+ *  the findings to issue comments; any other failure leaves them unposted,
+ *  where the missing anchors make the next run re-report them. */
+const postInlineFindings = async (
+  {
+    githubClient,
+    prNumber,
+    commitId,
+    comments,
+    inlineFindings,
+  }: {
+    githubClient: GithubClient
+    prNumber: number
+    commitId: string
+    comments: ReviewComment[]
+    inlineFindings: Finding[]
+  },
+  logger: Logger,
+): Promise<InlinePostOutcome> => {
+  if (comments.length === 0) return { url: "", rerouted: [], postedCount: 0 }
+  try {
+    const result = await githubClient.postFindingsReview({
+      prNumber,
+      commitId,
+      body: REVIEW_MARKER,
+      comments,
+    })
+    if (result.kind === "rejected") {
+      return { url: "", rerouted: inlineFindings, postedCount: 0 }
+    }
+    logger.info("findings review posted", {
+      reviewUrl: result.url,
+      inlineCount: comments.length,
+    })
+    return { url: result.url, rerouted: [], postedCount: comments.length }
+  } catch (postError) {
+    logger.warn(
+      "failed to post findings review — findings will re-report next run",
+      { error: describeError(postError) },
+    )
+    return { url: "", rerouted: [], postedCount: 0 }
+  }
 }
 
 const SKIPPED_RESULT_BASE: Omit<
@@ -164,11 +240,9 @@ export const orchestrate = async (
   try {
     await githubClient.requestBotReview({ prNodeId: prContext.nodeId })
   } catch (requestError) {
-    const errorDetail =
-      requestError instanceof Error
-        ? `[${requestError.name}]: ${requestError.message}`
-        : String(requestError)
-    logger.warn("failed to request bot review", { error: errorDetail })
+    logger.warn("failed to request bot review", {
+      error: describeError(requestError),
+    })
   }
 
   const postSkipReview = async (reason: string): Promise<OrchestrateResult> => {
@@ -177,8 +251,6 @@ export const orchestrate = async (
       prNumber: prContext.prNumber,
       commitId: prContext.headSha,
       body,
-      comments: [],
-      fallbackBody: body,
     })
     logger.info("posted skip review", { reason, reviewUrl: url })
     return { ...SKIPPED_RESULT_BASE, reviewUrl: url, skippedReason: reason }
@@ -246,7 +318,7 @@ export const orchestrate = async (
 
   // Step 10–11: generate findings (V1: single combined phase)
   const phase = phases[0]
-  if (phase === undefined) {
+  if (!phase) {
     throw new Error("resolvePhases returned no phases")
   }
   const structuredResult = await generateFindings({
@@ -269,136 +341,117 @@ export const orchestrate = async (
     logger.info("filtered non-findings", { droppedAsNonFinding })
   }
 
+  // Step 12.5: cross-run dedup — every run walks the same path; a first run
+  // is just the case where no bot comments exist yet. Sources: the bot's
+  // inline comments (live positions) and its beyond-diff issue comments
+  // (anchor lines). Runs before the cap so duplicates don't consume slots.
+  const inlineAnchors = await fetchInlineAnchors(
+    { githubClient, prNumber: prContext.prNumber },
+    logger,
+  )
+  const issueState = await fetchIssueCommentState(
+    { githubClient, prNumber: prContext.prNumber },
+    logger,
+  )
+  const existingAnchors = [...inlineAnchors, ...issueState.anchors]
+  const newFindings = realFindings.filter(
+    (finding) => !isDuplicateFinding(finding, existingAnchors),
+  )
+
+  logger.info("cross-run dedup", {
+    isFirstRun: !issueState.statusCommentExists,
+    existingAnchorCount: existingAnchors.length,
+    findingsCount: realFindings.length,
+    newFindingsCount: newFindings.length,
+  })
+
   const { selected, droppedByCap } = selectFindings({
-    findings: realFindings,
+    findings: newFindings,
     severityThreshold,
     maxFindings: config.maxFindings,
   })
 
-  // Step 12.5: cross-run dedup
-  let existingAnchors: Set<string>
-  try {
-    const existingComments = await githubClient.fetchReviewComments({
-      prNumber: prContext.prNumber,
-    })
-    existingAnchors = extractAnchorKeys(
-      existingComments.map((comment) => comment.body),
-    )
-  } catch (fetchError) {
-    const errorDetail =
-      fetchError instanceof Error
-        ? `[${fetchError.name}]: ${fetchError.message}`
-        : String(fetchError)
-    logger.warn("failed to fetch existing comments — treating as first run", {
-      error: errorDetail,
-    })
-    existingAnchors = new Set()
-  }
-
-  const isRerun = existingAnchors.size > 0
-  const isNewFinding = (finding: Finding): boolean =>
-    !existingAnchors.has(computeAnchorKey(finding))
-  const newFindings = isRerun ? selected.filter(isNewFinding) : selected
-
-  logger.info("cross-run dedup", {
-    existingAnchorCount: existingAnchors.size,
-    selectedCount: selected.length,
-    newFindingsCount: newFindings.length,
-    isRerun,
-  })
-
-  // Step 13: post review
+  // Step 13: post findings — anchorable ones batch into a single review
+  // (invisible marker body: one notification, a bare "reviewed" timeline
+  // event, no prose); the rest post as individual issue comments so every
+  // new finding is a visible event. All narration lives in the status
+  // comment. Unposted findings carry no anchor and re-report next run.
   const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
+  const { comments, bodyFindings } = mapFindingsToReview({
+    findings: selected,
+    commentableByPath,
+  })
+  const inlineFindings = selected.filter(
+    (finding) => !bodyFindings.includes(finding),
+  )
 
-  if (!isRerun) {
-    const reviewPayload: ReviewPayload =
-      selected.length > 0
-        ? buildReviewPayload({
-            findings: selected,
-            commentableByPath,
-            droppedByCap,
-            modelUsed,
-          })
-        : {
-            body: buildZeroFindingsBody({ model: modelUsed }),
-            comments: [],
-            fallbackBody: buildZeroFindingsBody({ model: modelUsed }),
-          }
-
-    const { url: reviewUrl } = await githubClient.submitReview({
+  const inlineOutcome = await postInlineFindings(
+    {
+      githubClient,
       prNumber: prContext.prNumber,
       commitId: prContext.headSha,
-      ...reviewPayload,
-    })
+      comments,
+      inlineFindings,
+    },
+    logger,
+  )
 
-    logger.info("review posted", {
-      reviewUrl,
-      findingsCount: selected.length,
-      modelUsed,
-    })
-
-    return {
-      findingsCount: newFindings.length,
-      reviewUrl,
-      modelUsed,
-      skippedReason: "",
-      costSummaryMarkdown,
+  const standaloneFindings = [...bodyFindings, ...inlineOutcome.rerouted]
+  // Sequential posting with per-comment fallback is inherently stateful —
+  // each failure drops only its own finding from the posted tally.
+  let postedStandalone = 0
+  for (const finding of standaloneFindings) {
+    try {
+      await githubClient.postIssueComment({
+        prNumber: prContext.prNumber,
+        body: renderStandaloneFinding(finding),
+      })
+      postedStandalone += 1
+    } catch (postError) {
+      logger.warn(
+        "failed to post beyond-diff finding — it will re-report next run",
+        {
+          error: describeError(postError),
+          file: finding.file,
+          line: finding.line,
+        },
+      )
     }
   }
-
-  // Re-run — post only new findings, upsert summary comment
-  const totalCount = existingAnchors.size + newFindings.length
-  let reviewUrl = ""
-
-  if (newFindings.length > 0) {
-    const reviewPayload = buildReviewPayload({
-      findings: newFindings,
-      commentableByPath,
-      droppedByCap: [],
-      modelUsed,
-    })
-
-    const result = await githubClient.submitReview({
-      prNumber: prContext.prNumber,
-      commitId: prContext.headSha,
-      ...reviewPayload,
-    })
-    reviewUrl = result.url
-
-    logger.info("re-run review posted", {
-      reviewUrl,
-      newFindingsCount: newFindings.length,
-      totalCount,
-    })
-  } else {
-    logger.info("re-run — no new findings", { totalCount })
+  if (postedStandalone > 0) {
+    logger.info("beyond-diff findings posted", { count: postedStandalone })
   }
 
-  const summaryBody = buildRerunSummary({
+  // Step 14: status comment — the always-updated run receipt. Counts report
+  // what actually landed; unposted findings self-heal next run and the
+  // comment says so rather than claiming they were posted.
+  const postedCount = inlineOutcome.postedCount + postedStandalone
+  const statusBody = buildStatusComment({
     sha: prContext.headSha,
-    newCount: newFindings.length,
-    totalCount,
+    isFirstRun: !issueState.statusCommentExists,
+    postedCount,
+    unpostedCount: selected.length - postedCount,
+    // Coalesced: fail-open reposts can leave two anchors for one finding,
+    // and the tracked count reports findings, not comment anchors.
+    totalCount: coalesceAnchors(existingAnchors).length + postedCount,
+    droppedByCap,
     model: modelUsed,
   })
   try {
     await githubClient.upsertSummaryComment({
       prNumber: prContext.prNumber,
-      body: summaryBody,
-      anchor: RERUN_ANCHOR,
+      body: statusBody,
+      anchor: STATUS_ANCHOR,
     })
-  } catch (summaryError) {
-    const errorDetail =
-      summaryError instanceof Error
-        ? `[${summaryError.name}]: ${summaryError.message}`
-        : String(summaryError)
-    logger.warn("failed to upsert summary comment", {
-      error: errorDetail,
+  } catch (statusError) {
+    logger.warn("failed to upsert status comment", {
+      error: describeError(statusError),
     })
   }
 
   return {
-    findingsCount: newFindings.length,
-    reviewUrl,
+    findingsCount: postedCount,
+    reviewUrl: inlineOutcome.url,
     modelUsed,
     skippedReason: "",
     costSummaryMarkdown,

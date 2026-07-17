@@ -70,9 +70,27 @@ export type OctokitLike = {
 export type DiffFetchResult =
   { kind: "ok"; diff: string } | { kind: "too_large" }
 
-export type SubmitReviewResult = { url: string; usedFallbackBody: boolean }
+export type SubmitReviewResult = { url: string }
 
 export type UpsertCommentResult = { url: string; created: boolean }
+
+/** An existing inline review comment, with both positions GitHub tracks:
+ *  `line` is the current spot on the latest diff (null once the comment goes
+ *  outdated); `originalLine` is where it sat when posted. For multi-line
+ *  comments both carry the START of the range — anchors embed the finding's
+ *  `line`, which is the range start, so dedup must compare like with like
+ *  (GitHub's own `line` field is the range END). */
+export type ExistingReviewComment = {
+  path: string
+  body: string
+  line: number | null
+  originalLine: number | null
+}
+
+/** Outcome of posting the inline-findings review: `rejected` is GitHub's
+ *  422 on the comment anchors — the caller falls back to issue comments. */
+export type FindingsReviewResult =
+  { kind: "ok"; url: string } | { kind: "rejected" }
 
 export type GithubClient = {
   fetchPullRequest: (params: { prNumber: number }) => Promise<PrContext>
@@ -82,14 +100,23 @@ export type GithubClient = {
     prNumber: number
     commitId: string
     body: string
-    comments: ReviewComment[]
-    /** Precomputed by the caller (pure code); posted body-only if GitHub
-     *  rejects the inline anchors. */
-    fallbackBody: string
   }) => Promise<SubmitReviewResult>
-  fetchReviewComments: (params: {
+  postFindingsReview: (params: {
     prNumber: number
-  }) => Promise<{ path: string; body: string }[]>
+    commitId: string
+    body: string
+    comments: ReviewComment[]
+  }) => Promise<FindingsReviewResult>
+  postIssueComment: (params: {
+    prNumber: number
+    body: string
+  }) => Promise<{ url: string }>
+  fetchBotReviewComments: (params: {
+    prNumber: number
+  }) => Promise<ExistingReviewComment[]>
+  fetchBotIssueComments: (params: {
+    prNumber: number
+  }) => Promise<{ body: string }[]>
   upsertSummaryComment: (params: {
     prNumber: number
     body: string
@@ -111,7 +138,15 @@ const prResponseSchema = z.object({
 const urlResponseSchema = z.object({ html_url: z.string() })
 
 const reviewCommentListSchema = z.array(
-  z.object({ path: z.string(), body: z.string() }),
+  z.object({
+    path: z.string(),
+    body: z.string(),
+    line: z.int().positive().nullish(),
+    original_line: z.int().positive().nullish(),
+    start_line: z.int().positive().nullish(),
+    original_start_line: z.int().positive().nullish(),
+    user: z.object({ login: z.string() }).nullable(),
+  }),
 )
 
 const issueCommentListSchema = z.array(
@@ -119,6 +154,7 @@ const issueCommentListSchema = z.array(
     id: z.int().positive(),
     body: z.string(),
     html_url: z.string(),
+    user: z.object({ login: z.string() }).nullable(),
   }),
 )
 
@@ -207,15 +243,31 @@ export const createGithubClient = (
     type: z.literal("Bot"),
   })
 
+  /** The token identity's login — the author of everything this client
+   *  posts. Memoized: the login never changes within a run, and every method
+   *  comparing or resolving authorship needs it. App installation tokens
+   *  resolve `viewer` to a Bot whose login usually already carries the
+   *  `[bot]` suffix — append it only when absent, or the lookup targets a
+   *  nonexistent `<slug>[bot][bot]` user. User tokens (PATs) post as the
+   *  user, so their login gets no suffix at all. */
+  let botLoginCache: string | undefined
+  const resolveBotLogin = async (): Promise<string> => {
+    if (botLoginCache) return botLoginCache
+    const viewer = await octokit.graphql<{
+      viewer: { login: string; __typename: string }
+    }>("query { viewer { login __typename } }")
+    const { login, __typename } = viewer.viewer
+    botLoginCache =
+      __typename === "Bot" && !login.endsWith("[bot]") ? `${login}[bot]` : login
+    return botLoginCache
+  }
+
   const requestBotReview = async ({
     prNodeId,
   }: {
     prNodeId: string
   }): Promise<void> => {
-    const viewer = await octokit.graphql<{
-      viewer: { login: string }
-    }>("query { viewer { login } }")
-    const botLogin = `${viewer.viewer.login}[bot]`
+    const botLogin = await resolveBotLogin()
 
     const response = await octokit.rest.users.getByUsername({
       username: botLogin,
@@ -237,19 +289,43 @@ export const createGithubClient = (
     logger.info("requested bot review", { login: parsed.data.login })
   }
 
+  /** Body-only review — the vehicle for skip notices. */
   const submitReview = async ({
     prNumber,
     commitId,
     body,
+  }: {
+    prNumber: number
+    commitId: string
+    body: string
+  }): Promise<SubmitReviewResult> => {
+    const response = await octokit.rest.pulls.createReview({
+      owner,
+      repo,
+      pull_number: prNumber,
+      commit_id: commitId,
+      event: "COMMENT",
+      body,
+    })
+    return { url: parseReviewUrl(response.data) }
+  }
+
+  /** The inline-findings batch: one review carrying every anchorable
+   *  finding, body kept to the caller's invisible marker so the timeline
+   *  shows a bare "reviewed" event. GitHub answers 422 when an anchor is
+   *  not part of the diff — e.g. a force-push racing the run — reported as
+   *  `rejected` so the caller can re-route the findings to issue comments. */
+  const postFindingsReview = async ({
+    prNumber,
+    commitId,
+    body,
     comments,
-    fallbackBody,
   }: {
     prNumber: number
     commitId: string
     body: string
     comments: ReviewComment[]
-    fallbackBody: string
-  }): Promise<SubmitReviewResult> => {
+  }): Promise<FindingsReviewResult> => {
     try {
       const response = await octokit.rest.pulls.createReview({
         owner,
@@ -258,42 +334,49 @@ export const createGithubClient = (
         commit_id: commitId,
         event: "COMMENT",
         body,
-        ...(comments.length > 0 ? { comments } : {}),
+        comments,
       })
-      return { url: parseReviewUrl(response.data), usedFallbackBody: false }
+      return { kind: "ok", url: parseReviewUrl(response.data) }
     } catch (submitError) {
-      // GitHub answers 422 when an inline anchor is not part of the diff —
-      // e.g. a force-push racing the run. Only that case gets the body-only
-      // retry; a 422 on a zero-comment review is a different bug and rethrows.
-      const inlineAnchorsRejected =
-        comments.length > 0 && errorStatus(submitError) === 422
-      if (!inlineAnchorsRejected) throw submitError
-
-      logger.warn(
-        "inline comments rejected (422) — posting body-only fallback",
-        {
-          prNumber,
-          rejectedCommentCount: comments.length,
-        },
-      )
-      const response = await octokit.rest.pulls.createReview({
-        owner,
-        repo,
-        pull_number: prNumber,
-        commit_id: commitId,
-        event: "COMMENT",
-        body: fallbackBody,
+      if (errorStatus(submitError) !== 422) throw submitError
+      logger.warn("inline comment anchors rejected (422)", {
+        prNumber,
+        rejectedCommentCount: comments.length,
       })
-      return { url: parseReviewUrl(response.data), usedFallbackBody: true }
+      return { kind: "rejected" }
     }
   }
 
-  const fetchReviewComments = async ({
+  const postIssueComment = async ({
+    prNumber,
+    body,
+  }: {
+    prNumber: number
+    body: string
+  }): Promise<{ url: string }> => {
+    const response = await octokit.rest.issues.createComment({
+      owner,
+      repo,
+      issue_number: prNumber,
+      body,
+    })
+    const parsed = urlResponseSchema.safeParse(response.data)
+    if (!parsed.success) {
+      throw new Error("unexpected issue comment response shape")
+    }
+    return { url: parsed.data.html_url }
+  }
+
+  /** Only the bot's own comments count: anchors drive dedup, and anyone can
+   *  paste an `<!-- umm-actually:... -->` marker into a comment — without the
+   *  author filter that would silently suppress a real future finding. */
+  const fetchBotReviewComments = async ({
     prNumber,
   }: {
     prNumber: number
-  }): Promise<{ path: string; body: string }[]> => {
-    const allComments: { path: string; body: string }[] = []
+  }): Promise<ExistingReviewComment[]> => {
+    const botLogin = await resolveBotLogin()
+    const allComments: ExistingReviewComment[] = []
 
     for (let page = 1; page <= MAX_PAGES; page++) {
       const response = await octokit.rest.pulls.listReviewComments({
@@ -307,7 +390,17 @@ export const createGithubClient = (
       if (!parsed.success) {
         throw new Error("unexpected review comments response shape")
       }
-      allComments.push(...parsed.data)
+      allComments.push(
+        ...parsed.data
+          .filter((comment) => comment.user?.login === botLogin)
+          .map((comment) => ({
+            path: comment.path,
+            body: comment.body,
+            line: comment.start_line ?? comment.line ?? null,
+            originalLine:
+              comment.original_start_line ?? comment.original_line ?? null,
+          })),
+      )
       if (parsed.data.length < PER_PAGE) break
       if (page === MAX_PAGES) {
         logger.warn("review comments page cap reached", {
@@ -317,10 +410,48 @@ export const createGithubClient = (
       }
     }
 
-    logger.info("fetched review comments", {
+    logger.info("fetched bot review comments", {
       prNumber,
       count: allComments.length,
     })
+    return allComments
+  }
+
+  /** The bot's own issue comments on the PR — the status comment plus any
+   *  beyond-diff finding comments. One listing serves both the run signal
+   *  and the beyond-diff dedup anchors. Author-filtered for the same reason
+   *  as fetchBotReviewComments: anyone can paste an anchor marker. */
+  const fetchBotIssueComments = async ({
+    prNumber,
+  }: {
+    prNumber: number
+  }): Promise<{ body: string }[]> => {
+    const botLogin = await resolveBotLogin()
+    const allComments: { body: string }[] = []
+
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const response = await octokit.rest.issues.listComments({
+        owner,
+        repo,
+        issue_number: prNumber,
+        per_page: PER_PAGE,
+        page,
+      })
+      const parsed = issueCommentListSchema.safeParse(response.data)
+      if (!parsed.success) {
+        throw new Error("unexpected issue comments response shape")
+      }
+      allComments.push(
+        ...parsed.data
+          .filter((comment) => comment.user?.login === botLogin)
+          .map((comment) => ({ body: comment.body })),
+      )
+      if (parsed.data.length < PER_PAGE) break
+      if (page === MAX_PAGES) {
+        logger.warn("issue comments page cap reached", { prNumber })
+      }
+    }
+
     return allComments
   }
 
@@ -333,6 +464,12 @@ export const createGithubClient = (
     body: string
     anchor: string
   }): Promise<UpsertCommentResult> => {
+    // Only the bot's own comment is an update target — a pasted anchor from
+    // another author must not hijack the receipt (the edit would 403 anyway;
+    // bots can't modify other users' comments). The anchor must open the
+    // body: finding comments carry model-generated text that could quote the
+    // marker mid-body, and matching one would overwrite the finding.
+    const botLogin = await resolveBotLogin()
     let totalFetched = 0
 
     for (let page = 1; page <= MAX_PAGES; page++) {
@@ -349,8 +486,9 @@ export const createGithubClient = (
       }
       totalFetched += parsed.data.length
 
-      const existingComment = parsed.data.find((comment) =>
-        comment.body.includes(anchor),
+      const existingComment = parsed.data.find(
+        (comment) =>
+          comment.user?.login === botLogin && comment.body.startsWith(anchor),
       )
       if (existingComment) {
         const updateResponse = await octokit.rest.issues.updateComment({
@@ -395,7 +533,10 @@ export const createGithubClient = (
     fetchDiff,
     requestBotReview,
     submitReview,
-    fetchReviewComments,
+    postFindingsReview,
+    postIssueComment,
+    fetchBotReviewComments,
+    fetchBotIssueComments,
     upsertSummaryComment,
   }
 }
