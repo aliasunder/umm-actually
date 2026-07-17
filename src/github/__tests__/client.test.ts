@@ -1099,10 +1099,14 @@ describe("upsertSummaryComment", () => {
   const commentUrl =
     "https://github.com/aliasunder/fixture/pull/7#issuecomment-1"
   const anchor = "<!-- umm-actually-status -->"
+  const viewerResponse = {
+    data: { viewer: { login: "umm-actually", __typename: "Bot" } },
+  }
   const body = `${anchor}\n\n**umm-actually** re-reviewed`
 
   it("creates a new comment when no matching anchor exists", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [
         {
           data: [
@@ -1139,6 +1143,7 @@ describe("upsertSummaryComment", () => {
 
   it("updates an existing comment when the anchor is found", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [
         {
           data: [
@@ -1181,6 +1186,7 @@ describe("upsertSummaryComment", () => {
       user: { login: "aliasunder" },
     }))
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [
         { data: fullPage },
         {
@@ -1213,6 +1219,7 @@ describe("upsertSummaryComment", () => {
 
   it("throws on a malformed issue comments response", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [{ data: "not an array" }],
     })
     const { client } = makeClient(stub)
@@ -1224,6 +1231,7 @@ describe("upsertSummaryComment", () => {
 
   it("throws when the create response has no html_url", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [{ data: [] }],
       createCommentResponses: [{ data: { id: 1 } }],
     })
@@ -1236,6 +1244,7 @@ describe("upsertSummaryComment", () => {
 
   it("throws when the update response has no html_url", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [
         {
           data: [
@@ -1257,8 +1266,38 @@ describe("upsertSummaryComment", () => {
     ).rejects.toThrow("unexpected issue comment response shape")
   })
 
+  it("creates a new comment instead of updating a spoofed anchor from another author", async () => {
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listCommentsResponses: [
+        {
+          data: [
+            {
+              id: 66,
+              body: `${anchor}\n\nspoofed receipt`,
+              html_url: "https://example.com/66",
+              user: { login: "some-human" },
+            },
+          ],
+        },
+      ],
+      createCommentResponses: [{ data: { html_url: commentUrl } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.upsertSummaryComment({
+      prNumber: 7,
+      body,
+      anchor,
+    })
+
+    expect(result).toEqual({ url: commentUrl, created: true })
+    expect(stub.updateCommentCalls).toHaveLength(0)
+  })
+
   it("creates when the issue comments list is empty", async () => {
     const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
       listCommentsResponses: [{ data: [] }],
       createCommentResponses: [{ data: { html_url: commentUrl } }],
     })
