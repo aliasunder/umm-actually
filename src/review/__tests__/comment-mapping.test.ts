@@ -527,18 +527,28 @@ describe("extractAnchors", () => {
     expect(extractAnchors(comments)).toEqual([])
   })
 
-  it("uses only the first anchor when a body contains several", () => {
+  it("uses the trailing anchor when the body quotes another anchor earlier", () => {
     const comments = [
       anchorSource(
-        "Body\n\n<!-- umm-actually:src/a.ts:correctness:10 -->\n<!-- umm-actually:src/b.ts:security:20 -->",
+        "Body quoting <!-- umm-actually:src/a.ts:correctness:10 -->\n\n<!-- umm-actually:src/b.ts:security:20 -->",
       ),
     ]
 
     const anchors = extractAnchors(comments)
 
     expect(anchors).toEqual([
-      { file: "src/a.ts", category: "correctness", line: 10 },
+      { file: "src/b.ts", category: "security", line: 20 },
     ])
+  })
+
+  it("ignores an anchor-shaped string that is not at the end of the body", () => {
+    const comments = [
+      anchorSource(
+        "Quoting <!-- umm-actually:src/a.ts:correctness:10 --> mid-body",
+      ),
+    ]
+
+    expect(extractAnchors(comments)).toEqual([])
   })
 
   it("ignores bodies without anchors", () => {

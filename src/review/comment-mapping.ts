@@ -24,8 +24,12 @@ export type MappedReview = {
  */
 const SNAP_DISTANCE = 3
 
-/** Matches `<!-- umm-actually:KEY -->` -- the hidden HTML anchor in each inline finding. Group 1 is the dedup key. */
-const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->/
+/** Matches `<!-- umm-actually:KEY -->` only at the end of a body — the
+ *  genuine anchor is always the last thing the bot appends. An
+ *  anchor-shaped string earlier in the body (e.g. model text quoting one)
+ *  must not win the extraction, or it would suppress future findings at
+ *  whatever location it names. Group 1 is the dedup key. */
+const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->\s*$/
 
 /**
  * Findings within this many lines of an existing anchor in the same
