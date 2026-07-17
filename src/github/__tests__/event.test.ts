@@ -31,7 +31,6 @@ describe("resolvePullRequestEvent", () => {
       kind: "complete",
       context: {
         prNumber: 7,
-        nodeId: "PR_kwDOMock7",
         title: "feat: trim names before greeting",
         body: "Trims whitespace from names and validates registry keys.",
         headSha: "abc123def456abc123def456abc123def456abc1",
@@ -55,7 +54,6 @@ describe("resolvePullRequestEvent", () => {
       kind: "complete",
       context: {
         prNumber: 7,
-        nodeId: "PR_kwDOMock7",
         title: "feat: trim names before greeting",
         body: "Trims whitespace from names and validates registry keys.",
         headSha: "abc123def456abc123def456abc123def456abc1",

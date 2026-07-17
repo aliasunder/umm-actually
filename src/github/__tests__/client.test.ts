@@ -24,7 +24,6 @@ const makeOctokitStub = ({
   listCommentsResponses = [],
   createCommentResponses = [],
   updateCommentResponses = [],
-  getByUsernameResponses = [],
   graphqlResponses = [],
 }: {
   getResponses?: StubResponse[]
@@ -33,7 +32,6 @@ const makeOctokitStub = ({
   listCommentsResponses?: StubResponse[]
   createCommentResponses?: StubResponse[]
   updateCommentResponses?: StubResponse[]
-  getByUsernameResponses?: StubResponse[]
   graphqlResponses?: GraphqlResponse[]
 } = {}) => {
   const getCalls: Record<string, unknown>[] = []
@@ -42,7 +40,6 @@ const makeOctokitStub = ({
   const listCommentsCalls: Record<string, unknown>[] = []
   const createCommentCalls: Record<string, unknown>[] = []
   const updateCommentCalls: Record<string, unknown>[] = []
-  const getByUsernameCalls: Record<string, unknown>[] = []
   const graphqlCalls: {
     query: string
     parameters?: Record<string, unknown>
@@ -76,16 +73,6 @@ const makeOctokitStub = ({
       return Promise.resolve(next.data as T)
     },
     rest: {
-      users: {
-        getByUsername: async (params: Record<string, unknown>) => {
-          getByUsernameCalls.push(params)
-          return takeNext(
-            getByUsernameResponses,
-            getByUsernameCalls.length,
-            "users.getByUsername",
-          )
-        },
-      },
       pulls: {
         get: async (params) => {
           getCalls.push(params)
@@ -145,7 +132,6 @@ const makeOctokitStub = ({
     listCommentsCalls,
     createCommentCalls,
     updateCommentCalls,
-    getByUsernameCalls,
     graphqlCalls,
   }
 }
@@ -190,7 +176,6 @@ describe("fetchPullRequest", () => {
     ])
     expect(prContext).toEqual({
       prNumber: 7,
-      nodeId: "PR_kwDOMock7",
       title: "feat: trim names before greeting",
       body: "Trims whitespace from names and validates registry keys.",
       headSha: "abc123def456abc123def456abc123def456abc1",
@@ -284,161 +269,6 @@ describe("fetchDiff", () => {
     await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow(
       "expected a unified diff string from the diff media type",
     )
-  })
-})
-
-describe("requestBotReview", () => {
-  it("discovers the bot identity via REST and requests review via GraphQL", async () => {
-    const stub = makeOctokitStub({
-      graphqlResponses: [
-        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
-        { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
-      ],
-      getByUsernameResponses: [
-        {
-          data: {
-            node_id: "BOT_kgDOEewBdQ",
-            login: "umm-actually[bot]",
-            type: "Bot",
-          },
-        },
-      ],
-    })
-    const { client, logger } = makeClient(stub)
-
-    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
-
-    expect(stub.graphqlCalls).toHaveLength(2)
-    expect(stub.graphqlCalls[0]?.query).toBe(
-      "query { viewer { login __typename } }",
-    )
-    expect(stub.getByUsernameCalls).toEqual([{ username: "umm-actually[bot]" }])
-    expect(stub.graphqlCalls[1]?.parameters).toEqual({
-      prId: "PR_kwDOMock7",
-      botIds: ["BOT_kgDOEewBdQ"],
-    })
-    expect(logger.messages).toContainEqual({
-      level: "info",
-      message: "requested bot review",
-      data: { login: "umm-actually[bot]" },
-    })
-  })
-
-  it("does not double-suffix a viewer login that already carries [bot]", async () => {
-    const stub = makeOctokitStub({
-      graphqlResponses: [
-        { data: { viewer: { login: "umm-actually[bot]", __typename: "Bot" } } },
-        { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
-      ],
-      getByUsernameResponses: [
-        {
-          data: {
-            node_id: "BOT_kgDOEewBdQ",
-            login: "umm-actually[bot]",
-            type: "Bot",
-          },
-        },
-      ],
-    })
-    const { client } = makeClient(stub)
-
-    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
-
-    expect(stub.getByUsernameCalls).toEqual([{ username: "umm-actually[bot]" }])
-  })
-
-  it("logs a warning when the bot user response is malformed", async () => {
-    const stub = makeOctokitStub({
-      graphqlResponses: [
-        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
-      ],
-      getByUsernameResponses: [{ data: { message: "Not Found" } }],
-    })
-    const { client, logger } = makeClient(stub)
-
-    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
-
-    expect(stub.graphqlCalls).toHaveLength(1)
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "could not resolve bot user for review request",
-      data: { botLogin: "umm-actually[bot]" },
-    })
-  })
-
-  it("propagates errors from the viewer query", async () => {
-    const stub = makeOctokitStub({
-      graphqlResponses: [{ error: new Error("token expired") }],
-    })
-    const { client } = makeClient(stub)
-
-    await expect(
-      client.requestBotReview({ prNodeId: "PR_kwDOMock7" }),
-    ).rejects.toThrow("token expired")
-  })
-
-  it("propagates errors from the getByUsername REST call", async () => {
-    const stub = makeOctokitStub({
-      graphqlResponses: [
-        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
-      ],
-      getByUsernameResponses: [{ error: makeStatusError(404) }],
-    })
-    const { client } = makeClient(stub)
-
-    await expect(
-      client.requestBotReview({ prNodeId: "PR_kwDOMock7" }),
-    ).rejects.toThrow("HTTP 404")
-  })
-
-  it("propagates errors from the requestReviews mutation", async () => {
-    const stub = makeOctokitStub({
-      graphqlResponses: [
-        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
-        { error: new Error("insufficient permissions") },
-      ],
-      getByUsernameResponses: [
-        {
-          data: {
-            node_id: "BOT_kgDOEewBdQ",
-            login: "umm-actually[bot]",
-            type: "Bot",
-          },
-        },
-      ],
-    })
-    const { client } = makeClient(stub)
-
-    await expect(
-      client.requestBotReview({ prNodeId: "PR_kwDOMock7" }),
-    ).rejects.toThrow("insufficient permissions")
-  })
-
-  it("rejects a non-Bot user type", async () => {
-    const stub = makeOctokitStub({
-      graphqlResponses: [
-        { data: { viewer: { login: "some-app", __typename: "Bot" } } },
-      ],
-      getByUsernameResponses: [
-        {
-          data: {
-            node_id: "MDQ6VXNlcjEyMzQ=",
-            login: "some-app[bot]",
-            type: "User",
-          },
-        },
-      ],
-    })
-    const { client, logger } = makeClient(stub)
-
-    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
-
-    expect(stub.graphqlCalls).toHaveLength(1)
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "could not resolve bot user for review request",
-      data: { botLogin: "some-app[bot]" },
-    })
   })
 })
 
@@ -953,6 +783,22 @@ describe("fetchBotIssueComments", () => {
     expect(comments).toEqual([])
   })
 
+  it("does not double-suffix a viewer login that already carries [bot]", async () => {
+    // Regression guard: unconditional suffixing built `umm-actually[bot][bot]`
+    // and silently matched no comments.
+    const stub = makeOctokitStub({
+      graphqlResponses: [
+        { data: { viewer: { login: "umm-actually[bot]", __typename: "Bot" } } },
+      ],
+      listCommentsResponses: [{ data: [botComment(9, "finding")] }],
+    })
+    const { client } = makeClient(stub)
+
+    const comments = await client.fetchBotIssueComments({ prNumber: 7 })
+
+    expect(comments).toEqual([{ body: "finding" }])
+  })
+
   it("matches a plain user login when the token is a PAT", async () => {
     // A personal access token resolves viewer to a User — comments are
     // authored by the bare login, so no [bot] suffix may be appended.
@@ -1078,38 +924,42 @@ describe("fetchBotIssueComments", () => {
 })
 
 describe("bot login memoization", () => {
-  it("resolves the viewer query only once across requestBotReview and fetchBotIssueComments", async () => {
+  it("resolves the viewer query only once across fetchBotIssueComments and upsertSummaryComment", async () => {
+    const commentUrl =
+      "https://github.com/aliasunder/fixture/pull/7#issuecomment-1"
     const stub = makeOctokitStub({
       graphqlResponses: [
         { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
-        { data: { requestReviews: { pullRequest: { id: "PR_kwDOMock7" } } } },
       ],
-      getByUsernameResponses: [
-        {
-          data: {
-            node_id: "BOT_kgDOEewBdQ",
-            login: "umm-actually[bot]",
-            type: "Bot",
-          },
-        },
-      ],
-      listCommentsResponses: [{ data: [] }],
+      listCommentsResponses: [{ data: [] }, { data: [] }],
+      createCommentResponses: [{ data: { html_url: commentUrl } }],
     })
     const { client } = makeClient(stub)
 
-    await client.requestBotReview({ prNodeId: "PR_kwDOMock7" })
     const comments = await client.fetchBotIssueComments({ prNumber: 7 })
+    const result = await client.upsertSummaryComment({
+      prNumber: 7,
+      body: "<!-- umm-actually-status -->\n\nstatus",
+      anchor: "<!-- umm-actually-status -->",
+    })
 
     expect(comments).toEqual([])
-    // Only two GraphQL calls: the viewer query (memoized) and the mutation.
-    // A third call would mean the viewer query ran twice.
-    expect(stub.graphqlCalls).toHaveLength(2)
-    expect(stub.graphqlCalls[0]).toEqual({
-      query: "query { viewer { login __typename } }",
-    })
-    // fetchBotIssueComments must have actually listed comments — a
-    // short-circuited empty result would leave this empty too.
+    expect(result).toEqual({ url: commentUrl, created: true })
+    // Exactly one GraphQL call: the memoized viewer query. A second call
+    // would mean the viewer query ran twice.
+    expect(stub.graphqlCalls).toEqual([
+      { query: "query { viewer { login __typename } }" },
+    ])
+    // Both methods must have actually listed comments — a short-circuited
+    // empty result would leave this at one call (or none).
     expect(stub.listCommentsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 1,
+      },
       {
         owner: "aliasunder",
         repo: "fixture",
