@@ -466,7 +466,9 @@ export const createGithubClient = (
   }): Promise<UpsertCommentResult> => {
     // Only the bot's own comment is an update target — a pasted anchor from
     // another author must not hijack the receipt (the edit would 403 anyway;
-    // bots can't modify other users' comments).
+    // bots can't modify other users' comments). The anchor must open the
+    // body: finding comments carry model-generated text that could quote the
+    // marker mid-body, and matching one would overwrite the finding.
     const botLogin = await resolveBotLogin()
     let totalFetched = 0
 
@@ -486,7 +488,7 @@ export const createGithubClient = (
 
       const existingComment = parsed.data.find(
         (comment) =>
-          comment.user?.login === botLogin && comment.body.includes(anchor),
+          comment.user?.login === botLogin && comment.body.startsWith(anchor),
       )
       if (existingComment) {
         const updateResponse = await octokit.rest.issues.updateComment({

@@ -999,7 +999,24 @@ describe("fetchBotIssueComments", () => {
     const comments = await client.fetchBotIssueComments({ prNumber: 7 })
 
     expect(comments).toEqual([{ body: "bot finding" }])
-    expect(stub.listCommentsCalls).toHaveLength(2)
+    // Exact page sequence: the stub serves responses by call count, so a
+    // length check alone would pass even if page 1 were requested twice.
+    expect(stub.listCommentsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 2,
+      },
+    ])
   })
 
   it("stops at the page cap and logs a warning", async () => {
@@ -1019,7 +1036,16 @@ describe("fetchBotIssueComments", () => {
     const comments = await client.fetchBotIssueComments({ prNumber: 7 })
 
     expect(comments).toEqual([])
-    expect(stub.listCommentsCalls).toHaveLength(10)
+    // Pages 1 through 10 exactly — not the same page requested ten times.
+    expect(stub.listCommentsCalls).toEqual(
+      Array.from({ length: 10 }, (_, index) => ({
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: index + 1,
+      })),
+    )
     expect(logger.messages).toContainEqual({
       level: "warn",
       message: "issue comments page cap reached",
@@ -1141,6 +1167,45 @@ describe("upsertSummaryComment", () => {
     expect(stub.updateCommentCalls).toHaveLength(0)
   })
 
+  it("does not update a finding comment quoting the anchor mid-body", async () => {
+    // Finding bodies carry model-generated text; one quoting the status
+    // marker must not become the upsert target and get overwritten.
+    const stub = makeOctokitStub({
+      graphqlResponses: [viewerResponse],
+      listCommentsResponses: [
+        {
+          data: [
+            {
+              id: 55,
+              body: `finding text quoting ${anchor} mid-body`,
+              html_url: "https://example.com/55",
+              user: { login: "umm-actually[bot]" },
+            },
+          ],
+        },
+      ],
+      createCommentResponses: [{ data: { html_url: commentUrl } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.upsertSummaryComment({
+      prNumber: 7,
+      body,
+      anchor,
+    })
+
+    expect(result).toEqual({ url: commentUrl, created: true })
+    expect(stub.updateCommentCalls).toHaveLength(0)
+    expect(stub.createCommentCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        body,
+      },
+    ])
+  })
+
   it("updates an existing comment when the anchor is found", async () => {
     const stub = makeOctokitStub({
       graphqlResponses: [viewerResponse],
@@ -1211,7 +1276,22 @@ describe("upsertSummaryComment", () => {
     })
 
     expect(result).toEqual({ url: commentUrl, created: false })
-    expect(stub.listCommentsCalls).toHaveLength(2)
+    expect(stub.listCommentsCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 1,
+      },
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        issue_number: 7,
+        per_page: 100,
+        page: 2,
+      },
+    ])
     expect(stub.updateCommentCalls).toEqual([
       { owner: "aliasunder", repo: "fixture", comment_id: 200, body },
     ])

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { CommentableFile } from "../../diff/commentable-lines.js"
 import {
   buildStatusComment,
+  coalesceAnchors,
   computeAnchorKey,
   extractAnchors,
   isDuplicateFinding,
@@ -636,6 +637,42 @@ describe("isDuplicateFinding", () => {
         [],
       ),
     ).toBe(false)
+  })
+})
+
+describe("coalesceAnchors", () => {
+  it("collapses anchors within LINE_PROXIMITY into the first one", () => {
+    const anchors = [
+      { file: "src/a.ts", category: "correctness", line: 50 },
+      { file: "src/a.ts", category: "correctness", line: 53 },
+    ]
+
+    expect(coalesceAnchors(anchors)).toEqual([
+      { file: "src/a.ts", category: "correctness", line: 50 },
+    ])
+  })
+
+  it("keeps anchors beyond LINE_PROXIMITY as distinct findings", () => {
+    const anchors = [
+      { file: "src/a.ts", category: "correctness", line: 50 },
+      { file: "src/a.ts", category: "correctness", line: 56 },
+    ]
+
+    expect(coalesceAnchors(anchors)).toEqual(anchors)
+  })
+
+  it("keeps same-line anchors that differ in file or category", () => {
+    const anchors = [
+      { file: "src/a.ts", category: "correctness", line: 50 },
+      { file: "src/b.ts", category: "correctness", line: 50 },
+      { file: "src/a.ts", category: "security", line: 50 },
+    ]
+
+    expect(coalesceAnchors(anchors)).toEqual(anchors)
+  })
+
+  it("returns an empty array for no anchors", () => {
+    expect(coalesceAnchors([])).toEqual([])
   })
 })
 

@@ -16,6 +16,7 @@ import { renderCostSummary } from "./openrouter/cost-summary.js"
 import type { ContextReader } from "./context/workspace.js"
 import {
   buildStatusComment,
+  coalesceAnchors,
   extractAnchors,
   isDuplicateFinding,
   mapFindingsToReview,
@@ -113,8 +114,10 @@ const fetchIssueCommentState = async (
   try {
     const comments = await githubClient.fetchBotIssueComments({ prNumber })
     return {
+      // startsWith, not includes: a finding comment's model-generated text
+      // could quote the marker mid-body and misclassify the run as a re-run.
       statusCommentExists: comments.some((comment) =>
-        comment.body.includes(STATUS_ANCHOR),
+        comment.body.startsWith(STATUS_ANCHOR),
       ),
       anchors: extractAnchors(
         comments.map((comment) => ({
@@ -428,7 +431,9 @@ export const orchestrate = async (
     isFirstRun: !issueState.statusCommentExists,
     postedCount,
     unpostedCount: selected.length - postedCount,
-    totalCount: existingAnchors.length + postedCount,
+    // Coalesced: fail-open reposts can leave two anchors for one finding,
+    // and the tracked count reports findings, not comment anchors.
+    totalCount: coalesceAnchors(existingAnchors).length + postedCount,
     droppedByCap,
     model: modelUsed,
   })

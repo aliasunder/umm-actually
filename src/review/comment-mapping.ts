@@ -91,9 +91,11 @@ export const extractAnchors = (comments: AnchorSource[]): AnchorEntry[] => {
   })
 }
 
-/** True when a finding is within LINE_PROXIMITY of an existing anchor. */
+/** True when a finding is within LINE_PROXIMITY of an existing anchor.
+ *  Takes any anchor-shaped location — a Finding satisfies it, and so does
+ *  another AnchorEntry (coalesceAnchors compares anchors to anchors). */
 export const isDuplicateFinding = (
-  finding: Pick<Finding, "file" | "category" | "line">,
+  finding: AnchorEntry,
   anchors: AnchorEntry[],
 ): boolean => {
   return anchors.some((anchor) => {
@@ -103,6 +105,16 @@ export const isDuplicateFinding = (
       Math.abs(anchor.line - finding.line) <= LINE_PROXIMITY
     )
   })
+}
+
+/** Collapses anchors the proximity rule would treat as one finding. A
+ *  fail-open fetch can repost an already-anchored finding, leaving two
+ *  anchors for it — the status comment counts findings, not anchors. */
+export const coalesceAnchors = (anchors: AnchorEntry[]): AnchorEntry[] => {
+  return anchors.reduce<AnchorEntry[]>((kept, anchor) => {
+    if (isDuplicateFinding(anchor, kept)) return kept
+    return [...kept, anchor]
+  }, [])
 }
 
 const findingTag = (finding: Finding): string =>

@@ -1008,6 +1008,64 @@ describe("orchestrate", () => {
       ])
     })
 
+    it("a finding comment quoting the status marker mid-body does not make the run a re-run", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotIssueComments: async () => [
+            { body: `finding text quoting \`${STATUS_ANCHOR}\` mid-body` },
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+        }),
+      ])
+    })
+
+    it("counts duplicate anchors for one finding once in the status comment", async () => {
+      const findings = fixtureReviewResponse.findings
+      const duplicateFinding = findings[0]
+      if (!duplicateFinding) {
+        throw new Error("expected at least one fixture finding")
+      }
+
+      // Two anchors within LINE_PROXIMITY of each other — the residue a
+      // fail-open fetch leaves when it reposts an already-anchored finding.
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotIssueComments: async () => [
+            issueFinding(computeAnchorKey(duplicateFinding)),
+            issueFinding(
+              computeAnchorKey({
+                ...duplicateFinding,
+                line: duplicateFinding.line + 2,
+              }),
+            ),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(findings.length - 1)
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: findings.length - 1,
+          totalCount: findings.length,
+        }),
+      ])
+    })
+
     it("dedups findings matching beyond-diff issue-comment anchors", async () => {
       const findings = fixtureReviewResponse.findings
       const duplicateFinding = findings[0]
