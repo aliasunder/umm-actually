@@ -283,10 +283,7 @@ const makeOrchestrateDeps = (
     },
     submitReview: async (params) => {
       submitReviewCalls.push(params)
-      return {
-        url: "https://github.com/test/review/1",
-        usedFallbackBody: false,
-      }
+      return { url: "https://github.com/test/review/1" }
     },
     postFindingsReview: async (params) => {
       postFindingsReviewCalls.push(params)

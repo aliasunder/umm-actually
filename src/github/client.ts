@@ -70,7 +70,7 @@ export type OctokitLike = {
 export type DiffFetchResult =
   { kind: "ok"; diff: string } | { kind: "too_large" }
 
-export type SubmitReviewResult = { url: string; usedFallbackBody: boolean }
+export type SubmitReviewResult = { url: string }
 
 export type UpsertCommentResult = { url: string; created: boolean }
 
@@ -307,7 +307,7 @@ export const createGithubClient = (
       event: "COMMENT",
       body,
     })
-    return { url: parseReviewUrl(response.data), usedFallbackBody: false }
+    return { url: parseReviewUrl(response.data) }
   }
 
   /** The inline-findings batch: one review carrying every anchorable

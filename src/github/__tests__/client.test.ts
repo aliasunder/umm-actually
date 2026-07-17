@@ -469,7 +469,7 @@ describe("submitReview", () => {
         body: "skip notice",
       },
     ])
-    expect(result).toEqual({ url: reviewUrl, usedFallbackBody: false })
+    expect(result).toEqual({ url: reviewUrl })
   })
 
   it("propagates errors without a retry", async () => {
