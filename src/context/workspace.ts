@@ -221,7 +221,7 @@ export const createContextReader = (
     try {
       return await readFile(path.join(resolvedRoot, scannedPath), "utf8")
     } catch (readError) {
-      logger.warn("scanned file unreadable — excluding from related files", {
+      logger.warn("scanned file unreadable — excluding from context", {
         path: scannedPath,
         error: String(readError),
       })

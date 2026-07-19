@@ -540,7 +540,7 @@ describe("findRelatedFiles", () => {
       )
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message: "scanned file unreadable — excluding from related files",
+        message: "scanned file unreadable — excluding from context",
         data: {
           path: "locked.ts",
           error: expect.stringContaining("EACCES"),
