@@ -495,9 +495,10 @@ export const createContextReader = (
 
     const candidates: DocCandidate[] = []
     for (const scannedPath of scannedPaths) {
-      if (posix.normalize(scannedPath) === normalizedConventionsFile) continue
+      const normalizedScannedPath = posix.normalize(scannedPath)
+      if (normalizedScannedPath === normalizedConventionsFile) continue
       if (changedPathSet.has(scannedPath)) continue
-      if (excludePathSet.has(posix.normalize(scannedPath))) continue
+      if (excludePathSet.has(normalizedScannedPath)) continue
 
       const content = await readScannedFileOrNull(scannedPath)
       if (!content) continue

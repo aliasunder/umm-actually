@@ -9,7 +9,7 @@ LLM-powered pull request review as a GitHub Action. One consolidated review per 
 - Posts exactly **one** PR review with inline comments anchored to diff lines — no duplicate comments, no unrequested-reviewer badges
 - Structured output end to end: every finding carries a category, severity, confidence, and a concrete failure scenario
 - Model-agnostic via OpenRouter — pick your model, see your per-call costs
-- Findings that can't be anchored to the diff (e.g. callers outside the changed files) render in the review body under "Findings beyond the diff"
+- Findings that can't be anchored to the diff (e.g. callers outside the changed files) are posted as standalone comments on the PR
 - PRs with oversized diffs are skipped gracefully with a body-only review stating the reason
 
 ## Setup
@@ -109,7 +109,7 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 6. Filters findings by severity threshold, deduplicates overlapping findings, and caps if configured
 7. On re-runs, compares findings against previously posted inline comments (by hidden HTML anchor) and filters out duplicates
 8. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
-9. Posts one consolidated review — findings that can't be inlined render in the review body; re-runs upsert a summary comment with totals
+9. Posts one review with inline comments (invisible body); beyond-diff findings post as standalone PR comments; every run upserts a status comment with cross-run totals
 
 ## Status
 
