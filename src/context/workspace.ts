@@ -366,7 +366,7 @@ export const createContextReader = (
 
         if (filePaths.length >= config.maxScanFiles) {
           logger.warn(
-            "workspace scan capped — related-file detection may be incomplete",
+            "workspace scan capped — related-file and doc detection may be incomplete",
             { maxScanFiles: config.maxScanFiles },
           )
           return filePaths

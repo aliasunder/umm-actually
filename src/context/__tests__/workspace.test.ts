@@ -597,7 +597,7 @@ describe("findRelatedFiles", () => {
       expect(logger.messages).toContainEqual({
         level: "warn",
         message:
-          "workspace scan capped — related-file detection may be incomplete",
+          "workspace scan capped — related-file and doc detection may be incomplete",
         data: { maxScanFiles: DEFAULT_MAX_SCAN_FILES },
       })
     } finally {
