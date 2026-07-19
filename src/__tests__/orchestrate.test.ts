@@ -133,12 +133,14 @@ const expectedStatus = ({
   unpostedCount = 0,
   totalCount,
   droppedByCap = [],
+  contextNotes = [],
 }: {
   isFirstRun: boolean
   postedCount: number
   unpostedCount?: number
   totalCount: number
   droppedByCap?: Finding[]
+  contextNotes?: string[]
 }) => ({
   prNumber: 7,
   anchor: STATUS_ANCHOR,
@@ -150,6 +152,7 @@ const expectedStatus = ({
     totalCount,
     droppedByCap,
     model: "test/model",
+    contextNotes,
   }),
 })
 
@@ -837,6 +840,130 @@ describe("orchestrate", () => {
 
       const reviewContext = first(stubs.generateFindingsCalls)
       expect(reviewContext.relatedDocs).toEqual([docFile])
+    })
+
+    it("adds a context note when a priority doc is skipped", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: ["README.md", "CHANGELOG.md"] },
+        contextReader: {
+          readPriorityDocs: async (params) => ({
+            files: [
+              {
+                path: "README.md",
+                content: "# Readme",
+                includedAs: "full" as const,
+                reason: "priority documentation",
+              },
+            ],
+            remainingTokens: params.budgetTokens - 10,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+          contextNotes: [
+            "Priority docs not included: `CHANGELOG.md` (missing, unreadable, or over budget)",
+          ],
+        }),
+      ])
+    })
+
+    it("adds a context note when related files are excluded by cap", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { traceRelatedFiles: true },
+        contextReader: {
+          findRelatedFiles: async () => ({
+            files: [],
+            excludedByCapPaths: ["src/extra-a.ts", "src/extra-b.ts"],
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+          contextNotes: [
+            "2 related file(s) excluded by `max_related_files` cap: `src/extra-a.ts`, `src/extra-b.ts`",
+          ],
+        }),
+      ])
+    })
+
+    it("adds a context note when related docs are excluded by cap", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { traceRelatedFiles: true },
+        contextReader: {
+          findRelatedDocs: async () => ({
+            files: [],
+            excludedByCapPaths: ["docs/overflow.md"],
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+          contextNotes: [
+            "1 related doc(s) excluded by `max_related_docs` cap: `docs/overflow.md`",
+          ],
+        }),
+      ])
+    })
+
+    it("combines all three context notes when all conditions are met", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          traceRelatedFiles: true,
+          priorityDocs: ["MISSING.md"],
+        },
+        contextReader: {
+          readPriorityDocs: async (params) => ({
+            files: [],
+            remainingTokens: params.budgetTokens,
+          }),
+          findRelatedFiles: async () => ({
+            files: [],
+            excludedByCapPaths: ["src/capped.ts"],
+          }),
+          findRelatedDocs: async () => ({
+            files: [],
+            excludedByCapPaths: ["docs/capped.md"],
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+          contextNotes: [
+            "Priority docs not included: `MISSING.md` (missing, unreadable, or over budget)",
+            "1 related file(s) excluded by `max_related_files` cap: `src/capped.ts`",
+            "1 related doc(s) excluded by `max_related_docs` cap: `docs/capped.md`",
+          ],
+        }),
+      ])
     })
   })
 
