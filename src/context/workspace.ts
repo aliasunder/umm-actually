@@ -231,6 +231,7 @@ export const createContextReader = (
 
   const readPriorityDocOrNull = async (
     docPath: string,
+    maxBytes: number,
   ): Promise<string | null> => {
     // Assigned inside a try because resolveUnderRoot throws on traversal —
     // the escaping path must degrade to a skip, not crash the review.
@@ -249,6 +250,21 @@ export const createContextReader = (
         logger.warn(
           "priority doc resolves outside the reviewable workspace — skipping",
           { path: docPath },
+        )
+        return null
+      }
+      // Stat before reading: a priority doc can be arbitrarily large, and the
+      // token check only runs after the full read. UTF-8 bytes ≥ chars, so a
+      // file whose bytes exceed the remaining character budget can never fit —
+      // skip it without pulling it into memory. A failed stat falls through to
+      // the read path, which already logs and degrades per error kind.
+      const fileStats = await stat(safePath).catch(() => null)
+      if (fileStats !== null && fileStats.size > maxBytes) {
+        logger.warn(
+          "priority doc exceeds remaining context budget — skipping",
+          {
+            path: docPath,
+          },
         )
         return null
       }
@@ -456,7 +472,10 @@ export const createContextReader = (
     let remainingTokens = budgetTokens
 
     for (const docPath of priorityDocs) {
-      const content = await readPriorityDocOrNull(docPath)
+      const content = await readPriorityDocOrNull(
+        docPath,
+        remainingTokens * CHARS_PER_TOKEN,
+      )
       if (!content) continue
       if (content.includes("\x00")) continue
       const contentTokens = estimateTokens(content)

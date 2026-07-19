@@ -978,6 +978,37 @@ describe("readPriorityDocs", () => {
     }
   })
 
+  it("skips a doc whose byte size exceeds the byte budget before reading it", async () => {
+    // Multibyte content: 400 chars fit a 100-token budget, but 1200 UTF-8
+    // bytes exceed it — only the stat-first byte guard skips this doc;
+    // the post-read token check would have included it.
+    const multibyteContent = "あ".repeat(400)
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": multibyteContent,
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md"],
+        budgetTokens: estimateTokens(multibyteContent),
+      })
+
+      expect(result).toEqual({
+        files: [],
+        remainingTokens: estimateTokens(multibyteContent),
+      })
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "priority doc exceeds remaining context budget — skipping",
+        data: { path: "README.md" },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
   it("skips a missing priority doc with an info log", async () => {
     const { root, cleanup } = await makeTempWorkspace({
       "src/target.ts": "export const target = true",
