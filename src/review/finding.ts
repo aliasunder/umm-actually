@@ -50,8 +50,20 @@ export const SEVERITY_RANK: Record<FindingSeverity, number> = {
  * compatible with strict structured-output mode (every key required,
  * additionalProperties: false).
  */
+/** The file path is interpolated into an HTML-comment anchor
+ *  (`<!-- umm-actually:file:category:line -->`): a `-->` would close the
+ *  comment early and inject model-controlled content into the rendered
+ *  body, and a newline would break the anchor's single-line round-trip.
+ *  Enforced via refine, not .regex, so the constraint stays out of the
+ *  JSON schema sent to OpenRouter (provider pattern support varies). */
+const isSafeFilePath = (file: string): boolean =>
+  !file.includes("-->") && !/[\r\n]/.test(file)
+
 const findingSchema = z.strictObject({
-  file: z.string().min(1),
+  file: z
+    .string()
+    .min(1)
+    .refine(isSafeFilePath, 'file must be a single-line path without "-->"'),
   line: z.int().positive(),
   end_line: z.int().positive().nullable(),
   category: z.enum(FINDING_CATEGORIES),

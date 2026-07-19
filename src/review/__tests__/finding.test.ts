@@ -57,6 +57,20 @@ describe("reviewResponseSchema", () => {
     expect(result.success).toBe(false)
   })
 
+  it.each([
+    { name: "an HTML-comment terminator", file: "src/a.ts --> injected <!--" },
+    { name: "a newline", file: "src/a.ts\nsrc/b.ts" },
+  ])("rejects a finding whose file contains $name", ({ file }) => {
+    const response = {
+      analysis: "checked",
+      findings: [makeFinding({ file })],
+    }
+
+    const result = reviewResponseSchema.safeParse(response)
+
+    expect(result.success).toBe(false)
+  })
+
   it("rejects a finding with an unknown category", () => {
     const response = {
       analysis: "checked",

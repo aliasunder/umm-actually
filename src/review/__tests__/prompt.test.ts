@@ -16,7 +16,6 @@ if (combinedPhase === undefined)
 
 const prContext: PrContext = {
   prNumber: 7,
-  nodeId: "PR_kwDOMock7",
   title: "feat: trim names before greeting",
   body: "Trims whitespace from names.",
   headSha: "abc123",

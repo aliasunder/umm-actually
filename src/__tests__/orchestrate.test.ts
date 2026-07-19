@@ -13,14 +13,14 @@ import type {
 import { estimateTokens, type PromptFile } from "../review/prompt.js"
 import { annotateDiff } from "../diff/annotate-diff.js"
 import { computeCommentableLines } from "../diff/commentable-lines.js"
-import type { ReviewResponse } from "../review/finding.js"
+import type { Finding, ReviewResponse } from "../review/finding.js"
 import {
-  buildRerunSummary,
-  buildReviewBody,
-  buildZeroFindingsBody,
+  buildStatusComment,
   computeAnchorKey,
   mapFindingsToReview,
-  RERUN_ANCHOR,
+  renderStandaloneFinding,
+  REVIEW_MARKER,
+  STATUS_ANCHOR,
   type ReviewComment,
 } from "../review/comment-mapping.js"
 import { filterNonFindings } from "../review/filter-non-findings.js"
@@ -59,7 +59,6 @@ const fixtureReviewResponse: ReviewResponse = JSON.parse(
 
 const fixturePrContext: PrContext = {
   prNumber: 7,
-  nodeId: "PR_kwDOMock7",
   title: "feat: trim names before greeting",
   body: "Trims whitespace from names and validates registry keys.",
   headSha: "abc123def456abc123def456abc123def456abc1",
@@ -96,20 +95,6 @@ const expectedMapped = mapFindingsToReview({
   findings: expectedSelection.selected,
   commentableByPath: fixtureCommentableByPath,
 })
-const expectedBody = buildReviewBody({
-  bodyFindings: expectedMapped.bodyFindings,
-  droppedByCap: expectedSelection.droppedByCap,
-  model: "test/model",
-  inlineCommentCount: expectedMapped.comments.length,
-})
-const expectedFallbackBody = buildReviewBody({
-  bodyFindings: expectedSelection.selected,
-  droppedByCap: expectedSelection.droppedByCap,
-  model: "test/model",
-  bodyFindingsHeading: "Findings",
-  bodyFindingsDescription:
-    "Inline comments were unavailable; all findings are listed here:",
-})
 const expectedCostSummary = renderCostSummary({
   attempts: [fixtureAttempt],
   modelUsed: "test/model",
@@ -124,14 +109,49 @@ const expectedCappedMapped = mapFindingsToReview({
   findings: expectedCappedSelection.selected,
   commentableByPath: fixtureCommentableByPath,
 })
-const expectedCappedBody = buildReviewBody({
-  bodyFindings: expectedCappedMapped.bodyFindings,
-  droppedByCap: expectedCappedSelection.droppedByCap,
-  model: "test/model",
-  inlineCommentCount: expectedCappedMapped.comments.length,
-})
 
-const expectedZeroBody = buildZeroFindingsBody({ model: "test/model" })
+/** Full expected postFindingsReview params for a run posting `findings` as
+ *  new — exact whole-value asserts catch a wrong finding surviving dedup or
+ *  an incomplete payload that count-only checks would miss. */
+const expectedFindingsReview = (findings: Finding[]) => {
+  const mapped = mapFindingsToReview({
+    findings,
+    commentableByPath: fixtureCommentableByPath,
+  })
+  return {
+    prNumber: 7,
+    commitId: fixturePrContext.headSha,
+    body: REVIEW_MARKER,
+    comments: mapped.comments,
+  }
+}
+
+/** Full expected upsertSummaryComment params for the status comment. */
+const expectedStatus = ({
+  isFirstRun,
+  postedCount,
+  unpostedCount = 0,
+  totalCount,
+  droppedByCap = [],
+}: {
+  isFirstRun: boolean
+  postedCount: number
+  unpostedCount?: number
+  totalCount: number
+  droppedByCap?: Finding[]
+}) => ({
+  prNumber: 7,
+  anchor: STATUS_ANCHOR,
+  body: buildStatusComment({
+    sha: fixturePrContext.headSha,
+    isFirstRun,
+    postedCount,
+    unpostedCount,
+    totalCount,
+    droppedByCap,
+    model: "test/model",
+  }),
+})
 
 const buildSkipBody = (reason: string): string =>
   `**umm-actually** — review skipped\n\n${reason}\n\n---\n*umm-actually*`
@@ -160,8 +180,18 @@ type SubmitReviewParams = {
   prNumber: number
   commitId: string
   body: string
+}
+
+type PostFindingsReviewParams = {
+  prNumber: number
+  commitId: string
+  body: string
   comments: ReviewComment[]
-  fallbackBody: string
+}
+
+type PostIssueCommentParams = {
+  prNumber: number
+  body: string
 }
 
 type ReadChangedFilesParams = {
@@ -209,9 +239,11 @@ type RecordingStubs = {
   deps: OrchestrateDeps
   fetchPullRequestCalls: { prNumber: number }[]
   fetchDiffCalls: { prNumber: number }[]
-  requestBotReviewCalls: { prNodeId: string }[]
   submitReviewCalls: SubmitReviewParams[]
-  fetchReviewCommentsCalls: { prNumber: number }[]
+  postFindingsReviewCalls: PostFindingsReviewParams[]
+  postIssueCommentCalls: PostIssueCommentParams[]
+  fetchBotReviewCommentsCalls: { prNumber: number }[]
+  fetchBotIssueCommentsCalls: { prNumber: number }[]
   upsertSummaryCommentCalls: UpsertSummaryCommentParams[]
   readConventionsCalls: { conventionsFile: string }[]
   readChangedFilesCalls: ReadChangedFilesParams[]
@@ -235,7 +267,10 @@ const makeOrchestrateDeps = (
   const fetchPullRequestCalls: { prNumber: number }[] = []
   const fetchDiffCalls: { prNumber: number }[] = []
   const submitReviewCalls: SubmitReviewParams[] = []
-  const fetchReviewCommentsCalls: { prNumber: number }[] = []
+  const postFindingsReviewCalls: PostFindingsReviewParams[] = []
+  const postIssueCommentCalls: PostIssueCommentParams[] = []
+  const fetchBotReviewCommentsCalls: { prNumber: number }[] = []
+  const fetchBotIssueCommentsCalls: { prNumber: number }[] = []
   const upsertSummaryCommentCalls: UpsertSummaryCommentParams[] = []
   const readConventionsCalls: { conventionsFile: string }[] = []
   const readChangedFilesCalls: ReadChangedFilesParams[] = []
@@ -251,8 +286,6 @@ const makeOrchestrateDeps = (
     ...overrides.fixtureResult,
   }
 
-  const requestBotReviewCalls: { prNodeId: string }[] = []
-
   const githubClient: GithubClient = {
     fetchPullRequest: async (params) => {
       fetchPullRequestCalls.push(params)
@@ -262,18 +295,24 @@ const makeOrchestrateDeps = (
       fetchDiffCalls.push(params)
       return { kind: "ok" as const, diff: sampleDiff }
     },
-    requestBotReview: async (params) => {
-      requestBotReviewCalls.push(params)
-    },
     submitReview: async (params) => {
       submitReviewCalls.push(params)
-      return {
-        url: "https://github.com/test/review/1",
-        usedFallbackBody: false,
-      }
+      return { url: "https://github.com/test/review/1" }
     },
-    fetchReviewComments: async (params) => {
-      fetchReviewCommentsCalls.push(params)
+    postFindingsReview: async (params) => {
+      postFindingsReviewCalls.push(params)
+      return { kind: "ok" as const, url: "https://github.com/test/review/1" }
+    },
+    postIssueComment: async (params) => {
+      postIssueCommentCalls.push(params)
+      return { url: "https://github.com/test/comment/1" }
+    },
+    fetchBotReviewComments: async (params) => {
+      fetchBotReviewCommentsCalls.push(params)
+      return []
+    },
+    fetchBotIssueComments: async (params) => {
+      fetchBotIssueCommentsCalls.push(params)
       return []
     },
     upsertSummaryComment: async (params) => {
@@ -328,9 +367,11 @@ const makeOrchestrateDeps = (
     deps,
     fetchPullRequestCalls,
     fetchDiffCalls,
-    requestBotReviewCalls,
     submitReviewCalls,
-    fetchReviewCommentsCalls,
+    postFindingsReviewCalls,
+    postIssueCommentCalls,
+    fetchBotReviewCommentsCalls,
+    fetchBotIssueCommentsCalls,
     upsertSummaryCommentCalls,
     readConventionsCalls,
     readChangedFilesCalls,
@@ -426,8 +467,6 @@ describe("orchestrate", () => {
         prNumber: fixturePrContext.prNumber,
         commitId: fixturePrContext.headSha,
         body: buildSkipBody(skipReason),
-        comments: [],
-        fallbackBody: buildSkipBody(skipReason),
       })
     })
 
@@ -455,8 +494,6 @@ describe("orchestrate", () => {
         prNumber: fixturePrContext.prNumber,
         commitId: fixturePrContext.headSha,
         body: buildSkipBody(skipReason),
-        comments: [],
-        fallbackBody: buildSkipBody(skipReason),
       })
     })
 
@@ -483,8 +520,6 @@ describe("orchestrate", () => {
         prNumber: fixturePrContext.prNumber,
         commitId: fixturePrContext.headSha,
         body: buildSkipBody(skipReason),
-        comments: [],
-        fallbackBody: buildSkipBody(skipReason),
       })
     })
 
@@ -519,14 +554,23 @@ describe("orchestrate", () => {
         costSummaryMarkdown: expectedCostSummary,
       })
 
-      expect(stubs.submitReviewCalls).toHaveLength(1)
-      expect(first(stubs.submitReviewCalls)).toEqual({
-        prNumber: fixturePrContext.prNumber,
-        commitId: fixturePrContext.headSha,
-        body: expectedBody,
-        comments: expectedMapped.comments,
-        fallbackBody: expectedFallbackBody,
-      })
+      expect(stubs.submitReviewCalls).toHaveLength(0)
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(expectedSelection.selected),
+      ])
+      expect(stubs.postIssueCommentCalls).toEqual(
+        expectedMapped.bodyFindings.map((finding) => ({
+          prNumber: fixturePrContext.prNumber,
+          body: renderStandaloneFinding(finding),
+        })),
+      )
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+        }),
+      ])
     })
 
     it("passes changed files and conventions to generateFindings", async () => {
@@ -837,7 +881,7 @@ describe("orchestrate", () => {
       expect(stubs.findRelatedFilesCalls).toHaveLength(1)
     })
 
-    it("posts zero-findings body when all findings are below threshold", async () => {
+    it("posts no review and a clean status comment when all findings are below threshold", async () => {
       const stubs = makeOrchestrateDeps({
         config: { severityThreshold: "critical" },
       })
@@ -846,19 +890,16 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(0)
-      expect(result.reviewUrl).toBe("https://github.com/test/review/1")
+      expect(result.reviewUrl).toBe("")
       expect(result.skippedReason).toBe("")
-      expect(stubs.submitReviewCalls).toHaveLength(1)
-      expect(first(stubs.submitReviewCalls)).toEqual({
-        prNumber: fixturePrContext.prNumber,
-        commitId: fixturePrContext.headSha,
-        body: expectedZeroBody,
-        comments: [],
-        fallbackBody: expectedZeroBody,
-      })
+      expect(stubs.postFindingsReviewCalls).toHaveLength(0)
+      expect(stubs.postIssueCommentCalls).toHaveLength(0)
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({ isFirstRun: true, postedCount: 0, totalCount: 0 }),
+      ])
     })
 
-    it("respects maxFindings cap and includes dropped findings in body", async () => {
+    it("respects maxFindings cap and notes dropped findings in the status comment", async () => {
       const stubs = makeOrchestrateDeps({
         config: { maxFindings: 1 },
       })
@@ -867,9 +908,22 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(1)
-      expect(stubs.submitReviewCalls).toHaveLength(1)
-      const reviewCall = first(stubs.submitReviewCalls)
-      expect(reviewCall.body).toBe(expectedCappedBody)
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        {
+          prNumber: 7,
+          commitId: fixturePrContext.headSha,
+          body: REVIEW_MARKER,
+          comments: expectedCappedMapped.comments,
+        },
+      ])
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: 1,
+          totalCount: 1,
+          droppedByCap: expectedCappedSelection.droppedByCap,
+        }),
+      ])
     })
 
     it("returns costSummaryMarkdown when LLM call happened", async () => {
@@ -894,14 +948,105 @@ describe("orchestrate", () => {
       expect(result.costSummaryMarkdown).toBeNull()
     })
 
-    it("builds fallback body with all selected findings", async () => {
-      const stubs = makeOrchestrateDeps()
+    it("re-routes inline findings to issue comments when GitHub rejects the anchors", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          postFindingsReview: async () => ({ kind: "rejected" as const }),
+        },
+      })
       const logger = createTestLogger()
 
-      await orchestrate(stubs.deps, logger)
+      const result = await orchestrate(stubs.deps, logger)
 
-      const reviewCall = first(stubs.submitReviewCalls)
-      expect(reviewCall.fallbackBody).toBe(expectedFallbackBody)
+      expect(result.reviewUrl).toBe("")
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(stubs.postIssueCommentCalls).toEqual(
+        expectedSelection.selected.map((finding) => ({
+          prNumber: 7,
+          body: renderStandaloneFinding(finding),
+        })),
+      )
+    })
+
+    it("continues when the findings review post throws", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          postFindingsReview: async () => {
+            throw new Error("boom")
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.reviewUrl).toBe("")
+      expect(result.findingsCount).toBe(expectedMapped.bodyFindings.length)
+      // Unposted findings are NOT re-routed — their missing anchors make the
+      // next run re-report them, and the status comment says so instead of
+      // claiming they were posted.
+      expect(stubs.postIssueCommentCalls).toEqual(
+        expectedMapped.bodyFindings.map((finding) => ({
+          prNumber: 7,
+          body: renderStandaloneFinding(finding),
+        })),
+      )
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedMapped.bodyFindings.length,
+          unpostedCount:
+            expectedSelection.selected.length -
+            expectedMapped.bodyFindings.length,
+          totalCount: expectedMapped.bodyFindings.length,
+        }),
+      ])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message:
+          "failed to post findings review — findings will re-report next run",
+        data: { error: "[Error]: boom" },
+      })
+    })
+
+    it("continues when a beyond-diff comment post fails", async () => {
+      const beyondDiffFinding = makeFinding({
+        file: "src/untouched.ts",
+        line: 400,
+      })
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [beyondDiffFinding] },
+        },
+        githubClient: {
+          postIssueComment: async () => {
+            throw new Error("boom")
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(0)
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: 0,
+          unpostedCount: 1,
+          totalCount: 0,
+        }),
+      ])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message:
+          "failed to post beyond-diff finding — it will re-report next run",
+        data: {
+          error: "[Error]: boom",
+          file: "src/untouched.ts",
+          line: 400,
+        },
+      })
     })
 
     it("uses complete PrContext from pull_request event without fetching", async () => {
@@ -911,38 +1056,6 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.fetchPullRequestCalls).toHaveLength(0)
-    })
-
-    it("continues when requestBotReview throws", async () => {
-      const stubs = makeOrchestrateDeps({
-        githubClient: {
-          requestBotReview: async () => {
-            throw new Error("GraphQL viewer query failed")
-          },
-        },
-      })
-      const logger = createTestLogger()
-
-      const result = await orchestrate(stubs.deps, logger)
-
-      expect(result.findingsCount).toBe(expectedSelection.selected.length)
-      expect(result.reviewUrl).toBe("https://github.com/test/review/1")
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "failed to request bot review",
-        data: { error: "[Error]: GraphQL viewer query failed" },
-      })
-    })
-
-    it("calls requestBotReview with the PR node ID", async () => {
-      const stubs = makeOrchestrateDeps()
-      const logger = createTestLogger()
-
-      await orchestrate(stubs.deps, logger)
-
-      expect(stubs.requestBotReviewCalls).toEqual([
-        { prNodeId: "PR_kwDOMock7" },
-      ])
     })
 
     it("filters non-findings from LLM output", async () => {
@@ -972,20 +1085,6 @@ describe("orchestrate", () => {
         findings: mixedSelection.selected,
         commentableByPath: fixtureCommentableByPath,
       })
-      const mixedBody = buildReviewBody({
-        bodyFindings: mixedMapped.bodyFindings,
-        droppedByCap: mixedSelection.droppedByCap,
-        model: "test/model",
-        inlineCommentCount: mixedMapped.comments.length,
-      })
-      const mixedFallbackBody = buildReviewBody({
-        bodyFindings: mixedSelection.selected,
-        droppedByCap: mixedSelection.droppedByCap,
-        model: "test/model",
-        bodyFindingsHeading: "Findings",
-        bodyFindingsDescription:
-          "Inline comments were unavailable; all findings are listed here:",
-      })
 
       const stubs = makeOrchestrateDeps({
         fixtureResult: { review: mixedResponse },
@@ -1002,14 +1101,14 @@ describe("orchestrate", () => {
         costSummaryMarkdown: expectedCostSummary,
       })
 
-      expect(stubs.submitReviewCalls).toHaveLength(1)
-      expect(first(stubs.submitReviewCalls)).toEqual({
-        prNumber: fixturePrContext.prNumber,
-        commitId: fixturePrContext.headSha,
-        body: mixedBody,
-        comments: mixedMapped.comments,
-        fallbackBody: mixedFallbackBody,
-      })
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        {
+          prNumber: 7,
+          commitId: fixturePrContext.headSha,
+          body: REVIEW_MARKER,
+          comments: mixedMapped.comments,
+        },
+      ])
 
       expect(logger.messages).toContainEqual({
         level: "info",
@@ -1020,33 +1119,56 @@ describe("orchestrate", () => {
   })
 
   describe("cross-run dedup", () => {
-    it("first run — posts normal review, no summary comment", async () => {
+    const existingComment = (
+      body: string,
+      positions: { line?: number | null; originalLine?: number | null } = {},
+    ) => ({
+      path: "src/greeter.ts",
+      body,
+      line: positions.line ?? null,
+      originalLine: positions.originalLine ?? null,
+    })
+    const statusComment = {
+      body: `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc1234\``,
+    }
+    const issueFinding = (key: string) => ({
+      body: `finding text\n\n<!-- umm-actually:${key} -->`,
+    })
+
+    it("first run — no bot comments: posts findings and creates the status comment", async () => {
       const stubs = makeOrchestrateDeps()
       const logger = createTestLogger()
 
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
-      expect(stubs.fetchReviewCommentsCalls).toHaveLength(1)
-      expect(stubs.submitReviewCalls).toHaveLength(1)
-      expect(stubs.upsertSummaryCommentCalls).toHaveLength(0)
+      expect(stubs.fetchBotReviewCommentsCalls).toEqual([{ prNumber: 7 }])
+      expect(stubs.fetchBotIssueCommentsCalls).toEqual([{ prNumber: 7 }])
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(expectedSelection.selected),
+      ])
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+        }),
+      ])
     })
 
-    it("re-run — filters duplicate findings and posts only new ones", async () => {
+    it("dedups findings matching inline-comment anchors and posts the rest", async () => {
       const findings = fixtureReviewResponse.findings
       const duplicateFinding = findings[0]
-      if (duplicateFinding === undefined) {
+      if (!duplicateFinding) {
         throw new Error("expected at least one fixture finding")
       }
-      const duplicateAnchor = computeAnchorKey(duplicateFinding)
 
       const stubs = makeOrchestrateDeps({
         githubClient: {
-          fetchReviewComments: async () => [
-            {
-              path: duplicateFinding.file,
-              body: `some comment\n\n<!-- umm-actually:${duplicateAnchor} -->`,
-            },
+          fetchBotReviewComments: async () => [
+            existingComment(
+              `some comment\n\n<!-- umm-actually:${computeAnchorKey(duplicateFinding)} -->`,
+            ),
           ],
         },
       })
@@ -1054,66 +1176,215 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      const newFindingCount = findings.length - 1
-      expect(result.findingsCount).toBe(newFindingCount)
-      expect(stubs.submitReviewCalls).toHaveLength(1)
-      expect(stubs.upsertSummaryCommentCalls).toHaveLength(1)
-
-      const summaryCall = first(stubs.upsertSummaryCommentCalls)
-      expect(summaryCall.anchor).toBe(RERUN_ANCHOR)
-      expect(summaryCall.body).toBe(
-        buildRerunSummary({
-          sha: fixturePrContext.headSha,
-          newCount: newFindingCount,
-          totalCount: 1 + newFindingCount,
-          model: "test/model",
+      expect(result.findingsCount).toBe(findings.length - 1)
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(findings.slice(1)),
+      ])
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: findings.length - 1,
+          totalCount: findings.length,
         }),
-      )
+      ])
     })
 
-    it("re-run — skips review when all findings are duplicates", async () => {
-      const findings = fixtureReviewResponse.findings
-      const existingComments = findings.map((finding) => ({
-        path: finding.file,
-        body: `comment\n\n<!-- umm-actually:${computeAnchorKey(finding)} -->`,
-      }))
-
+    it("a finding comment quoting the status marker mid-body does not make the run a re-run", async () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
-          fetchReviewComments: async () => existingComments,
+          fetchBotIssueComments: async () => [
+            { body: `finding text quoting \`${STATUS_ANCHOR}\` mid-body` },
+          ],
         },
       })
       const logger = createTestLogger()
 
       const result = await orchestrate(stubs.deps, logger)
 
-      expect(result.findingsCount).toBe(0)
-      expect(result.reviewUrl).toBe("")
-      expect(stubs.submitReviewCalls).toHaveLength(0)
-      expect(stubs.upsertSummaryCommentCalls).toHaveLength(1)
-
-      const summaryCall = first(stubs.upsertSummaryCommentCalls)
-      expect(summaryCall.body).toBe(
-        buildRerunSummary({
-          sha: fixturePrContext.headSha,
-          newCount: 0,
-          totalCount: findings.length,
-          model: "test/model",
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
         }),
-      )
+      ])
     })
 
-    it("re-run — zero findings from LLM posts summary only", async () => {
+    it("counts duplicate anchors for one finding once in the status comment", async () => {
+      const findings = fixtureReviewResponse.findings
+      const duplicateFinding = findings[0]
+      if (!duplicateFinding) {
+        throw new Error("expected at least one fixture finding")
+      }
+
+      // Two anchors within LINE_PROXIMITY of each other — the residue a
+      // fail-open fetch leaves when it reposts an already-anchored finding.
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotIssueComments: async () => [
+            issueFinding(computeAnchorKey(duplicateFinding)),
+            issueFinding(
+              computeAnchorKey({
+                ...duplicateFinding,
+                line: duplicateFinding.line + 2,
+              }),
+            ),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(findings.length - 1)
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: findings.length - 1,
+          totalCount: findings.length,
+        }),
+      ])
+    })
+
+    it("dedups findings matching beyond-diff issue-comment anchors", async () => {
+      const findings = fixtureReviewResponse.findings
+      const duplicateFinding = findings[0]
+      if (!duplicateFinding) {
+        throw new Error("expected at least one fixture finding")
+      }
+
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotIssueComments: async () => [
+            issueFinding(computeAnchorKey(duplicateFinding)),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(findings.length - 1)
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(findings.slice(1)),
+      ])
+    })
+
+    it("dedups a finding whose reported line drifted within the window", async () => {
+      const findings = fixtureReviewResponse.findings
+      const driftedFinding = findings[0]
+      if (!driftedFinding) {
+        throw new Error("expected at least one fixture finding")
+      }
+      const driftedAnchor = computeAnchorKey({
+        ...driftedFinding,
+        line: driftedFinding.line + 3,
+      })
+
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotReviewComments: async () => [
+            existingComment(
+              `some comment\n\n<!-- umm-actually:${driftedAnchor} -->`,
+            ),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(findings.length - 1)
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(findings.slice(1)),
+      ])
+    })
+
+    it("dedup follows the comment's live position across pushes", async () => {
+      const findings = fixtureReviewResponse.findings
+      const movedFinding = findings[0]
+      if (!movedFinding) {
+        throw new Error("expected at least one fixture finding")
+      }
+      // Anchor was posted 50 lines away from where the finding sits now; the
+      // comment's live position tracked the code as it moved.
+      const staleAnchor = computeAnchorKey({
+        ...movedFinding,
+        line: movedFinding.line - 50,
+      })
+
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotReviewComments: async () => [
+            existingComment(
+              `some comment\n\n<!-- umm-actually:${staleAnchor} -->`,
+              {
+                line: movedFinding.line,
+                originalLine: movedFinding.line - 50,
+              },
+            ),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(findings.length - 1)
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(findings.slice(1)),
+      ])
+    })
+
+    it("legacy title-hash anchors don't dedup", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotReviewComments: async () => [
+            existingComment(
+              "old format\n\n<!-- umm-actually:src/greeter.ts:correctness:ffdf51bc -->",
+            ),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(expectedSelection.selected),
+      ])
+    })
+
+    it("an existing status comment flips wording to re-reviewed", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotIssueComments: async () => [statusComment],
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: false,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+        }),
+      ])
+    })
+
+    it("zero new findings on a re-run still updates the status comment", async () => {
       const stubs = makeOrchestrateDeps({
         fixtureResult: {
           review: { analysis: "clean", findings: [] },
         },
         githubClient: {
-          fetchReviewComments: async () => [
-            {
-              path: "src/a.ts",
-              body: "body\n\n<!-- umm-actually:src/a.ts:correctness:aaaaaaaa -->",
-            },
+          fetchBotIssueComments: async () => [
+            statusComment,
+            issueFinding("src/a.ts:correctness:42"),
           ],
         },
       })
@@ -1122,21 +1393,14 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(0)
-      expect(stubs.submitReviewCalls).toHaveLength(0)
-      expect(stubs.upsertSummaryCommentCalls).toHaveLength(1)
-
-      const summaryCall = first(stubs.upsertSummaryCommentCalls)
-      expect(summaryCall.body).toBe(
-        buildRerunSummary({
-          sha: fixturePrContext.headSha,
-          newCount: 0,
-          totalCount: 1,
-          model: "test/model",
-        }),
-      )
+      expect(stubs.postFindingsReviewCalls).toHaveLength(0)
+      expect(stubs.postIssueCommentCalls).toHaveLength(0)
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({ isFirstRun: false, postedCount: 0, totalCount: 1 }),
+      ])
     })
 
-    it("does not fetch review comments on skip paths", async () => {
+    it("does not fetch comments on skip paths", async () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           fetchDiff: async () => ({ kind: "too_large" as const }),
@@ -1146,18 +1410,64 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(stubs.fetchReviewCommentsCalls).toHaveLength(0)
+      expect(stubs.fetchBotReviewCommentsCalls).toHaveLength(0)
+      expect(stubs.fetchBotIssueCommentsCalls).toHaveLength(0)
     })
 
-    it("continues without throwing when upsertSummaryComment fails", async () => {
+    it("posts every finding as new when the inline-comment fetch fails", async () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
-          fetchReviewComments: async () => [
-            {
-              path: "src/a.ts",
-              body: "body\n\n<!-- umm-actually:src/a.ts:correctness:aaaaaaaa -->",
-            },
-          ],
+          fetchBotReviewComments: async () => {
+            throw new Error("network error")
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(expectedSelection.selected),
+      ])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message:
+          "failed to fetch inline comments — treating their findings as new",
+        data: { error: "[Error]: network error" },
+      })
+    })
+
+    it("treats an issue-comment fetch failure as a first run", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotIssueComments: async () => {
+            throw new Error("network error")
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+        }),
+      ])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "failed to fetch issue comments — treating as a first run",
+        data: { error: "[Error]: network error" },
+      })
+    })
+
+    it("continues without throwing when the status comment upsert fails", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
           upsertSummaryComment: async () => {
             throw new Error("API rate limit")
           },
@@ -1169,24 +1479,11 @@ describe("orchestrate", () => {
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
       expect(result.reviewUrl).toBe("https://github.com/test/review/1")
-      expect(stubs.submitReviewCalls).toHaveLength(1)
-    })
-
-    it("degrades to first run when fetching review comments fails", async () => {
-      const stubs = makeOrchestrateDeps({
-        githubClient: {
-          fetchReviewComments: async () => {
-            throw new Error("network error")
-          },
-        },
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "failed to upsert status comment",
+        data: { error: "[Error]: API rate limit" },
       })
-      const logger = createTestLogger()
-
-      const result = await orchestrate(stubs.deps, logger)
-
-      expect(result.findingsCount).toBe(expectedSelection.selected.length)
-      expect(stubs.submitReviewCalls).toHaveLength(1)
-      expect(stubs.upsertSummaryCommentCalls).toHaveLength(0)
     })
   })
 })
