@@ -52,10 +52,15 @@ failure scenario, do not report the finding.`
 const OUTPUT_DISCIPLINE = `OUTPUT DISCIPLINE — field constraints:
 - "title": imperative fix statement, under 80 characters (e.g. "Trim keys
   before inserting into the registry"). Do not start with "Issue:" or
-  "Bug:".
+  "Bug:". A declarative confirmation title ("X is correct", "X is
+  accurate", "N/A — …") or a verification task ("Verify X handles Y") is
+  not a finding — do not emit it.
 - "description": 1–3 sentences stating the defect and its impact. No code
   tracing, no call-chain walk-through, no quoting of source lines. Put
   traces and evidence in "analysis", not here.
+- "suggestion": a concrete code change, or null when a fix is genuinely
+  optional. A suggestion of "no bug", "no action needed", or "N/A" means
+  there is no finding — do not emit it.
 - "failure_scenario": a concrete input or state that triggers the problem
   and what goes wrong. A failure_scenario starting with "N/A", "None",
   "Not applicable", or "Placeholder" means there is no real finding — do

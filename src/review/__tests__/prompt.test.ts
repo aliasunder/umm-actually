@@ -84,6 +84,15 @@ describe("buildSystemPrompt", () => {
     )
   })
 
+  it("bans declarative confirmation titles and non-action suggestions in the output discipline", () => {
+    const systemPrompt = buildSystemPrompt({ phase: combinedPhase })
+
+    expect(systemPrompt).toContain("A declarative confirmation title")
+    expect(systemPrompt).toContain(
+      '"suggestion": a concrete code change, or null',
+    )
+  })
+
   it("places OUTPUT DISCIPLINE between SEVERITY_RUBRIC and ANCHORING_CONTRACT", () => {
     const systemPrompt = buildSystemPrompt({ phase: combinedPhase })
 
