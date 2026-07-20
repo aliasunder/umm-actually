@@ -18,7 +18,12 @@ targets are within expected bounds and of expected type. Silent catches: .catch(
 {}) and catch (e) {} swallow errors — every catch must log or re-throw. If the PR
 modifies user-facing docs, verify factual claims (capabilities, architecture, data
 flow) match the actual implementation — a doc claiming "no external communication"
-when the system has outbound sync is a correctness bug.`
+when the system has outbound sync is a correctness bug. When unchanged
+documentation files are provided as context (whether because they reference
+changed code or because they are priority documentation), check every factual
+claim in those docs against the current implementation — flag
+stale descriptions, outdated architecture references, incorrect parameter names,
+and capability claims that no longer hold.`
 
 export const DIMENSION_CODE_QUALITY = `DIMENSION 2 — CODE QUALITY & CONVENTIONS.
 Review against the conventions file: naming conventions (explicit names over

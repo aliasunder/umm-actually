@@ -9,7 +9,7 @@ LLM-powered pull request review as a GitHub Action. One consolidated review per 
 - Posts exactly **one** PR review with inline comments anchored to diff lines — no duplicate comments, no unrequested-reviewer badges
 - Structured output end to end: every finding carries a category, severity, confidence, and a concrete failure scenario
 - Model-agnostic via OpenRouter — pick your model, see your per-call costs
-- Findings that can't be anchored to the diff (e.g. callers outside the changed files) render in the review body under "Findings beyond the diff"
+- Findings that can't be anchored to the diff (e.g. callers outside the changed files) are posted as standalone comments on the PR
 - PRs with oversized diffs are skipped gracefully with a body-only review stating the reason
 
 ## Setup
@@ -70,20 +70,25 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 
 ## Inputs
 
-| Input                   | Default                       | Description                                                                                                 |
-| ----------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `github_token`          | _(required)_                  | Token for fetching the diff and posting the review. A GitHub App installation token keeps the bot identity. |
-| `openrouter_api_key`    | _(required)_                  | OpenRouter API key                                                                                          |
-| `model`                 | `anthropic/claude-sonnet-4-6` | OpenRouter model slug exactly as listed on openrouter.ai/models                                             |
-| `fallback_model`        | `""`                          | Model to retry with if the primary model fails the structured-output ladder                                 |
-| `max_findings`          | `""` _(uncapped)_             | Cap on posted findings, highest severity first. Empty = all validated findings post.                        |
-| `severity_threshold`    | `low`                         | Minimum severity to post: `low` \| `medium` \| `high` \| `critical`                                         |
-| `conventions_file`      | `AGENTS.md`                   | Repo-relative path to the conventions file included in the prompt                                           |
-| `phases`                | `combined`                    | Review phases to run. V1 supports: `combined`                                                               |
-| `context_budget_tokens` | `80000`                       | Approximate token budget for prompt context (file contents + diff — conventions have a separate cap)        |
-| `trace_related_files`   | `true`                        | Include files that reference changed files in the prompt so the model can trace regressions into callers    |
-| `cost_summary`          | `true`                        | Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow step summary             |
-| `pr_number`             | `""`                          | PR number override — required only when the triggering event does not identify a PR directly                |
+| Input                   | Default                       | Description                                                                                                                                                                                               |
+| ----------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github_token`          | _(required)_                  | Token for fetching the diff and posting the review. A GitHub App installation token keeps the bot identity.                                                                                               |
+| `openrouter_api_key`    | _(required)_                  | OpenRouter API key                                                                                                                                                                                        |
+| `model`                 | `anthropic/claude-sonnet-4-6` | OpenRouter model slug exactly as listed on openrouter.ai/models                                                                                                                                           |
+| `fallback_model`        | `""`                          | Model to retry with if the primary model fails the structured-output ladder                                                                                                                               |
+| `max_findings`          | `""` _(uncapped)_             | Cap on posted findings, highest severity first. Empty = all validated findings post.                                                                                                                      |
+| `severity_threshold`    | `low`                         | Minimum severity to post: `low` \| `medium` \| `high` \| `critical`                                                                                                                                       |
+| `conventions_file`      | `AGENTS.md`                   | Repo-relative path to the conventions file included in the prompt                                                                                                                                         |
+| `phases`                | `combined`                    | Review phases to run. V1 supports: `combined`                                                                                                                                                             |
+| `context_budget_tokens` | `80000`                       | Approximate token budget for prompt context (file contents + diff — conventions have a separate cap)                                                                                                      |
+| `trace_related_files`   | `true`                        | Enable heuristic context scanning — import-tracing for caller regressions and mention-matching for doc staleness detection. Does not affect `priority_docs`                                               |
+| `priority_docs`         | `README.md`                   | Comma-separated repo-relative paths always included in review context, independent of `trace_related_files`. Shares the doc token budget with mention-matched docs when both are active. Empty = disabled |
+| `max_scan_files`        | `5000`                        | Maximum files to walk during workspace scan for related file and doc detection                                                                                                                            |
+| `max_scan_bytes`        | `262144`                      | Maximum byte size of a single file to include in the workspace scan                                                                                                                                       |
+| `max_related_files`     | `8`                           | Maximum import-traced related files to include in review context                                                                                                                                          |
+| `max_related_docs`      | `4`                           | Maximum mention-matched documentation files to include in review context (excludes priority docs)                                                                                                         |
+| `cost_summary`          | `true`                        | Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow step summary                                                                                                           |
+| `pr_number`             | `""`                          | PR number override — required only when the triggering event does not identify a PR directly                                                                                                              |
 
 ## Outputs
 
@@ -98,13 +103,13 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 
 1. Resolves the PR from the triggering event (supports `pull_request`, `pull_request_target`, and `issue_comment` events)
 2. Fetches the unified diff via the GitHub API — PRs that exceed the API's diff size limit are skipped
-3. Reads the conventions file and changed source files (token-budgeted), then traces imports to find related files that reference the changes
+3. Reads the conventions file and changed source files (token-budgeted), traces imports to find related code files, and scans doc files (`.md`, `.json`) for mentions of changed paths
 4. Builds a structured prompt with randomized delimiter nonces (prompt injection defense) and sends it to OpenRouter
 5. Validates the response against a strict Zod schema, retrying with a fallback model if the primary fails
 6. Filters findings by severity threshold, deduplicates overlapping findings, and caps if configured
 7. On re-runs, compares findings against previously posted inline comments (by hidden HTML anchor) and filters out duplicates
 8. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
-9. Posts one consolidated review — findings that can't be inlined render in the review body; re-runs upsert a summary comment with totals
+9. Posts one review with inline comments (invisible body); beyond-diff findings post as standalone PR comments; every run upserts a status comment with cross-run totals
 
 ## Status
 
@@ -115,7 +120,8 @@ umm-actually is in early development — the core review pipeline works but ther
 - Single-pass review with inline findings anchored to diff lines
 - Structured output with retry ladder and fallback model
 - Import-tracing: changed code is traced into callers via reverse-import scan
-- Token-budgeted context (changed files + related files + conventions)
+- Doc-mention scan: unchanged docs (`.md`, `.json`) that reference changed code reach the prompt for staleness detection
+- Token-budgeted context (changed files + related files + related docs + conventions)
 - Prompt injection defense (randomized delimiter nonces)
 - Skip-path handling with posted reasons (oversized diff, empty diff, API limits)
 - Cost transparency (per-run model/token/USD report in workflow summary)
@@ -124,7 +130,6 @@ umm-actually is in early development — the core review pipeline works but ther
 
 **In progress**
 
-- **Doc-staleness detection** — extending the workspace scan to doc files (`.md`, `.json`) so unchanged docs that describe changed code reach the prompt and staleness becomes a finding
 - **Branded check run** — using the Checks API so the CI check shows the umm-actually avatar instead of the generic GitHub Actions logo
 
 **Planned**

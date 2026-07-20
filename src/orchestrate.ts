@@ -44,6 +44,7 @@ export type ReviewContext = {
   conventions: string | null
   changedFiles: PromptFile[]
   relatedFiles: PromptFile[]
+  relatedDocs: PromptFile[]
   annotatedDiff: string
   priorFindings: Finding[]
 }
@@ -300,12 +301,56 @@ export const orchestrate = async (
       budgetTokens: fileBudgetTokens,
     })
 
-  const relatedFiles = config.traceRelatedFiles
+  const relatedFilesResult = config.traceRelatedFiles
     ? await contextReader.findRelatedFiles({
         changedPaths,
         budgetTokens: remainingTokens,
       })
-    : []
+    : { files: [], excludedByCapPaths: [] }
+
+  const relatedFiles = relatedFilesResult.files
+  const relatedFilesTokens = relatedFiles.reduce(
+    (sum, file) => sum + estimateTokens(file.content),
+    0,
+  )
+  const docBudgetTokens = Math.max(0, remainingTokens - relatedFilesTokens)
+
+  const { files: priorityDocFiles, remainingTokens: docRemainingTokens } =
+    await contextReader.readPriorityDocs({
+      priorityDocs: config.priorityDocs,
+      budgetTokens: docBudgetTokens,
+    })
+
+  const mentionMatchedDocsResult = config.traceRelatedFiles
+    ? await contextReader.findRelatedDocs({
+        changedPaths,
+        budgetTokens: docRemainingTokens,
+        conventionsFile: config.conventionsFile,
+        excludePaths: config.priorityDocs,
+      })
+    : { files: [], excludedByCapPaths: [] }
+
+  const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
+
+  const contextNotes: string[] = []
+  const skippedPriorityDocs = config.priorityDocs.filter(
+    (docPath) => !priorityDocFiles.some((file) => file.path === docPath),
+  )
+  if (skippedPriorityDocs.length > 0) {
+    contextNotes.push(
+      `Priority docs not included: ${skippedPriorityDocs.map((docPath) => `\`${docPath}\``).join(", ")} (missing, unreadable, or over budget)`,
+    )
+  }
+  if (relatedFilesResult.excludedByCapPaths.length > 0) {
+    contextNotes.push(
+      `${relatedFilesResult.excludedByCapPaths.length} related file(s) excluded by \`max_related_files\` cap: ${relatedFilesResult.excludedByCapPaths.map((filePath) => `\`${filePath}\``).join(", ")}`,
+    )
+  }
+  if (mentionMatchedDocsResult.excludedByCapPaths.length > 0) {
+    contextNotes.push(
+      `${mentionMatchedDocsResult.excludedByCapPaths.length} related doc(s) excluded by \`max_related_docs\` cap: ${mentionMatchedDocsResult.excludedByCapPaths.map((docPath) => `\`${docPath}\``).join(", ")}`,
+    )
+  }
 
   // Step 10–11: generate findings (V1: single combined phase)
   const phase = phases[0]
@@ -318,6 +363,7 @@ export const orchestrate = async (
     conventions,
     changedFiles,
     relatedFiles,
+    relatedDocs,
     annotatedDiff,
     priorFindings: [],
   })
@@ -427,6 +473,7 @@ export const orchestrate = async (
     totalCount: coalesceAnchors(existingAnchors).length + postedCount,
     droppedByCap,
     model: modelUsed,
+    contextNotes,
   })
   try {
     await githubClient.upsertSummaryComment({

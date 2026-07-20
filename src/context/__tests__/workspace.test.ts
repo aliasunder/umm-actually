@@ -6,7 +6,22 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { createTestLogger } from "../../__tests__/test-logger.js"
 import { estimateTokens } from "../../review/prompt.js"
-import { createContextReader, MAX_SCAN_FILES } from "../workspace.js"
+import {
+  createContextReader,
+  DEFAULT_MAX_SCAN_FILES,
+  DEFAULT_MAX_SCAN_BYTES,
+  DEFAULT_RELATED_FILES_MAX,
+  DEFAULT_RELATED_DOCS_MAX,
+  type ContextReaderConfig,
+} from "../workspace.js"
+
+const defaultConfig = (workspaceRoot: string): ContextReaderConfig => ({
+  workspaceRoot,
+  maxScanFiles: DEFAULT_MAX_SCAN_FILES,
+  maxScanBytes: DEFAULT_MAX_SCAN_BYTES,
+  relatedFilesMax: DEFAULT_RELATED_FILES_MAX,
+  relatedDocsMax: DEFAULT_RELATED_DOCS_MAX,
+})
 
 const workspaceRoot = fileURLToPath(
   new URL("../../../fixtures/workspace", import.meta.url),
@@ -21,10 +36,15 @@ const callerContent = readFixture("src/caller.ts")
 const consumerContent = readFixture("src/consumer.ts")
 const barrelConsumerContent = readFixture("src/barrel-consumer.ts")
 const greeterTestContent = readFixture("src/__tests__/greeter.test.ts")
+const apiDocContent = readFixture("docs/api.md")
+const configJsonContent = readFixture("docs/config.json")
 
 const makeReader = () => {
   const logger = createTestLogger()
-  const contextReader = createContextReader({ workspaceRoot }, logger)
+  const contextReader = createContextReader(
+    defaultConfig(workspaceRoot),
+    logger,
+  )
   return { contextReader, logger }
 }
 
@@ -80,7 +100,7 @@ describe("readConventions", () => {
     })
     await symlink(path.join(root, "CLAUDE.md"), path.join(root, "AGENTS.md"))
     const contextReader = createContextReader(
-      { workspaceRoot: root },
+      defaultConfig(root),
       createTestLogger(),
     )
 
@@ -112,7 +132,7 @@ describe("readConventions", () => {
       path.join(root, "AGENTS.md"),
     )
     const contextReader = createContextReader(
-      { workspaceRoot: root },
+      defaultConfig(root),
       createTestLogger(),
     )
 
@@ -178,7 +198,7 @@ describe("readChangedFiles", () => {
       "src/large.ts": multibyteContent,
     })
     const contextReader = createContextReader(
-      { workspaceRoot: root },
+      defaultConfig(root),
       createTestLogger(),
     )
 
@@ -224,7 +244,7 @@ describe("readChangedFiles", () => {
     })
     await chmod(path.join(root, "src/locked.ts"), 0o000)
     const logger = createTestLogger()
-    const contextReader = createContextReader({ workspaceRoot: root }, logger)
+    const contextReader = createContextReader(defaultConfig(root), logger)
 
     try {
       const result = await contextReader.readChangedFiles({
@@ -292,7 +312,7 @@ describe("readChangedFiles", () => {
       path.join(root, "src/leak.ts"),
     )
     const logger = createTestLogger()
-    const contextReader = createContextReader({ workspaceRoot: root }, logger)
+    const contextReader = createContextReader(defaultConfig(root), logger)
 
     try {
       const result = await contextReader.readChangedFiles({
@@ -321,7 +341,7 @@ describe("readChangedFiles", () => {
     })
     await symlink(path.join(root, ".git/config"), path.join(root, "leak.ts"))
     const logger = createTestLogger()
-    const contextReader = createContextReader({ workspaceRoot: root }, logger)
+    const contextReader = createContextReader(defaultConfig(root), logger)
 
     try {
       const result = await contextReader.readChangedFiles({
@@ -353,7 +373,7 @@ describe("findRelatedFiles", () => {
       budgetTokens: 100_000,
     })
 
-    expect(relatedFiles).toEqual([
+    expect(relatedFiles.files).toEqual([
       {
         path: "src/caller.ts",
         content: callerContent,
@@ -383,7 +403,7 @@ describe("findRelatedFiles", () => {
       budgetTokens: 100_000,
     })
 
-    expect(relatedFiles).toEqual([
+    expect(relatedFiles.files).toEqual([
       {
         path: "src/barrel-consumer.ts",
         content: barrelConsumerContent,
@@ -401,7 +421,7 @@ describe("findRelatedFiles", () => {
       budgetTokens: 100_000,
     })
 
-    expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
+    expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual([
       "src/consumer.ts",
       "src/__tests__/greeter.test.ts",
     ])
@@ -415,7 +435,7 @@ describe("findRelatedFiles", () => {
       budgetTokens: 100_000,
     })
 
-    expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
+    expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual([
       "src/importers/importer-1.ts",
       "src/importers/importer-2.ts",
       "src/importers/importer-3.ts",
@@ -435,7 +455,7 @@ describe("findRelatedFiles", () => {
       budgetTokens: estimateTokens(consumerContent),
     })
 
-    expect(relatedFiles).toEqual([
+    expect(relatedFiles.files).toEqual([
       {
         path: "src/consumer.ts",
         content: consumerContent,
@@ -453,7 +473,7 @@ describe("findRelatedFiles", () => {
       "small.ts": `import { target } from "./target.js"\nexport const small = target\n`,
     })
     const logger = createTestLogger()
-    const contextReader = createContextReader({ workspaceRoot: root }, logger)
+    const contextReader = createContextReader(defaultConfig(root), logger)
 
     try {
       const relatedFiles = await contextReader.findRelatedFiles({
@@ -461,9 +481,9 @@ describe("findRelatedFiles", () => {
         budgetTokens: 1_000_000,
       })
 
-      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
-        "small.ts",
-      ])
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
+        ["small.ts"],
+      )
     } finally {
       await cleanup()
     }
@@ -479,7 +499,7 @@ describe("findRelatedFiles", () => {
       ".hidden/covert.ts": importTarget,
     })
     const contextReader = createContextReader(
-      { workspaceRoot: root },
+      defaultConfig(root),
       createTestLogger(),
     )
 
@@ -489,9 +509,9 @@ describe("findRelatedFiles", () => {
         budgetTokens: 100_000,
       })
 
-      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
-        "src/legit.ts",
-      ])
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
+        ["src/legit.ts"],
+      )
     } finally {
       await cleanup()
     }
@@ -506,7 +526,7 @@ describe("findRelatedFiles", () => {
     })
     await chmod(path.join(root, "locked.ts"), 0o000)
     const logger = createTestLogger()
-    const contextReader = createContextReader({ workspaceRoot: root }, logger)
+    const contextReader = createContextReader(defaultConfig(root), logger)
 
     try {
       const relatedFiles = await contextReader.findRelatedFiles({
@@ -515,12 +535,12 @@ describe("findRelatedFiles", () => {
       })
 
       // readable.ts still arriving proves the scan carried on past the failure
-      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
-        "readable.ts",
-      ])
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
+        ["readable.ts"],
+      )
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message: "scanned file unreadable — excluding from related files",
+        message: "scanned file unreadable — excluding from context",
         data: {
           path: "locked.ts",
           error: expect.stringContaining("EACCES"),
@@ -539,7 +559,7 @@ describe("findRelatedFiles", () => {
       "binary.ts": `${importTarget}export const marker = "\x00"\n`,
     })
     const contextReader = createContextReader(
-      { workspaceRoot: root },
+      defaultConfig(root),
       createTestLogger(),
     )
 
@@ -549,9 +569,9 @@ describe("findRelatedFiles", () => {
         budgetTokens: 100_000,
       })
 
-      expect(relatedFiles.map((relatedFile) => relatedFile.path)).toEqual([
-        "clean.ts",
-      ])
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
+        ["clean.ts"],
+      )
     } finally {
       await cleanup()
     }
@@ -559,14 +579,14 @@ describe("findRelatedFiles", () => {
 
   it("stops scanning at the file cap and warns that detection may be incomplete", async () => {
     const fillerFiles = Object.fromEntries(
-      Array.from({ length: MAX_SCAN_FILES + 1 }, (_, fillerIndex) => [
+      Array.from({ length: DEFAULT_MAX_SCAN_FILES + 1 }, (_, fillerIndex) => [
         `filler-${String(fillerIndex).padStart(5, "0")}.ts`,
         "export {}\n",
       ]),
     )
     const { root, cleanup } = await makeTempWorkspace(fillerFiles)
     const logger = createTestLogger()
-    const contextReader = createContextReader({ workspaceRoot: root }, logger)
+    const contextReader = createContextReader(defaultConfig(root), logger)
 
     try {
       await contextReader.findRelatedFiles({
@@ -577,9 +597,581 @@ describe("findRelatedFiles", () => {
       expect(logger.messages).toContainEqual({
         level: "warn",
         message:
-          "workspace scan capped — related-file detection may be incomplete",
-        data: { maxScanFiles: MAX_SCAN_FILES },
+          "workspace scan capped — related-file and doc detection may be incomplete",
+        data: { maxScanFiles: DEFAULT_MAX_SCAN_FILES },
       })
+    } finally {
+      await cleanup()
+    }
+  })
+})
+
+describe("findRelatedDocs", () => {
+  it("finds docs that mention changed paths", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/greeter.ts"],
+      budgetTokens: 100_000,
+      conventionsFile: "AGENTS.md",
+      excludePaths: [],
+    })
+
+    expect(relatedDocs.files).toEqual([
+      {
+        path: "docs/api.md",
+        content: apiDocContent,
+        includedAs: "full",
+        reason: "mentions src/greeter.ts",
+      },
+    ])
+  })
+
+  it("finds docs with multiple mentioned paths", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/greeter.ts", "src/registry.ts"],
+      budgetTokens: 100_000,
+      conventionsFile: "AGENTS.md",
+      excludePaths: [],
+    })
+
+    expect(relatedDocs.files).toEqual([
+      {
+        path: "docs/api.md",
+        content: apiDocContent,
+        includedAs: "full",
+        reason: "mentions src/greeter.ts, src/registry.ts",
+      },
+    ])
+  })
+
+  it("finds JSON doc files that mention changed paths", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/hub.ts"],
+      budgetTokens: 100_000,
+      conventionsFile: "AGENTS.md",
+      excludePaths: [],
+    })
+
+    expect(relatedDocs.files).toEqual([
+      {
+        path: "docs/config.json",
+        content: configJsonContent,
+        includedAs: "full",
+        reason: "mentions src/hub.ts",
+      },
+    ])
+  })
+
+  it("excludes the conventions file from results even when it mentions changed paths", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "AGENTS.md": "# Conventions\n\nSee src/target.ts for the implementation.",
+      "docs/other.md": "# Other\n\nAlso references src/target.ts here.",
+      "src/target.ts": "export const target = true",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        excludePaths: [],
+      })
+
+      // docs/other.md proves the scan ran and found results; AGENTS.md is
+      // excluded despite mentioning the changed path
+      expect(relatedDocs.files).toEqual([
+        {
+          path: "docs/other.md",
+          content: "# Other\n\nAlso references src/target.ts here.",
+          includedAs: "full",
+          reason: "mentions src/target.ts",
+        },
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("excludes changed docs from results", async () => {
+    const retainedContent = "# Retained\n\nAlso references src/target.ts here."
+    const { root, cleanup } = await makeTempWorkspace({
+      "docs/changed.md": "# Changed\n\nSee src/target.ts for details.",
+      "docs/retained.md": retainedContent,
+      "src/target.ts": "export const target = true",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts", "docs/changed.md"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        excludePaths: [],
+      })
+
+      expect(relatedDocs.files).toEqual([
+        {
+          path: "docs/retained.md",
+          content: retainedContent,
+          includedAs: "full",
+          reason: "mentions src/target.ts",
+        },
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("returns empty array when no docs mention changed paths", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/nonexistent.ts"],
+      budgetTokens: 100_000,
+      conventionsFile: "AGENTS.md",
+      excludePaths: [],
+    })
+
+    expect(relatedDocs.files).toEqual([])
+  })
+
+  it("respects the token budget", async () => {
+    const { contextReader } = makeReader()
+
+    const relatedDocs = await contextReader.findRelatedDocs({
+      changedPaths: ["src/greeter.ts"],
+      budgetTokens: 1,
+      conventionsFile: "AGENTS.md",
+      excludePaths: [],
+    })
+
+    expect(relatedDocs.files).toEqual([])
+  })
+
+  it("caps results at DEFAULT_RELATED_DOCS_MAX, keeping alphabetically first docs", async () => {
+    const docFiles: Record<string, string> = {}
+    for (
+      let fileIndex = 0;
+      fileIndex < DEFAULT_RELATED_DOCS_MAX + 2;
+      fileIndex++
+    ) {
+      docFiles[`docs/doc-${fileIndex}.md`] =
+        `# Doc ${fileIndex}\n\nSee src/target.ts for details.`
+    }
+    docFiles["src/target.ts"] = "export const target = true"
+
+    const { root, cleanup } = await makeTempWorkspace(docFiles)
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        excludePaths: [],
+      })
+
+      // All 6 docs have identical relevance (1 full-path mention each), so
+      // alphabetical tiebreaker determines which 4 survive the cap
+      expect(relatedDocs.files.map((doc) => doc.path)).toEqual([
+        "docs/doc-0.md",
+        "docs/doc-1.md",
+        "docs/doc-2.md",
+        "docs/doc-3.md",
+      ])
+      expect(relatedDocs.excludedByCapPaths).toEqual([
+        "docs/doc-4.md",
+        "docs/doc-5.md",
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("honors a custom relatedDocsMax cap", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "docs/a.md": "# A\n\nSee src/target.ts for details.",
+      "docs/b.md": "# B\n\nSee src/target.ts for details.",
+      "docs/c.md": "# C\n\nSee src/target.ts for details.",
+      "src/target.ts": "export const target = true",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(
+        { ...defaultConfig(root), relatedDocsMax: 2 },
+        logger,
+      )
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        excludePaths: [],
+      })
+
+      expect(relatedDocs.files.map((doc) => doc.path)).toEqual([
+        "docs/a.md",
+        "docs/b.md",
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("skips binary doc files", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "docs/binary.md": "# Binary\n\nSee src/target.ts\x00binary data",
+      "src/target.ts": "export const target = true",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        excludePaths: [],
+      })
+
+      expect(relatedDocs.files).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("truncates the reason to three paths with an overflow count", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "docs/mentions-many.md": [
+        "# Many mentions",
+        "See src/a.ts, src/b.ts, src/c.ts, and src/d.ts for details.",
+      ].join("\n"),
+      "src/a.ts": "export const a = 1",
+      "src/b.ts": "export const b = 2",
+      "src/c.ts": "export const c = 3",
+      "src/d.ts": "export const d = 4",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        excludePaths: [],
+      })
+
+      expect(relatedDocs.files).toEqual([
+        {
+          path: "docs/mentions-many.md",
+          content:
+            "# Many mentions\nSee src/a.ts, src/b.ts, src/c.ts, and src/d.ts for details.",
+          includedAs: "full",
+          reason: "mentions src/a.ts, src/b.ts, src/c.ts, +1 more",
+        },
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("ranks full-path mentions above basename-only mentions", async () => {
+    const basenameContent = "# Basename\n\nSee greeter.ts for greetings."
+    const fullPathContent = "# Full Path\n\nSee src/greeter.ts for greetings."
+    const { root, cleanup } = await makeTempWorkspace({
+      "docs/basename-only.md": basenameContent,
+      "docs/full-path.md": fullPathContent,
+      "src/greeter.ts": "export const greet = () => 'hi'",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/greeter.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        excludePaths: [],
+      })
+
+      expect(relatedDocs.files).toEqual([
+        {
+          path: "docs/full-path.md",
+          content: fullPathContent,
+          includedAs: "full",
+          reason: "mentions src/greeter.ts",
+        },
+        {
+          path: "docs/basename-only.md",
+          content: basenameContent,
+          includedAs: "full",
+          reason: "mentions src/greeter.ts",
+        },
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("excludes paths listed in excludePaths from mention-matched results", async () => {
+    const readmeContent = "# My Project\n\nSee src/target.ts for details."
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": readmeContent,
+      "src/target.ts": "export const target = true",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const relatedDocs = await reader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        excludePaths: ["README.md"],
+      })
+
+      expect(relatedDocs.files).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+})
+
+describe("readPriorityDocs", () => {
+  it("reads a priority doc and tracks remaining budget", async () => {
+    const readmeContent = "# My Project\n\nGeneral overview with no file refs."
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": readmeContent,
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md"],
+        budgetTokens: 100_000,
+      })
+
+      expect(result).toEqual({
+        files: [
+          {
+            path: "README.md",
+            content: readmeContent,
+            includedAs: "full",
+            reason: "priority documentation",
+          },
+        ],
+        remainingTokens: 100_000 - estimateTokens(readmeContent),
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("skips a doc whose byte size exceeds the byte budget before reading it", async () => {
+    // Multibyte content: 400 chars fit a 100-token budget, but 1200 UTF-8
+    // bytes exceed it — only the stat-first byte guard skips this doc;
+    // the post-read token check would have included it.
+    const multibyteContent = "あ".repeat(400)
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": multibyteContent,
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md"],
+        budgetTokens: estimateTokens(multibyteContent),
+      })
+
+      expect(result).toEqual({
+        files: [],
+        remainingTokens: estimateTokens(multibyteContent),
+      })
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "priority doc exceeds remaining context budget — skipping",
+        data: { path: "README.md" },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("skips a missing priority doc with an info log", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "src/target.ts": "export const target = true",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md"],
+        budgetTokens: 100_000,
+      })
+
+      expect(result).toEqual({ files: [], remainingTokens: 100_000 })
+      expect(logger.messages).toContainEqual({
+        level: "info",
+        message: "priority doc not found — skipping",
+        data: { path: "README.md" },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("skips a priority doc that escapes the workspace with a warn log", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "src/target.ts": "export const target = true",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["../../etc/passwd"],
+        budgetTokens: 100_000,
+      })
+
+      expect(result).toEqual({ files: [], remainingTokens: 100_000 })
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "priority doc path escapes workspace — skipping",
+        data: { path: "../../etc/passwd" },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("skips an unreadable priority doc with a warn log", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": "# Unreadable",
+    })
+    await chmod(path.join(root, "README.md"), 0o000)
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md"],
+        budgetTokens: 100_000,
+      })
+
+      expect(result).toEqual({ files: [], remainingTokens: 100_000 })
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "priority doc unreadable — skipping",
+        data: { path: "README.md", error: expect.stringContaining("EACCES") },
+      })
+    } finally {
+      await chmod(path.join(root, "README.md"), 0o644)
+      await cleanup()
+    }
+  })
+
+  it("skips a symlinked priority doc that resolves outside the workspace", async () => {
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), "umm-outside-"))
+    await writeFile(
+      path.join(outsideRoot, "secret.md"),
+      "runner secret",
+      "utf8",
+    )
+    const { root, cleanup } = await makeTempWorkspace({
+      "src/placeholder.ts": "export {}",
+    })
+    await symlink(
+      path.join(outsideRoot, "secret.md"),
+      path.join(root, "README.md"),
+    )
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md"],
+        budgetTokens: 100_000,
+      })
+
+      expect(result).toEqual({ files: [], remainingTokens: 100_000 })
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message:
+          "priority doc resolves outside the reviewable workspace — skipping",
+        data: { path: "README.md" },
+      })
+    } finally {
+      await cleanup()
+      await rm(outsideRoot, { recursive: true, force: true })
+    }
+  })
+
+  it("skips a priority doc that exceeds the budget", async () => {
+    const readmeContent = "# Project\n\n" + "x".repeat(400)
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": readmeContent,
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md"],
+        budgetTokens: 1,
+      })
+
+      expect(result).toEqual({ files: [], remainingTokens: 1 })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("skips binary priority docs", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": "# Binary\x00content",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md"],
+        budgetTokens: 100_000,
+      })
+
+      expect(result).toEqual({ files: [], remainingTokens: 100_000 })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("returns empty files and full budget when priorityDocs is empty", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": "# Project",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: [],
+        budgetTokens: 100_000,
+      })
+
+      expect(result).toEqual({ files: [], remainingTokens: 100_000 })
     } finally {
       await cleanup()
     }

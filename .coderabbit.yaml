@@ -5,3 +5,9 @@ reviews:
   poem: false
   sequence_diagrams: false
   review_status: false
+  auto_review:
+    # Turn off automatic reviews entirely — no on-open review and no per-push
+    # re-review. CodeRabbit only reviews when explicitly asked via the
+    # "@coderabbitai review" command. With auto reviews off, the
+    # auto_incremental_review key is redundant and omitted.
+    enabled: false

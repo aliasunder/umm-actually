@@ -41,9 +41,29 @@ inputs:
     required: false
     default: "80000"
   trace_related_files:
-    description: Include files that reference changed files in the prompt so the model can trace regressions into callers
+    description: Include related files in the prompt — import-tracing for caller regressions, and doc-mention scanning for staleness detection
     required: false
     default: "true"
+  priority_docs:
+    description: Comma-separated repo-relative paths always included in review context (empty = disabled)
+    required: false
+    default: "README.md"
+  max_scan_files:
+    description: Maximum files to walk during workspace scan for related file and doc detection
+    required: false
+    default: "5000"
+  max_scan_bytes:
+    description: Maximum byte size of a single file to include in the workspace scan
+    required: false
+    default: "262144"
+  max_related_files:
+    description: Maximum import-traced related files to include in review context
+    required: false
+    default: "8"
+  max_related_docs:
+    description: Maximum mention-matched documentation files to include in review context (excludes priority docs)
+    required: false
+    default: "4"
   cost_summary:
     description: Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow step summary
     required: false

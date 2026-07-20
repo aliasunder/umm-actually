@@ -313,6 +313,7 @@ export const buildStatusComment = ({
   totalCount,
   droppedByCap,
   model,
+  contextNotes = [],
 }: {
   sha: string
   isFirstRun: boolean
@@ -321,6 +322,7 @@ export const buildStatusComment = ({
   totalCount: number
   droppedByCap: Finding[]
   model: string
+  contextNotes?: string[]
 }): string => {
   const shaShort = sha.slice(0, 7)
   const verb = isFirstRun ? "reviewed" : "re-reviewed"
@@ -341,6 +343,10 @@ export const buildStatusComment = ({
     droppedByCap.length === 0
       ? ""
       : `_${droppedByCap.length} lower-severity finding(s) omitted by the max_findings cap: ${droppedByCap.map((finding) => `\`${finding.file}:${finding.line}\``).join(", ")}_`
+  const contextSection =
+    contextNotes.length === 0
+      ? ""
+      : `<details>\n<summary>Context notes</summary>\n\n${contextNotes.map((note) => `- ${note}`).join("\n")}\n\n</details>`
   const attribution = `---\n*umm-actually · ${model}*`
   return [
     STATUS_ANCHOR,
@@ -348,6 +354,7 @@ export const buildStatusComment = ({
     findingsLine,
     unpostedNote,
     capNote,
+    contextSection,
     attribution,
   ]
     .filter(Boolean)

@@ -28,6 +28,11 @@ const collectRawInputs = (): RawInputs => ({
   phases: core.getInput("phases"),
   contextBudgetTokens: core.getInput("context_budget_tokens"),
   traceRelatedFiles: core.getBooleanInput("trace_related_files"),
+  maxScanFiles: core.getInput("max_scan_files"),
+  maxScanBytes: core.getInput("max_scan_bytes"),
+  maxRelatedFiles: core.getInput("max_related_files"),
+  maxRelatedDocs: core.getInput("max_related_docs"),
+  priorityDocs: core.getInput("priority_docs"),
   costSummary: core.getBooleanInput("cost_summary"),
   prNumberOverride: core.getInput("pr_number"),
 })
@@ -51,7 +56,16 @@ try {
       eventName: context.eventName,
       payload: context.payload,
       githubClient: createGithubClient({ octokit, owner, repo }, logger),
-      contextReader: createContextReader({ workspaceRoot }, logger),
+      contextReader: createContextReader(
+        {
+          workspaceRoot,
+          maxScanFiles: config.maxScanFiles,
+          maxScanBytes: config.maxScanBytes,
+          relatedFilesMax: config.maxRelatedFiles,
+          relatedDocsMax: config.maxRelatedDocs,
+        },
+        logger,
+      ),
       generateFindings: createPromptedGenerateFindings(
         {
           openrouterClient: createOpenRouterClient(

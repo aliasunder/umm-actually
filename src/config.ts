@@ -34,6 +34,16 @@ const configSchema = z.object({
   phases: z.string().min(1, "phases must not be empty"),
   contextBudgetTokens: requiredPositiveInteger,
   traceRelatedFiles: z.boolean(),
+  maxScanFiles: requiredPositiveInteger,
+  maxScanBytes: requiredPositiveInteger,
+  maxRelatedFiles: requiredPositiveInteger,
+  maxRelatedDocs: requiredPositiveInteger,
+  priorityDocs: z.string().transform((value) =>
+    value
+      .split(",")
+      .map((segment) => segment.trim())
+      .filter(Boolean),
+  ),
   costSummary: z.boolean(),
   prNumberOverride: optionalPositiveInteger,
 })

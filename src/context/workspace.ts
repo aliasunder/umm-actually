@@ -7,11 +7,22 @@ import {
   type PromptFile,
 } from "../review/prompt.js"
 import {
+  DOC_EXTENSIONS,
+  byMentionRelevance,
+  findMentionedChangedPaths,
+  type DocCandidate,
+} from "./doc-mentions.js"
+import {
   extractImportSpecifiers,
   resolveImportSpecifier,
 } from "./import-resolution.js"
 
 export type BudgetedFiles = { files: PromptFile[]; remainingTokens: number }
+
+export type RelatedFilesResult = {
+  files: PromptFile[]
+  excludedByCapPaths: string[]
+}
 
 export type ContextReader = {
   /** null when the file is missing — the prompt renders a "(no conventions…)" block. */
@@ -25,7 +36,17 @@ export type ContextReader = {
   findRelatedFiles: (params: {
     changedPaths: string[]
     budgetTokens: number
-  }) => Promise<PromptFile[]>
+  }) => Promise<RelatedFilesResult>
+  readPriorityDocs: (params: {
+    priorityDocs: string[]
+    budgetTokens: number
+  }) => Promise<BudgetedFiles>
+  findRelatedDocs: (params: {
+    changedPaths: string[]
+    budgetTokens: number
+    conventionsFile: string
+    excludePaths: string[]
+  }) => Promise<RelatedFilesResult>
 }
 
 const SCANNABLE_EXTENSIONS = new Set([
@@ -50,9 +71,18 @@ const PRUNED_DIRECTORIES = new Set([
 ])
 
 /** Scan bounds: a related-files miss on a pathological repo beats an unbounded walk. */
-export const MAX_SCAN_FILES = 5_000
-export const MAX_SCAN_BYTES = 262_144
-export const RELATED_FILES_MAX = 8
+export const DEFAULT_MAX_SCAN_FILES = 5_000
+export const DEFAULT_MAX_SCAN_BYTES = 262_144
+export const DEFAULT_RELATED_FILES_MAX = 8
+export const DEFAULT_RELATED_DOCS_MAX = 4
+
+export type ContextReaderConfig = {
+  workspaceRoot: string
+  maxScanFiles: number
+  maxScanBytes: number
+  relatedFilesMax: number
+  relatedDocsMax: number
+}
 
 type ImporterCandidate = {
   path: string
@@ -87,10 +117,10 @@ const isMissingFileError = (error: unknown): boolean => {
 }
 
 export const createContextReader = (
-  { workspaceRoot }: { workspaceRoot: string },
+  config: ContextReaderConfig,
   logger: Logger,
 ): ContextReader => {
-  const resolvedRoot = path.resolve(workspaceRoot)
+  const resolvedRoot = path.resolve(config.workspaceRoot)
 
   /** Changed-file paths come from the diff and are PR-author-influenced —
    *  a traversal outside the workspace is an attack, not a lookup miss. */
@@ -134,7 +164,7 @@ export const createContextReader = (
     const absolutePath = resolveUnderRoot(conventionsFile)
     try {
       const safePath = await realPathIfSafe(absolutePath)
-      if (safePath === null) {
+      if (!safePath) {
         throw new Error(`path escapes the workspace: ${conventionsFile}`)
       }
       return await readFile(safePath, "utf8")
@@ -159,7 +189,7 @@ export const createContextReader = (
   ): Promise<string | null> => {
     try {
       const safePath = await realPathIfSafe(absolutePath)
-      if (safePath !== null) return await readFile(safePath, "utf8")
+      if (safePath) return await readFile(safePath, "utf8")
       logger.warn(
         "changed file resolves outside the reviewable workspace — including as diff-only",
         { path: changedPath },
@@ -191,8 +221,61 @@ export const createContextReader = (
     try {
       return await readFile(path.join(resolvedRoot, scannedPath), "utf8")
     } catch (readError) {
-      logger.warn("scanned file unreadable — excluding from related files", {
+      logger.warn("scanned file unreadable — excluding from context", {
         path: scannedPath,
+        error: String(readError),
+      })
+      return null
+    }
+  }
+
+  const readPriorityDocOrNull = async (
+    docPath: string,
+    maxBytes: number,
+  ): Promise<string | null> => {
+    // Assigned inside a try because resolveUnderRoot throws on traversal —
+    // the escaping path must degrade to a skip, not crash the review.
+    let absolutePath: string
+    try {
+      absolutePath = resolveUnderRoot(docPath)
+    } catch {
+      logger.warn("priority doc path escapes workspace — skipping", {
+        path: docPath,
+      })
+      return null
+    }
+    try {
+      const safePath = await realPathIfSafe(absolutePath)
+      if (!safePath) {
+        logger.warn(
+          "priority doc resolves outside the reviewable workspace — skipping",
+          { path: docPath },
+        )
+        return null
+      }
+      // Stat before reading: a priority doc can be arbitrarily large, and the
+      // token check only runs after the full read. UTF-8 bytes ≥ chars, so a
+      // file whose bytes exceed the remaining character budget can never fit —
+      // skip it without pulling it into memory. A failed stat falls through to
+      // the read path, which already logs and degrades per error kind.
+      const fileStats = await stat(safePath).catch(() => null)
+      if (fileStats !== null && fileStats.size > maxBytes) {
+        logger.warn(
+          "priority doc exceeds remaining context budget — skipping",
+          {
+            path: docPath,
+          },
+        )
+        return null
+      }
+      return await readFile(safePath, "utf8")
+    } catch (readError) {
+      if (isMissingFileError(readError)) {
+        logger.info("priority doc not found — skipping", { path: docPath })
+        return null
+      }
+      logger.warn("priority doc unreadable — skipping", {
+        path: docPath,
         error: String(readError),
       })
       return null
@@ -249,8 +332,11 @@ export const createContextReader = (
     return { files, remainingTokens }
   }
 
-  const scanWorkspaceSourceFiles = async (): Promise<string[]> => {
-    const sourceFilePaths: string[] = []
+  /** BFS walk parameterized by extension set — shared by source and doc scans. */
+  const scanWorkspaceFiles = async (
+    extensions: Set<string>,
+  ): Promise<string[]> => {
+    const filePaths: string[] = []
     // Mutable queue by design: a breadth-first walk — subdirectories found
     // during iteration join the queue and are visited by the advancing index.
     const directoryQueue = [""]
@@ -276,23 +362,26 @@ export const createContextReader = (
           continue
         }
         if (!entry.isFile()) continue
-        if (!SCANNABLE_EXTENSIONS.has(posix.extname(entry.name))) continue
+        if (!extensions.has(posix.extname(entry.name))) continue
 
-        if (sourceFilePaths.length >= MAX_SCAN_FILES) {
+        if (filePaths.length >= config.maxScanFiles) {
           logger.warn(
-            "workspace scan capped — related-file detection may be incomplete",
-            { maxScanFiles: MAX_SCAN_FILES },
+            "workspace scan capped — related-file and doc detection may be incomplete",
+            { maxScanFiles: config.maxScanFiles },
           )
-          return sourceFilePaths
+          return filePaths
         }
         const fileStats = await stat(path.join(resolvedRoot, entryPath))
-        if (fileStats.size > MAX_SCAN_BYTES) continue
-        sourceFilePaths.push(entryPath)
+        if (fileStats.size > config.maxScanBytes) continue
+        filePaths.push(entryPath)
       }
     }
 
-    return sourceFilePaths
+    return filePaths
   }
+
+  const scanWorkspaceSourceFiles = (): Promise<string[]> =>
+    scanWorkspaceFiles(SCANNABLE_EXTENSIONS)
 
   const findRelatedFiles = async ({
     changedPaths,
@@ -300,7 +389,7 @@ export const createContextReader = (
   }: {
     changedPaths: string[]
     budgetTokens: number
-  }): Promise<PromptFile[]> => {
+  }): Promise<RelatedFilesResult> => {
     const changedPathSet = new Set(changedPaths)
     const scannedPaths = await scanWorkspaceSourceFiles()
 
@@ -308,7 +397,7 @@ export const createContextReader = (
     for (const scannedPath of scannedPaths) {
       if (changedPathSet.has(scannedPath)) continue
       const content = await readScannedFileOrNull(scannedPath)
-      if (content === null) continue
+      if (!content) continue
       // A NUL byte marks binary content — the same exclusion readChangedFiles
       // applies; a source-extension file can still carry one in a string literal
       if (content.includes("\x00")) continue
@@ -331,9 +420,14 @@ export const createContextReader = (
     const relatedFiles: PromptFile[] = []
     // Sequential state by design: rank order is priority order, and an
     // over-budget candidate is skipped so smaller candidates still fit.
+    // capBreakIndex tracks where the cap (not budget) stopped processing.
     let remainingTokens = budgetTokens
-    for (const importer of rankedImporters) {
-      if (relatedFiles.length >= RELATED_FILES_MAX) break
+    let capBreakIndex: number | undefined
+    for (const [importerIndex, importer] of rankedImporters.entries()) {
+      if (relatedFiles.length >= config.relatedFilesMax) {
+        capBreakIndex = importerIndex
+        break
+      }
       const contentTokens = estimateTokens(importer.content)
       if (contentTokens > remainingTokens) continue
       remainingTokens -= contentTokens
@@ -345,8 +439,154 @@ export const createContextReader = (
       })
     }
 
-    return relatedFiles
+    const excludedByCapPaths =
+      capBreakIndex !== undefined
+        ? rankedImporters.slice(capBreakIndex).map((importer) => importer.path)
+        : []
+
+    if (excludedByCapPaths.length > 0) {
+      logger.info(
+        "import-traced related files exceeded cap — excluded from context",
+        {
+          maxRelatedFiles: config.relatedFilesMax,
+          excludedPaths: excludedByCapPaths,
+        },
+      )
+    }
+
+    return { files: relatedFiles, excludedByCapPaths }
   }
 
-  return { readConventions, readChangedFiles, findRelatedFiles }
+  /** Reads explicitly named documentation files, independent of mention
+   *  matching or traceRelatedFiles. Budget-tracked like readChangedFiles. */
+  const readPriorityDocs = async ({
+    priorityDocs,
+    budgetTokens,
+  }: {
+    priorityDocs: string[]
+    budgetTokens: number
+  }): Promise<BudgetedFiles> => {
+    const files: PromptFile[] = []
+    // Sequential state by design: priority order determines budget priority,
+    // and each file's inclusion depends on the budget left by files before it.
+    let remainingTokens = budgetTokens
+
+    for (const docPath of priorityDocs) {
+      const content = await readPriorityDocOrNull(
+        docPath,
+        remainingTokens * CHARS_PER_TOKEN,
+      )
+      if (!content) continue
+      if (content.includes("\x00")) continue
+      const contentTokens = estimateTokens(content)
+      if (contentTokens > remainingTokens) continue
+      remainingTokens -= contentTokens
+      files.push({
+        path: docPath,
+        content,
+        includedAs: "full",
+        reason: "priority documentation",
+      })
+    }
+
+    return { files, remainingTokens }
+  }
+
+  /** Scans the workspace for documentation files that mention changed code
+   *  paths, ranked by mention specificity. */
+  const findRelatedDocs = async ({
+    changedPaths,
+    budgetTokens,
+    conventionsFile,
+    excludePaths,
+  }: {
+    changedPaths: string[]
+    budgetTokens: number
+    conventionsFile: string
+    excludePaths: string[]
+  }): Promise<RelatedFilesResult> => {
+    const changedPathSet = new Set(changedPaths)
+    const normalizedConventionsFile = posix.normalize(conventionsFile)
+    const excludePathSet = new Set(
+      excludePaths.map((excludePath) => posix.normalize(excludePath)),
+    )
+    const scannedPaths = await scanWorkspaceFiles(DOC_EXTENSIONS)
+
+    const candidates: DocCandidate[] = []
+    for (const scannedPath of scannedPaths) {
+      const normalizedScannedPath = posix.normalize(scannedPath)
+      if (normalizedScannedPath === normalizedConventionsFile) continue
+      if (changedPathSet.has(scannedPath)) continue
+      if (excludePathSet.has(normalizedScannedPath)) continue
+
+      const content = await readScannedFileOrNull(scannedPath)
+      if (!content) continue
+      if (content.includes("\x00")) continue
+
+      const { mentionedPaths, fullPathCount, basenameCount } =
+        findMentionedChangedPaths(content, changedPaths)
+      if (mentionedPaths.length === 0) continue
+
+      candidates.push({
+        path: scannedPath,
+        content,
+        fullPathCount,
+        basenameCount,
+        mentionedChangedPaths: mentionedPaths,
+      })
+    }
+
+    const rankedCandidates = [...candidates].sort(byMentionRelevance)
+
+    const relatedDocs: PromptFile[] = []
+    // Sequential state by design: rank order is priority order, and an
+    // over-budget candidate is skipped so smaller candidates still fit.
+    // capBreakIndex tracks where the cap (not budget) stopped processing.
+    let remainingTokens = budgetTokens
+    let capBreakIndex: number | undefined
+    for (const [candidateIndex, candidate] of rankedCandidates.entries()) {
+      if (relatedDocs.length >= config.relatedDocsMax) {
+        capBreakIndex = candidateIndex
+        break
+      }
+      const contentTokens = estimateTokens(candidate.content)
+      if (contentTokens > remainingTokens) continue
+      remainingTokens -= contentTokens
+
+      const displayPaths = candidate.mentionedChangedPaths.slice(0, 3)
+      const overflow =
+        candidate.mentionedChangedPaths.length - displayPaths.length
+      const reasonSuffix = overflow > 0 ? `, +${overflow} more` : ""
+      relatedDocs.push({
+        path: candidate.path,
+        content: candidate.content,
+        includedAs: "full",
+        reason: `mentions ${displayPaths.join(", ")}${reasonSuffix}`,
+      })
+    }
+
+    const excludedByCapPaths =
+      capBreakIndex !== undefined
+        ? rankedCandidates
+            .slice(capBreakIndex)
+            .map((candidate) => candidate.path)
+        : []
+
+    if (excludedByCapPaths.length > 0) {
+      logger.info("mention-matched docs exceeded cap — excluded from context", {
+        maxRelatedDocs: config.relatedDocsMax,
+        excludedPaths: excludedByCapPaths,
+      })
+    }
+
+    return { files: relatedDocs, excludedByCapPaths }
+  }
+
+  return {
+    readConventions,
+    readChangedFiles,
+    findRelatedFiles,
+    readPriorityDocs,
+    findRelatedDocs,
+  }
 }

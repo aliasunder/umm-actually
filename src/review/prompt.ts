@@ -122,14 +122,15 @@ const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
 /**
  * Assembles the user message. Section order is stable → volatile so prefix
  * caching can help on providers that support it: metadata, conventions, file
- * contents, related files, then the diff. The diff is never truncated here —
- * oversized PRs are skipped upstream rather than reviewed badly.
+ * contents, related files, related docs, then the diff. The diff is never
+ * truncated here — oversized PRs are skipped upstream rather than reviewed badly.
  */
 export const buildUserPrompt = ({
   prContext,
   conventions,
   changedFiles,
   relatedFiles,
+  relatedDocs,
   annotatedDiff,
   priorFindings,
   delimiterNonce,
@@ -138,6 +139,7 @@ export const buildUserPrompt = ({
   conventions: string | null
   changedFiles: PromptFile[]
   relatedFiles: PromptFile[]
+  relatedDocs: PromptFile[]
   annotatedDiff: string
   priorFindings: Finding[]
   /** Per-run random tag suffix — see generateDelimiterNonce. */
@@ -170,6 +172,16 @@ export const buildUserPrompt = ({
     .map((relatedFile) => renderFileBlock(relatedFile, delimiterNonce))
     .join("\n\n")
 
+  const relatedDocsSection =
+    relatedDocs.length === 0
+      ? ""
+      : [
+          "Documentation that may describe changed code (flag any claims that have become stale):",
+          ...relatedDocs.map((relatedDoc) =>
+            renderFileBlock(relatedDoc, delimiterNonce),
+          ),
+        ].join("\n\n")
+
   const priorFindingsSection =
     priorFindings.length === 0
       ? ""
@@ -180,6 +192,7 @@ export const buildUserPrompt = ({
     conventionsSection,
     changedFilesSection,
     relatedFilesSection,
+    relatedDocsSection,
     `<${diffTag} note="line numbers shown are new-file line numbers">\n${annotatedDiff}\n</${diffTag}>`,
     priorFindingsSection,
   ]

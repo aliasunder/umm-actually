@@ -404,6 +404,69 @@ describe("buildStatusComment", () => {
       `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\n1 new finding(s) posted (1 tracked finding(s) across all runs).\n\n_1 lower-severity finding(s) omitted by the max_findings cap: \`src/greeter.ts:5\`_\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
     )
   })
+
+  it("renders a collapsible context notes section when contextNotes are provided", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      postedCount: 2,
+      unpostedCount: 0,
+      totalCount: 2,
+      droppedByCap: [],
+      model: "anthropic/claude-sonnet-4-6",
+      contextNotes: [
+        "Priority docs not included: `README.md` (missing, unreadable, or over budget)",
+        "2 related file(s) excluded by `max_related_files` cap: `src/a.ts`, `src/b.ts`",
+      ],
+    })
+
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\n2 new finding(s) posted (2 tracked finding(s) across all runs).\n\n<details>\n<summary>Context notes</summary>\n\n- Priority docs not included: \`README.md\` (missing, unreadable, or over budget)\n- 2 related file(s) excluded by \`max_related_files\` cap: \`src/a.ts\`, \`src/b.ts\`\n\n</details>\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+    )
+  })
+
+  it("omits the context notes section when contextNotes is empty", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      postedCount: 0,
+      unpostedCount: 0,
+      totalCount: 0,
+      droppedByCap: [],
+      model: "anthropic/claude-sonnet-4-6",
+      contextNotes: [],
+    })
+
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\nNo findings above threshold.\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+    )
+  })
+
+  it("omits the context notes section when contextNotes is not provided", () => {
+    const withExplicitEmpty = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      postedCount: 0,
+      unpostedCount: 0,
+      totalCount: 0,
+      droppedByCap: [],
+      model: "anthropic/claude-sonnet-4-6",
+      contextNotes: [],
+    })
+
+    const withoutParam = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      postedCount: 0,
+      unpostedCount: 0,
+      totalCount: 0,
+      droppedByCap: [],
+      model: "anthropic/claude-sonnet-4-6",
+    })
+
+    expect(withExplicitEmpty).toBe(withoutParam)
+    expect(withoutParam).not.toContain("Context notes")
+  })
 })
 
 describe("computeAnchorKey", () => {

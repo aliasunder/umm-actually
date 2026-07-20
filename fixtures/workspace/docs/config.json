@@ -1,0 +1,6 @@
+{
+  "description": "Configuration for src/hub.ts service",
+  "settings": {
+    "maxConnections": 10
+  }
+}

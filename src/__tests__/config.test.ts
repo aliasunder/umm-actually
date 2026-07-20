@@ -12,6 +12,11 @@ const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   phases: "combined",
   contextBudgetTokens: "80000",
   traceRelatedFiles: true,
+  maxScanFiles: "5000",
+  maxScanBytes: "262144",
+  maxRelatedFiles: "8",
+  maxRelatedDocs: "4",
+  priorityDocs: "README.md",
   costSummary: true,
   prNumberOverride: "",
   ...overrides,
@@ -32,6 +37,11 @@ describe("parseConfig", () => {
       phases: "combined",
       contextBudgetTokens: 80000,
       traceRelatedFiles: true,
+      maxScanFiles: 5000,
+      maxScanBytes: 262144,
+      maxRelatedFiles: 8,
+      maxRelatedDocs: 4,
+      priorityDocs: ["README.md"],
       costSummary: true,
       prNumberOverride: undefined,
     })
@@ -99,6 +109,44 @@ describe("parseConfig", () => {
     const config = parseConfig(makeRawInputs({ prNumberOverride: "12" }))
 
     expect(config.prNumberOverride).toBe(12)
+  })
+
+  it("parses comma-separated priority_docs into an array", () => {
+    const config = parseConfig(
+      makeRawInputs({ priorityDocs: "README.md, CHANGELOG.md, docs/guide.md" }),
+    )
+
+    expect(config.priorityDocs).toEqual([
+      "README.md",
+      "CHANGELOG.md",
+      "docs/guide.md",
+    ])
+  })
+
+  it("parses empty priority_docs as empty array", () => {
+    const config = parseConfig(makeRawInputs({ priorityDocs: "" }))
+
+    expect(config.priorityDocs).toEqual([])
+  })
+
+  it("trims whitespace and filters empty segments from priority_docs", () => {
+    const config = parseConfig(
+      makeRawInputs({ priorityDocs: "README.md, , CHANGELOG.md," }),
+    )
+
+    expect(config.priorityDocs).toEqual(["README.md", "CHANGELOG.md"])
+  })
+
+  it("rejects a zero max_related_files", () => {
+    expect(() => parseConfig(makeRawInputs({ maxRelatedFiles: "0" }))).toThrow(
+      'maxRelatedFiles: "0" is not a positive integer',
+    )
+  })
+
+  it("rejects a zero max_related_docs", () => {
+    expect(() => parseConfig(makeRawInputs({ maxRelatedDocs: "0" }))).toThrow(
+      'maxRelatedDocs: "0" is not a positive integer',
+    )
   })
 
   it("aggregates multiple input errors into one message", () => {
