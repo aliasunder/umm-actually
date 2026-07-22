@@ -348,6 +348,9 @@ export const orchestrate = async (
     relatedFiles: relatedFiles.length,
     relatedFilePaths:
       relatedFiles.map((file) => file.path).join(", ") || "none",
+    excludedByRelatedFilesCap: relatedFilesResult.excludedByCapPaths.length,
+    excludedByRelatedFilesCapPaths:
+      relatedFilesResult.excludedByCapPaths.join(", ") || "none",
     priorityDocs: priorityDocFiles.length,
     priorityDocPaths:
       priorityDocFiles.map((file) => file.path).join(", ") || "none",
@@ -355,6 +358,9 @@ export const orchestrate = async (
     mentionMatchedDocPaths:
       mentionMatchedDocsResult.files.map((file) => file.path).join(", ") ||
       "none",
+    excludedByDocsCap: mentionMatchedDocsResult.excludedByCapPaths.length,
+    excludedByDocsCapPaths:
+      mentionMatchedDocsResult.excludedByCapPaths.join(", ") || "none",
     diffTokens,
     fileBudgetTokens,
     remainingTokens: docRemainingTokens,
