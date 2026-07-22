@@ -19,9 +19,11 @@ export type ReviewSummaryStats = {
 }
 
 /** Formats paths for a markdown table cell — em-dash when empty so cells
- *  are never blank. */
+ *  are never blank. Pipes are escaped so paths can't break the table. */
 const pathList = (paths: string[]): string =>
-  paths.length === 0 ? "—" : paths.join(", ")
+  paths.length === 0
+    ? "—"
+    : paths.map((path) => path.replaceAll("|", "\\|")).join(", ")
 
 /** Markdown summary for the workflow job summary — renders a context
  *  table showing what the model saw and a pipeline table showing what
