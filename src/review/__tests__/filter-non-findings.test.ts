@@ -278,6 +278,17 @@ describe("filterNonFindings", () => {
     expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
   })
 
+  it("drops a finding whose failure_scenario ends with 'analysis was wrong.'", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "On closer inspection, the boundary check is fine. My analysis was wrong.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
   // --- Suggestion signals (observed escapes) ---
 
   it("drops a finding whose suggestion starts with 'N/A' (observed on PR #12)", () => {
@@ -315,6 +326,18 @@ describe("filterNonFindings", () => {
     const finding = makeFinding({
       suggestion:
         "No change needed — the existing code is safe because Node.js `fs.stat` normalizes path separators on all platforms. This is a note, not a fix.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  // --- Title-field confirmation prefix (path A via CONFIRMATION_PREFIX) ---
+
+  it("drops a finding whose title starts with 'No bug —'", () => {
+    const finding = makeFinding({
+      title: "No bug — the fallback is intentional",
     })
 
     const result = filterNonFindings([finding])
