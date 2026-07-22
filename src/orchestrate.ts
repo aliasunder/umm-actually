@@ -367,9 +367,9 @@ export const orchestrate = async (
     docsExcludedCount: mentionMatchedDocsResult.excludedByCapPaths.length,
     docsExcludedPaths:
       mentionMatchedDocsResult.excludedByCapPaths.join(", ") || "none",
-    diffTokens,
-    fileBudgetTokens,
-    remainingTokens: docRemainingTokens,
+    tokenBudgetTotal: config.contextBudgetTokens,
+    tokenBudgetUsedByDiff: diffTokens,
+    tokenBudgetRemainingForDocs: docRemainingTokens,
   })
 
   const contextNotes: string[] = []
