@@ -210,6 +210,16 @@ export const orchestrate = async (
   const severityThreshold = resolveSeverityThreshold(config.severityThreshold)
   const phases = resolvePhases(config.phases)
 
+  logger.info("config", {
+    model: config.model,
+    fallbackModel: config.fallbackModel || null,
+    severityThreshold: config.severityThreshold,
+    maxFindings: config.maxFindings ?? "uncapped",
+    traceRelatedFiles: config.traceRelatedFiles,
+    priorityDocs: config.priorityDocs,
+    contextBudgetTokens: config.contextBudgetTokens,
+  })
+
   // Step 2: event resolution
   const resolvedEvent = resolvePullRequestEvent(
     {
@@ -332,6 +342,24 @@ export const orchestrate = async (
 
   const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
 
+  logger.info("context assembled", {
+    changedFiles: changedFiles.length,
+    changedFilePaths: changedFiles.map((file) => file.path).join(", "),
+    relatedFiles: relatedFiles.length,
+    relatedFilePaths:
+      relatedFiles.map((file) => file.path).join(", ") || "none",
+    priorityDocs: priorityDocFiles.length,
+    priorityDocPaths:
+      priorityDocFiles.map((file) => file.path).join(", ") || "none",
+    mentionMatchedDocs: mentionMatchedDocsResult.files.length,
+    mentionMatchedDocPaths:
+      mentionMatchedDocsResult.files.map((file) => file.path).join(", ") ||
+      "none",
+    diffTokens,
+    fileBudgetTokens,
+    remainingTokens: docRemainingTokens,
+  })
+
   const contextNotes: string[] = []
   const skippedPriorityDocs = config.priorityDocs.filter(
     (docPath) => !priorityDocFiles.some((file) => file.path === docPath),
@@ -374,9 +402,11 @@ export const orchestrate = async (
   const { findings: realFindings, droppedAsNonFinding } = filterNonFindings(
     structuredResult.review.findings,
   )
-  if (droppedAsNonFinding > 0) {
-    logger.info("filtered non-findings", { droppedAsNonFinding })
-  }
+  logger.info("filtered non-findings", {
+    totalFromModel: structuredResult.review.findings.length,
+    kept: realFindings.length,
+    droppedAsNonFinding,
+  })
 
   // Step 12.5: cross-run dedup — every run walks the same path; a first run
   // is just the case where no bot comments exist yet. Sources: the bot's
@@ -402,10 +432,16 @@ export const orchestrate = async (
     newFindingsCount: newFindings.length,
   })
 
-  const { selected, droppedByCap } = selectFindings({
+  const { selected, droppedBelowThreshold, droppedByCap } = selectFindings({
     findings: newFindings,
     severityThreshold,
     maxFindings: config.maxFindings,
+  })
+
+  logger.info("selection", {
+    selected: selected.length,
+    droppedBelowThreshold,
+    droppedByCap: droppedByCap.length,
   })
 
   // Step 13: post findings — anchorable ones batch into a single review
