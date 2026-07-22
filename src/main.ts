@@ -101,9 +101,7 @@ try {
   if (config.costSummary && result.costSummaryMarkdown) {
     core.summary.addRaw(result.costSummaryMarkdown)
   }
-  if (core.summary.isEmptyBuffer()) {
-    await core.summary.clear()
-  } else {
+  if (!core.summary.isEmptyBuffer()) {
     await core.summary.write()
   }
 } catch (error) {
