@@ -98,7 +98,7 @@ try {
   if (result.reviewSummaryMarkdown) {
     core.summary.addRaw(result.reviewSummaryMarkdown).addRaw("\n\n")
   }
-  if (config.costSummary && result.costSummaryMarkdown !== null) {
+  if (config.costSummary && result.costSummaryMarkdown) {
     core.summary.addRaw(result.costSummaryMarkdown)
   }
   if (core.summary.isEmptyBuffer()) {

@@ -31,6 +31,9 @@ const hasNonFindingSignal = (text: string): boolean => {
   return NON_FINDING_PREFIX.test(text) || CONFIRMATION_PREFIX.test(text)
 }
 
+/** Checks title, failure_scenario, and suggestion against start- and
+ *  end-anchored patterns that signal the model reported a non-finding
+ *  rather than a real defect. */
 const isNonFinding = (finding: Finding): boolean => {
   const title = finding.title.trim()
   const failureScenario = finding.failure_scenario.trim()
@@ -44,6 +47,8 @@ const isNonFinding = (finding: Finding): boolean => {
   return false
 }
 
+/** Removes model-reported non-findings (N/A titles, confirmation phrases,
+ *  etc.) before findings enter the selection pipeline. */
 export const filterNonFindings = (findings: Finding[]): FilterResult => {
   const realFindings = findings.filter((finding) => !isNonFinding(finding))
   return {

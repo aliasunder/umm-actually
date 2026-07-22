@@ -17,6 +17,8 @@ export type ReviewSummaryStats = {
   posted: number
 }
 
+/** Formats paths for a markdown table cell — em-dash when empty so cells
+ *  are never blank. */
 const pathList = (paths: string[]): string =>
   paths.length === 0 ? "—" : paths.join(", ")
 
