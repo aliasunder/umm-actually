@@ -27,6 +27,10 @@ import { filterNonFindings } from "../review/filter-non-findings.js"
 import { selectFindings } from "../review/select-findings.js"
 import { renderCostSummary } from "../openrouter/cost-summary.js"
 import {
+  renderReviewSummary,
+  type ReviewSummaryStats,
+} from "../review/review-summary.js"
+import {
   orchestrate,
   createPromptedGenerateFindings,
   type OrchestrateDeps,
@@ -99,6 +103,26 @@ const expectedCostSummary = renderCostSummary({
   attempts: [fixtureAttempt],
   modelUsed: "test/model",
 })
+
+const expectedReviewSummary = (
+  overrides: Partial<ReviewSummaryStats> = {},
+): string =>
+  renderReviewSummary({
+    prContext: fixturePrContext,
+    changedFilePaths: [fixtureChangedFile.path],
+    relatedFilePaths: [],
+    relatedFilesExcludedPaths: [],
+    priorityDocPaths: [],
+    mentionMatchedDocPaths: [],
+    docsExcludedPaths: [],
+    totalFromModel: fixtureReviewResponse.findings.length,
+    droppedAsNonFinding: 0,
+    duplicatesRemoved: 0,
+    droppedBelowThreshold: 0,
+    droppedByCap: 0,
+    posted: expectedSelection.selected.length,
+    ...overrides,
+  })
 
 const expectedCappedSelection = selectFindings({
   findings: fixtureReviewResponse.findings,
@@ -426,6 +450,7 @@ describe("orchestrate", () => {
         reviewUrl: "",
         modelUsed: "",
         skippedReason: "unsupported event: push",
+        reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
       })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
@@ -462,6 +487,7 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "",
         skippedReason: skipReason,
+        reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
       })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
@@ -489,6 +515,7 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "",
         skippedReason: skipReason,
+        reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
       })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
@@ -515,6 +542,7 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "",
         skippedReason: skipReason,
+        reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
       })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
@@ -554,6 +582,7 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "test/model",
         skippedReason: "",
+        reviewSummaryMarkdown: expectedReviewSummary(),
         costSummaryMarkdown: expectedCostSummary,
       })
 
@@ -1225,6 +1254,11 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "test/model",
         skippedReason: "",
+        reviewSummaryMarkdown: expectedReviewSummary({
+          totalFromModel: 2,
+          droppedAsNonFinding: 1,
+          posted: 1,
+        }),
         costSummaryMarkdown: expectedCostSummary,
       })
 

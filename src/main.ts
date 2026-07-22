@@ -86,8 +86,16 @@ try {
   core.setOutput("review_url", result.reviewUrl)
   core.setOutput("model_used", result.modelUsed)
   core.setOutput("skipped_reason", result.skippedReason)
+  if (result.reviewSummaryMarkdown) {
+    core.summary.addRaw(result.reviewSummaryMarkdown).addRaw("\n\n")
+  }
   if (config.costSummary && result.costSummaryMarkdown !== null) {
-    await core.summary.addRaw(result.costSummaryMarkdown).write()
+    core.summary.addRaw(result.costSummaryMarkdown)
+  }
+  if (core.summary.isEmptyBuffer()) {
+    await core.summary.clear()
+  } else {
+    await core.summary.write()
   }
 } catch (error) {
   core.setFailed(error instanceof Error ? error.message : String(error))

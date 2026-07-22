@@ -36,6 +36,7 @@ import {
   type PromptFile,
 } from "./review/prompt.js"
 import { filterNonFindings } from "./review/filter-non-findings.js"
+import { renderReviewSummary } from "./review/review-summary.js"
 import { selectFindings } from "./review/select-findings.js"
 
 export type ReviewContext = {
@@ -58,6 +59,7 @@ export type OrchestrateResult = {
   reviewUrl: string
   modelUsed: string
   skippedReason: string
+  reviewSummaryMarkdown: string | null
   costSummaryMarkdown: string | null
 }
 
@@ -195,6 +197,7 @@ const SKIPPED_RESULT_BASE: Omit<
 > = {
   findingsCount: 0,
   modelUsed: "",
+  reviewSummaryMarkdown: null,
   costSummaryMarkdown: null,
 }
 
@@ -535,11 +538,30 @@ export const orchestrate = async (
     })
   }
 
+  const reviewSummaryMarkdown = renderReviewSummary({
+    prContext,
+    changedFilePaths: changedFiles.map((file) => file.path),
+    relatedFilePaths: relatedFiles.map((file) => file.path),
+    relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
+    priorityDocPaths: priorityDocFiles.map((file) => file.path),
+    mentionMatchedDocPaths: mentionMatchedDocsResult.files.map(
+      (file) => file.path,
+    ),
+    docsExcludedPaths: mentionMatchedDocsResult.excludedByCapPaths,
+    totalFromModel: structuredResult.review.findings.length,
+    droppedAsNonFinding,
+    duplicatesRemoved: realFindings.length - newFindings.length,
+    droppedBelowThreshold,
+    droppedByCap: droppedByCap.length,
+    posted: postedCount,
+  })
+
   return {
     findingsCount: postedCount,
     reviewUrl: inlineOutcome.url,
     modelUsed,
     skippedReason: "",
+    reviewSummaryMarkdown,
     costSummaryMarkdown,
   }
 }
