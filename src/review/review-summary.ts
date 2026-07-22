@@ -13,6 +13,7 @@ export type ReviewSummaryStats = {
   droppedAsNonFinding: number
   duplicatesRemoved: number
   droppedBelowThreshold: number
+  droppedAsOverlapping: number
   droppedByCap: number
   posted: number
 }
@@ -54,6 +55,7 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     `| Dropped as non-findings | ${stats.droppedAsNonFinding} |`,
     `| Duplicates (cross-run) | ${stats.duplicatesRemoved} |`,
     `| Dropped below threshold | ${stats.droppedBelowThreshold} |`,
+    `| Dropped as overlapping | ${stats.droppedAsOverlapping} |`,
     `| Dropped by cap | ${stats.droppedByCap} |`,
     `| **Posted** | **${stats.posted}** |`,
   ].join("\n")

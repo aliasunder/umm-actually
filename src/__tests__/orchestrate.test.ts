@@ -120,6 +120,7 @@ const expectedReviewSummary = (
     droppedAsNonFinding: 0,
     duplicatesRemoved: 0,
     droppedBelowThreshold: 0,
+    droppedAsOverlapping: 0,
     droppedByCap: 0,
     posted: expectedSelection.selected.length,
     ...overrides,

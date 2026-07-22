@@ -4,6 +4,7 @@ import { SEVERITY_RANK } from "./finding.js"
 export type SelectionResult = {
   selected: Finding[]
   droppedBelowThreshold: number
+  droppedAsOverlapping: number
   droppedByCap: Finding[]
 }
 
@@ -73,12 +74,20 @@ export const selectFindings = ({
     return duplicateOfKept ? kept : [...kept, candidate]
   }, [])
 
+  const droppedAsOverlapping = aboveThreshold.length - deduplicated.length
+
   if (maxFindings === undefined || deduplicated.length <= maxFindings) {
-    return { selected: deduplicated, droppedBelowThreshold, droppedByCap: [] }
+    return {
+      selected: deduplicated,
+      droppedBelowThreshold,
+      droppedAsOverlapping,
+      droppedByCap: [],
+    }
   }
   return {
     selected: deduplicated.slice(0, maxFindings),
     droppedBelowThreshold,
+    droppedAsOverlapping,
     droppedByCap: deduplicated.slice(maxFindings),
   }
 }

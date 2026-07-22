@@ -448,7 +448,12 @@ export const orchestrate = async (
     findingsSurvivedDedup: newFindings.length,
   })
 
-  const { selected, droppedBelowThreshold, droppedByCap } = selectFindings({
+  const {
+    selected,
+    droppedBelowThreshold,
+    droppedAsOverlapping,
+    droppedByCap,
+  } = selectFindings({
     findings: newFindings,
     severityThreshold,
     maxFindings: config.maxFindings,
@@ -457,6 +462,7 @@ export const orchestrate = async (
   logger.info("findings selected for posting", {
     selected: selected.length,
     droppedBelowThreshold,
+    droppedAsOverlapping,
     droppedByCap: droppedByCap.length,
   })
 
@@ -554,6 +560,7 @@ export const orchestrate = async (
     droppedAsNonFinding,
     duplicatesRemoved: realFindings.length - newFindings.length,
     droppedBelowThreshold,
+    droppedAsOverlapping,
     droppedByCap: droppedByCap.length,
     posted: postedCount,
   })
