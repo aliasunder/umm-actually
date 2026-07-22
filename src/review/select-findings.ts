@@ -74,6 +74,8 @@ export const selectFindings = ({
     return duplicateOfKept ? kept : [...kept, candidate]
   }, [])
 
+  // Findings removed because another finding in the same file + category
+  // covers an overlapping line range at equal or higher severity.
   const droppedAsOverlapping = aboveThreshold.length - deduplicated.length
 
   if (maxFindings === undefined || deduplicated.length <= maxFindings) {
