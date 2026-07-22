@@ -1,5 +1,7 @@
 # AGENTS.md
 
+<!-- distilled from vault Reference/code-standards-* on 2026-07-22; refresh: run the sync-code-standards skill -->
+
 Project conventions for AI-assisted development on umm-actually.
 
 ## What this project is
@@ -87,6 +89,23 @@ files. Prefer SDK-provided types over redefining shapes.
   record injectable for tests.
 - Comments explain non-obvious domain context; never restate what a
   self-documenting name already says. Regex constants get doc comments.
+- Scope constants to where they're used — module level overstates
+  visibility when only one function needs the value.
+- A boolean mode param means the function does two things — split into
+  two single-responsibility functions; the caller owns the gating.
+- Type-only imports over structural duplication — don't clone interfaces
+  for "module purity"; type imports are erased at compile time.
+- Extract multi-step `.map()`/`.reduce()` callbacks into named functions
+  when they nest chains or build intermediates. Prefer `.filter(Boolean)`
+  over conditional spreads. Name non-trivial `.filter()` predicates.
+- Per-operation try/catch — each catch encloses one operation with one
+  failure meaning. Broad catch-alls are banned. Every catch logs or
+  re-throws; a swallowed error is worse than an uncaught one.
+- Parse structured strings with a declarative regex (named groups), not
+  index arithmetic.
+- `Boolean(x)` over `!!x`. TS ≥5.5 infers `.filter()` predicates from
+  bare comparisons — omit explicit type-guard annotations on `.filter()`
+  with a bare null/undefined check.
 - Relative imports use explicit `.js` extensions (ESM runtime requirement).
 
 ## Test conventions
@@ -102,11 +121,49 @@ files. Prefer SDK-provided types over redefining shapes.
   catches drift in formatting, structure, and attribution that field-level
   checks miss.
 - Two-bar rule: a test must (1) fail when the behavior breaks and (2) pass
-  only because the intended behavior occurred. Guard against silent no-op,
-  wrong-error, and early-return passes.
+  only because the intended behavior occurred. Four traps against bar 2:
+  **silent no-op** (assert the trigger happened, not just that state was
+  retained), **wrong-error** (`rejects.toThrow()` with no argument matches
+  ANY error — assert the specific message), **early-return** (assert a
+  side effect only the intended path produces), **wrong-item** (assert the
+  specific expected item, not just "something came back").
+- When unsure a test can fail for the right reason, mutate the production
+  code and watch it fail — for that specific reason.
+- Never decompose: `toHaveLength(1)` + index-based checks is weaker than
+  one `toEqual` on the mapped result — the decomposed form misses extra
+  items, ordering, and unexpected properties.
+- Filter tests seed data both inside AND outside the filter — exclusion
+  is half the behavior.
 - Stub SDK clients are plain objects injected through factories — no HTTP
   mocking libraries.
+- Every test file maps to a real source module — don't spawn a standalone
+  test file to mock differently.
 - Fixtures live in `fixtures/` and are shared across test files.
+
+## Logging & observability
+
+- Use `logger.ts`, never `console.log` — logger params are required, not
+  optional.
+- Thread the caller's logger into domain functions so deep events inherit
+  request context.
+- Levels: **error** (failed, needs attention), **warn** (degraded but
+  handled), **info** (state changes an operator cares about), **debug**
+  (diagnostic detail, off by default). Per-item loops log debug; their
+  summary logs info.
+- Never log PII, credentials, tokens, or secrets — log identifiers, not
+  identity payloads. Redact via destructuring, not `delete` on copies.
+- Every catch logs the error AND enough context (path, operation) to
+  diagnose from the log alone.
+- Internal functions describe what went wrong in their own domain — never
+  name API surfaces or prescribe caller-level remediation.
+
+## Docs
+
+- Docs update in the same change that alters behavior — README, action.yml
+  inputs, and the AGENTS.md structure tree all update in the same PR that
+  changes the feature surface.
+- Adding a concept (env var, input, file, feature) means sweeping every
+  doc that lists its peers.
 
 ## CI conventions
 
