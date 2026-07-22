@@ -361,7 +361,7 @@ export const orchestrate = async (
     relatedFilesExcludedCount: relatedFilesResult.excludedByCapPaths.length,
     relatedFilesExcludedPaths:
       relatedFilesResult.excludedByCapPaths.join(", ") || "none",
-    priorityDocsRead: priorityDocFiles.length,
+    priorityDocsReadCount: priorityDocFiles.length,
     priorityDocPaths:
       priorityDocFiles.map((file) => file.path).join(", ") || "none",
     mentionMatchedDocsCount: mentionMatchedDocsResult.files.length,
