@@ -11,6 +11,15 @@ import { createPromptedGenerateFindings, orchestrate } from "./orchestrate.js"
 
 const logger = createLogger("umm-actually")
 
+process.on("unhandledRejection", (error) => {
+  logger.warn("unhandled promise rejection (likely SDK internal)", {
+    error:
+      error instanceof Error
+        ? `[${error.name}]: ${error.message}`
+        : String(error),
+  })
+})
+
 /**
  * Collects raw inputs at the SDK boundary. Strings come from getInput;
  * booleans come pre-parsed from getBooleanInput, which enforces the strict

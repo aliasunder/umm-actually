@@ -344,6 +344,8 @@ export const createOpenRouterClient = (
           attempts.push({ ...attemptResult.attempt, costUsd })
           logger.info("review response accepted", {
             model: ladderModel,
+            routedModel: attemptResult.routedModel,
+            generationId: attemptResult.generationId,
             attemptCount: attempts.length,
           })
           return {
