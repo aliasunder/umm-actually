@@ -2,6 +2,7 @@ import type { PrContext } from "../github/event.js"
 
 export type ReviewSummaryStats = {
   prContext: PrContext
+  conventionsFile: string | null
   changedFilePaths: string[]
   relatedFilePaths: string[]
   relatedFilesExcludedPaths: string[]
@@ -29,6 +30,8 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     "### umm-actually review summary",
     "",
     `PR #${stats.prContext.prNumber} · \`${stats.prContext.headRef}\` → \`${stats.prContext.baseRef}\` · \`${sha}\``,
+    "",
+    `**Instructions:** ${stats.conventionsFile ?? "none"}`,
     "",
     "#### Context",
     "",

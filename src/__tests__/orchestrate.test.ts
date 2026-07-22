@@ -109,6 +109,7 @@ const expectedReviewSummary = (
 ): string =>
   renderReviewSummary({
     prContext: fixturePrContext,
+    conventionsFile: "AGENTS.md",
     changedFilePaths: [fixtureChangedFile.path],
     relatedFilePaths: [],
     relatedFilesExcludedPaths: [],

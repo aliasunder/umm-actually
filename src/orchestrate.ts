@@ -541,6 +541,7 @@ export const orchestrate = async (
 
   const reviewSummaryMarkdown = renderReviewSummary({
     prContext,
+    conventionsFile: conventions ? config.conventionsFile : null,
     changedFilePaths: changedFiles.map((file) => file.path),
     relatedFilePaths: relatedFiles.map((file) => file.path),
     relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
