@@ -352,6 +352,7 @@ export const orchestrate = async (
   const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
 
   logger.info("context assembled", {
+    conventionsFile: conventions ? config.conventionsFile : "not found",
     changedFilesCount: changedFiles.length,
     changedFilePaths: changedFiles.map((file) => file.path).join(", "),
     relatedFilesCount: relatedFiles.length,
