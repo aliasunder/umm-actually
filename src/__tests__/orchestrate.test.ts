@@ -1273,7 +1273,7 @@ describe("orchestrate", () => {
 
       expect(logger.messages).toContainEqual({
         level: "info",
-        message: "filtered non-findings",
+        message: "non-finding filter applied to model output",
         data: { totalFromModel: 2, kept: 1, droppedAsNonFinding: 1 },
       })
     })

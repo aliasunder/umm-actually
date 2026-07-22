@@ -213,7 +213,7 @@ export const orchestrate = async (
   const severityThreshold = resolveSeverityThreshold(config.severityThreshold)
   const phases = resolvePhases(config.phases)
 
-  logger.info("config", {
+  logger.info("review settings from action inputs", {
     model: config.model,
     fallbackModel: config.fallbackModel || null,
     severityThreshold: config.severityThreshold,
@@ -351,7 +351,7 @@ export const orchestrate = async (
 
   const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
 
-  logger.info("context assembled", {
+  logger.info("context sent to model", {
     conventionsFile: conventions ? config.conventionsFile : "not found",
     changedFilesCount: changedFiles.length,
     changedFilePaths: changedFiles.map((file) => file.path).join(", "),
@@ -418,7 +418,7 @@ export const orchestrate = async (
   const { findings: realFindings, droppedAsNonFinding } = filterNonFindings(
     structuredResult.review.findings,
   )
-  logger.info("filtered non-findings", {
+  logger.info("non-finding filter applied to model output", {
     totalFromModel: structuredResult.review.findings.length,
     kept: realFindings.length,
     droppedAsNonFinding,
@@ -441,7 +441,7 @@ export const orchestrate = async (
     (finding) => !isDuplicateFinding(finding, existingAnchors),
   )
 
-  logger.info("cross-run dedup", {
+  logger.info("cross-run dedup against prior bot comments", {
     statusCommentFound: issueState.statusCommentExists,
     existingAnchorCount: existingAnchors.length,
     findingsAfterFilter: realFindings.length,
@@ -454,7 +454,7 @@ export const orchestrate = async (
     maxFindings: config.maxFindings,
   })
 
-  logger.info("selection", {
+  logger.info("findings selected for posting", {
     selected: selected.length,
     droppedBelowThreshold,
     droppedByCap: droppedByCap.length,
