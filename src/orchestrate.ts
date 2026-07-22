@@ -216,8 +216,14 @@ export const orchestrate = async (
     severityThreshold: config.severityThreshold,
     maxFindings: config.maxFindings ?? "uncapped",
     traceRelatedFiles: config.traceRelatedFiles,
+    maxRelatedFiles: config.maxRelatedFiles,
+    maxRelatedDocs: config.maxRelatedDocs,
+    maxScanFiles: config.maxScanFiles,
+    maxScanBytes: config.maxScanBytes,
     priorityDocs: config.priorityDocs,
     contextBudgetTokens: config.contextBudgetTokens,
+    conventionsFile: config.conventionsFile,
+    costSummary: config.costSummary,
   })
 
   // Step 2: event resolution
