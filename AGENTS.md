@@ -25,7 +25,7 @@ src/
   openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, structured-output retry ladder, cost summary
   diff/                    # pure transforms over parse-diff output
   context/                 # workspace I/O: conventions file, changed files, import-trace scan, doc-mention scan, priority docs
-  review/                  # pure review logic: finding schema, phases, prompt, selection, comment mapping
+  review/                  # pure review logic: finding schema, phases, prompt, selection, comment mapping, summary
   orchestrate.ts           # pipeline + createPromptedGenerateFindings — fully testable with stub clients
 ```
 

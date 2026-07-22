@@ -20,7 +20,7 @@ export type ReviewSummaryStats = {
 
 /** Formats paths for a markdown table cell — em-dash when empty so cells
  *  are never blank. Pipes are escaped so paths can't break the table. */
-const pathList = (paths: string[]): string =>
+const renderPaths = (paths: string[]): string =>
   paths.length === 0
     ? "—"
     : paths.map((path) => path.replaceAll("|", "\\|")).join(", ")
@@ -42,12 +42,12 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     "",
     "| type | count | paths |",
     "| --- | --- | --- |",
-    `| Changed files | ${stats.changedFilePaths.length} | ${pathList(stats.changedFilePaths)} |`,
-    `| Related files | ${stats.relatedFilePaths.length} | ${pathList(stats.relatedFilePaths)} |`,
-    `| Priority docs | ${stats.priorityDocPaths.length} | ${pathList(stats.priorityDocPaths)} |`,
-    `| Mention-matched docs | ${stats.mentionMatchedDocPaths.length} | ${pathList(stats.mentionMatchedDocPaths)} |`,
-    `| Excluded (related files cap) | ${stats.relatedFilesExcludedPaths.length} | ${pathList(stats.relatedFilesExcludedPaths)} |`,
-    `| Excluded (docs cap) | ${stats.docsExcludedPaths.length} | ${pathList(stats.docsExcludedPaths)} |`,
+    `| Changed files | ${stats.changedFilePaths.length} | ${renderPaths(stats.changedFilePaths)} |`,
+    `| Related files | ${stats.relatedFilePaths.length} | ${renderPaths(stats.relatedFilePaths)} |`,
+    `| Priority docs | ${stats.priorityDocPaths.length} | ${renderPaths(stats.priorityDocPaths)} |`,
+    `| Mention-matched docs | ${stats.mentionMatchedDocPaths.length} | ${renderPaths(stats.mentionMatchedDocPaths)} |`,
+    `| Excluded (related files cap) | ${stats.relatedFilesExcludedPaths.length} | ${renderPaths(stats.relatedFilesExcludedPaths)} |`,
+    `| Excluded (docs cap) | ${stats.docsExcludedPaths.length} | ${renderPaths(stats.docsExcludedPaths)} |`,
     "",
     "#### Findings pipeline",
     "",
