@@ -120,7 +120,7 @@ Models sometimes report "findings" that conclude the code is fine — titled `N/
 - its **title** ends with a declarative confirmation — `…is correct` or `…is accurate`
 - its **failure_scenario** ends with a leaked conclusion — `…no bug` / `…no bug here` or `…analysis was wrong`
 
-The patterns are deliberately anchored to the start or end of a field, so real findings survive: a scenario like "No failure occurs until the third retry…" or "None of the guards catch this input" never matches. Dropped counts are logged per run (`filtered non-findings`).
+The patterns are deliberately anchored to the start or end of a field, so real findings survive: a scenario like "No failure occurs until the third retry…" or "None of the guards catch this input" never matches. Dropped counts are logged per run (`non-finding filter applied to model output`).
 
 ## Status
 
