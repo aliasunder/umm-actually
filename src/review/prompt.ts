@@ -117,10 +117,9 @@ const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
   if (file.includedAs === "diff-only") {
     return `<${fileTag} path="${pathAttribute}" note="full content omitted: too large — see diff">\n</${fileTag}>`
   }
-  const reasonAttribute =
-    file.reason === undefined
-      ? ""
-      : ` reason="${escapeAttributeValue(file.reason)}"`
+  const reasonAttribute = file.reason
+    ? ` reason="${escapeAttributeValue(file.reason)}"`
+    : ""
   return `<${fileTag} path="${pathAttribute}"${reasonAttribute}>\n${file.content}\n</${fileTag}>`
 }
 
