@@ -48,6 +48,7 @@ export type ReviewContext = {
   relatedDocs: PromptFile[]
   annotatedDiff: string
   priorFindings: Finding[]
+  priorBotComments: string[]
 }
 
 export type GenerateFindings = (
@@ -72,6 +73,13 @@ export type OrchestrateDeps = {
   generateFindings: GenerateFindings
 }
 
+const PRIOR_COMMENT_CAP = 30
+
+/** Strips the trailing dedup anchor from a comment body so the model
+ *  doesn't see the dedup infrastructure in the prior-comments section. */
+const stripAnchorComment = (body: string): string =>
+  body.replace(/\n*<!-- umm-actually:.+? -->\s*$/, "")
+
 const buildSkipBody = (reason: string): string =>
   `**umm-actually** — review skipped\n\n${reason}\n\n---\n*umm-actually*`
 
@@ -81,29 +89,38 @@ const describeError = (error: unknown): string => {
     : String(error)
 }
 
-/** Anchors from the bot's inline review comments (live positions). Empty on
+type InlineCommentState = {
+  anchors: AnchorEntry[]
+  commentBodies: string[]
+}
+
+/** Anchors and raw bodies from the bot's inline review comments. Empty on
  *  fetch failure — findings then post as new; duplicates beat losing them. */
-const fetchInlineAnchors = async (
+const fetchInlineCommentState = async (
   { githubClient, prNumber }: { githubClient: GithubClient; prNumber: number },
   logger: Logger,
-): Promise<AnchorEntry[]> => {
+): Promise<InlineCommentState> => {
   try {
     const existingComments = await githubClient.fetchBotReviewComments({
       prNumber,
     })
-    return extractAnchors(existingComments)
+    return {
+      anchors: extractAnchors(existingComments),
+      commentBodies: existingComments.map((comment) => comment.body),
+    }
   } catch (fetchError) {
     logger.warn(
       "failed to fetch inline comments — treating their findings as new",
       { error: describeError(fetchError) },
     )
-    return []
+    return { anchors: [], commentBodies: [] }
   }
 }
 
 type IssueCommentState = {
   statusCommentExists: boolean
   anchors: AnchorEntry[]
+  findingBodies: string[]
 }
 
 /** The bot's issue comments carry the rest of the cross-run state: the
@@ -116,25 +133,27 @@ const fetchIssueCommentState = async (
 ): Promise<IssueCommentState> => {
   try {
     const comments = await githubClient.fetchBotIssueComments({ prNumber })
+    const findingComments = comments.filter(
+      (comment) => !comment.body.startsWith(STATUS_ANCHOR),
+    )
     return {
       // startsWith, not includes: a finding comment's model-generated text
       // could quote the marker mid-body and misclassify the run as a re-run.
-      statusCommentExists: comments.some((comment) =>
-        comment.body.startsWith(STATUS_ANCHOR),
-      ),
+      statusCommentExists: comments.length > findingComments.length,
       anchors: extractAnchors(
-        comments.map((comment) => ({
+        findingComments.map((comment) => ({
           body: comment.body,
           line: null,
           originalLine: null,
         })),
       ),
+      findingBodies: findingComments.map((comment) => comment.body),
     }
   } catch (fetchError) {
     logger.warn("failed to fetch issue comments — treating as a first run", {
       error: describeError(fetchError),
     })
-    return { statusCommentExists: false, anchors: [] }
+    return { statusCommentExists: false, anchors: [], findingBodies: [] }
   }
 }
 
@@ -396,6 +415,24 @@ export const orchestrate = async (
     )
   }
 
+  // Step 9.5: fetch prior bot comments — needed both for the prompt (the
+  // model sees what's already posted and self-suppresses conceptual dupes)
+  // and for positional dedup after generation.
+  const inlineState = await fetchInlineCommentState(
+    { githubClient, prNumber: prContext.prNumber },
+    logger,
+  )
+  const issueState = await fetchIssueCommentState(
+    { githubClient, prNumber: prContext.prNumber },
+    logger,
+  )
+  const priorBotComments = [
+    ...inlineState.commentBodies,
+    ...issueState.findingBodies,
+  ]
+    .map(stripAnchorComment)
+    .slice(-PRIOR_COMMENT_CAP)
+
   // Step 10–11: generate findings (V1: single combined phase)
   const phase = phases[0]
   if (!phase) {
@@ -410,6 +447,7 @@ export const orchestrate = async (
     relatedDocs,
     annotatedDiff,
     priorFindings: [],
+    priorBotComments,
   })
 
   const { modelUsed, attempts } = structuredResult
@@ -428,15 +466,7 @@ export const orchestrate = async (
   // is just the case where no bot comments exist yet. Sources: the bot's
   // inline comments (live positions) and its beyond-diff issue comments
   // (anchor lines). Runs before the cap so duplicates don't consume slots.
-  const inlineAnchors = await fetchInlineAnchors(
-    { githubClient, prNumber: prContext.prNumber },
-    logger,
-  )
-  const issueState = await fetchIssueCommentState(
-    { githubClient, prNumber: prContext.prNumber },
-    logger,
-  )
-  const existingAnchors = [...inlineAnchors, ...issueState.anchors]
+  const existingAnchors = [...inlineState.anchors, ...issueState.anchors]
   const newFindings = realFindings.filter(
     (finding) => !isDuplicateFinding(finding, existingAnchors),
   )
@@ -444,6 +474,7 @@ export const orchestrate = async (
   logger.info("cross-run dedup against prior bot comments", {
     statusCommentFound: issueState.statusCommentExists,
     existingAnchorCount: existingAnchors.length,
+    priorBotCommentCount: priorBotComments.length,
     findingsAfterFilter: realFindings.length,
     findingsSurvivedDedup: newFindings.length,
   })
