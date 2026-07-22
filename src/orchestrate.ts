@@ -349,18 +349,18 @@ export const orchestrate = async (
   const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
 
   logger.info("context assembled", {
-    changedFiles: changedFiles.length,
+    changedFilesCount: changedFiles.length,
     changedFilePaths: changedFiles.map((file) => file.path).join(", "),
-    relatedFiles: relatedFiles.length,
+    relatedFilesCount: relatedFiles.length,
     relatedFilePaths:
       relatedFiles.map((file) => file.path).join(", ") || "none",
     relatedFilesExcludedCount: relatedFilesResult.excludedByCapPaths.length,
     relatedFilesExcludedPaths:
       relatedFilesResult.excludedByCapPaths.join(", ") || "none",
-    priorityDocs: priorityDocFiles.length,
+    priorityDocsRead: priorityDocFiles.length,
     priorityDocPaths:
       priorityDocFiles.map((file) => file.path).join(", ") || "none",
-    mentionMatchedDocs: mentionMatchedDocsResult.files.length,
+    mentionMatchedDocsCount: mentionMatchedDocsResult.files.length,
     mentionMatchedDocPaths:
       mentionMatchedDocsResult.files.map((file) => file.path).join(", ") ||
       "none",
@@ -438,10 +438,10 @@ export const orchestrate = async (
   )
 
   logger.info("cross-run dedup", {
-    isFirstRun: !issueState.statusCommentExists,
+    statusCommentFound: issueState.statusCommentExists,
     existingAnchorCount: existingAnchors.length,
-    findingsCount: realFindings.length,
-    newFindingsCount: newFindings.length,
+    findingsAfterFilter: realFindings.length,
+    findingsSurvivedDedup: newFindings.length,
   })
 
   const { selected, droppedBelowThreshold, droppedByCap } = selectFindings({
