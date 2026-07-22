@@ -180,4 +180,213 @@ describe("filterNonFindings", () => {
 
     expect(result).toEqual({ findings: [], droppedAsNonFinding: 0 })
   })
+
+  // --- Title signals (observed escapes on PRs #10/#12) ---
+
+  it("drops a finding whose title starts with 'N/A' (observed on PR #12)", () => {
+    const finding = makeFinding({
+      title: "N/A — maintains unposted design (ignore)",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose title starts with 'Placeholder'", () => {
+    const finding = makeFinding({
+      title: "Placeholder — re-evaluate after the refactor lands",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose title ends with 'is correct' (observed on PR #10)", () => {
+    const finding = makeFinding({
+      title: "Extensionless path handling in posix.basename is correct",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose title ends with 'is accurate' (observed on PR #10)", () => {
+    const finding = makeFinding({
+      title: "README doc-mention description is accurate",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  // --- Confirmation phrases: separator-anchored (observed escapes) ---
+
+  it("drops a finding whose failure_scenario starts with 'No failure —' (observed on PR #10)", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "No failure — the code handles extensionless paths correctly by falling through to the basename match.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose failure_scenario starts with 'No concrete failure scenario —' (observed on PR #10)", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "No concrete failure scenario — `fs.stat` handles forward-slash paths on Windows. This finding should be OMITTED under NOISE SUPPRESSION.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose failure_scenario starts with 'None —'", () => {
+    const finding = makeFinding({
+      failure_scenario: "None — the code handles this edge case.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose confirmation phrase is separated by a plain hyphen", () => {
+    const finding = makeFinding({
+      failure_scenario: "No bug - the guard already covers this input.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose failure_scenario ends with 'No bug here.' (observed on PR #10)", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "After re-tracing, the guard handles EOF correctly. The code is correct; my initial analysis was wrong. The comment and code are aligned. No bug here.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose failure_scenario ends with 'analysis was wrong.'", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "On closer inspection, the boundary check is fine. My analysis was wrong.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  // --- Suggestion signals (observed escapes) ---
+
+  it("drops a finding whose suggestion starts with 'N/A' (observed on PR #12)", () => {
+    const finding = makeFinding({
+      suggestion: "N/A — designed behavior per PR description.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose suggestion starts with 'No bug —' (observed on PR #10)", () => {
+    const finding = makeFinding({
+      suggestion: "No bug — code is correct.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose suggestion starts with 'No action needed —' (observed on PR #10)", () => {
+    const finding = makeFinding({
+      suggestion:
+        "No action needed — the code is correct. This is a documentation note: the budget subtraction correctly tracks only included files.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose suggestion starts with 'No change needed —' (observed on PR #10)", () => {
+    const finding = makeFinding({
+      suggestion:
+        "No change needed — the existing code is safe because Node.js `fs.stat` normalizes path separators on all platforms. This is a note, not a fix.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  // --- Title-field confirmation prefix (path A via CONFIRMATION_PREFIX) ---
+
+  it("drops a finding whose title starts with 'No bug —'", () => {
+    const finding = makeFinding({
+      title: "No bug — the fallback is intentional",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  // --- Separator anchoring: near-misses must survive ---
+
+  it("keeps a finding whose failure_scenario starts with 'No failure occurs until'", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "No failure occurs until the third retry aborts the batch.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  it("keeps a finding whose suggestion is a concrete change", () => {
+    const finding = makeFinding({
+      suggestion: "Add a null check before dereferencing the config value.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  it("keeps a finding with a verification-style title but real scenario and suggestion", () => {
+    const finding = makeFinding({
+      title: "Verify the timeout budget handles overflow",
+      suggestion: "Clamp the timeout to the configured maximum.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  it("keeps a finding whose failure_scenario mentions 'no bug' mid-sentence", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "The fallback swallows the error, so callers see no bug reports but data is lost.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
 })

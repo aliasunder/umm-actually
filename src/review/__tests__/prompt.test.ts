@@ -68,19 +68,45 @@ describe("buildSystemPrompt", () => {
     expect(systemPrompt).toContain("For CI/workflow files")
     expect(systemPrompt).toContain('fill the "analysis" field')
     expect(systemPrompt).toContain("Severity rubric:")
-    expect(systemPrompt).toContain("OUTPUT DISCIPLINE")
     expect(systemPrompt).toContain(
-      "imperative fix statement, under 80 characters",
+      [
+        'Line anchoring: "line" and "end_line" use the new-file line numbers printed in',
+        "the annotated diff. For inline placement, reference only numbers that appear",
+        "there, and keep end_line in the same hunk as line. Findings in code outside",
+        "the diff (traced regressions, pre-existing bugs) are still valuable — report",
+        "them with their real file and line; they are rendered in the review body",
+        "instead of inline.",
+      ].join("\n"),
     )
+  })
+
+  it("bans declarative confirmation titles and non-action suggestions in the output discipline", () => {
+    const systemPrompt = buildSystemPrompt({ phase: combinedPhase })
+
     expect(systemPrompt).toContain(
-      "1–3 sentences stating the defect and its impact",
-    )
-    expect(systemPrompt).toContain(
-      'starting with "N/A", "None",\n  "Not applicable", or "Placeholder"',
-    )
-    expect(systemPrompt).toContain("HARD PROHIBITION")
-    expect(systemPrompt).toContain(
-      "new-file line numbers printed in\nthe annotated diff",
+      [
+        "OUTPUT DISCIPLINE — field constraints:",
+        '- "title": imperative fix statement, under 80 characters (e.g. "Trim keys',
+        '  before inserting into the registry"). Do not start with "Issue:" or',
+        '  "Bug:". A declarative confirmation title ("X is correct", "X is',
+        '  accurate", "N/A — …") or a verification task ("Verify X handles Y") is',
+        "  not a finding — do not emit it.",
+        '- "description": 1–3 sentences stating the defect and its impact. No code',
+        "  tracing, no call-chain walk-through, no quoting of source lines. Put",
+        '  traces and evidence in "analysis", not here.',
+        '- "suggestion": a concrete code change, or null when a fix is genuinely',
+        '  optional. A suggestion of "no bug", "no action needed", or "N/A" means',
+        "  there is no finding — do not emit it.",
+        '- "failure_scenario": a concrete input or state that triggers the problem',
+        '  and what goes wrong. A failure_scenario starting with "N/A", "None",',
+        '  "Not applicable", or "Placeholder" means there is no real finding — do',
+        "  not emit the finding at all.",
+        "",
+        'HARD PROHIBITION — do not report a finding whose conclusion is "no bug",',
+        '"this is correct", "working as designed", "correct behavior", or any',
+        "equivalent. If your analysis concludes the code is correct, record that",
+        'conclusion in "analysis" and move on — do not emit a finding for it.',
+      ].join("\n"),
     )
   })
 

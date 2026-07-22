@@ -8,6 +8,7 @@ LLM-powered pull request review as a GitHub Action. One consolidated review per 
 - Reads your repo's conventions file (`AGENTS.md` by default) and reviews against it
 - Posts exactly **one** PR review with inline comments anchored to diff lines — no duplicate comments, no unrequested-reviewer badges
 - Structured output end to end: every finding carries a category, severity, confidence, and a concrete failure scenario
+- **Drops non-findings before they post** — findings that conclude "no bug here" (an `N/A — …` title, a "no action needed" suggestion, a "…is correct" title) are filtered deterministically
 - Model-agnostic via OpenRouter — pick your model, see your per-call costs
 - Findings that can't be anchored to the diff (e.g. callers outside the changed files) are posted as standalone comments on the PR
 - PRs with oversized diffs are skipped gracefully with a body-only review stating the reason
@@ -106,10 +107,20 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 3. Reads the conventions file and changed source files (token-budgeted), traces imports to find related code files, and scans doc files (`.md`, `.json`) for mentions of changed paths
 4. Builds a structured prompt with randomized delimiter nonces (prompt injection defense) and sends it to OpenRouter
 5. Validates the response against a strict Zod schema, retrying with a fallback model if the primary fails
-6. Filters findings by severity threshold, deduplicates overlapping findings, and caps if configured
+6. Drops non-findings (see [Non-finding filter](#non-finding-filter)), filters by severity threshold, deduplicates overlapping findings, and caps if configured
 7. On re-runs, compares findings against previously posted inline comments (by hidden HTML anchor) and filters out duplicates
 8. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
 9. Posts one review with inline comments (invisible body); beyond-diff findings post as standalone PR comments; every run upserts a status comment with cross-run totals
+
+## Non-finding filter
+
+Models sometimes report "findings" that conclude the code is fine — titled `N/A — …` or `…is correct`, with suggestions like "No action needed". The system prompt prohibits these, but models don't always comply, so every finding also passes a deterministic filter before severity threshold, cross-run dedup, and cap. A finding is dropped when:
+
+- its **title**, **failure_scenario**, or **suggestion** starts with a non-finding signal — `N/A`, `not applicable`, `placeholder`, or a separator-delimited confirmation phrase (`none — …`, `no failure — …`, `no concrete failure scenario — …`, `no bug — …`, `no action needed — …`, `no change needed — …`)
+- its **title** ends with a declarative confirmation — `…is correct` or `…is accurate`
+- its **failure_scenario** ends with a leaked conclusion — `…no bug` / `…no bug here` or `…analysis was wrong`
+
+The patterns are deliberately anchored to the start or end of a field, so real findings survive: a scenario like "No failure occurs until the third retry…" or "None of the guards catch this input" never matches. Dropped counts are logged per run (`filtered non-findings`).
 
 ## Status
 
@@ -127,6 +138,7 @@ umm-actually is in early development — the core review pipeline works but ther
 - Cost transparency (per-run model/token/USD report in workflow summary)
 - `@umm review` comment trigger for on-demand re-reviews
 - Cross-run finding dedup — re-runs detect previously posted inline findings via hidden HTML anchors and post only new ones, with an updatable summary comment tracking totals
+- Non-finding filter — deterministic drop of findings that amount to "no bug here" (`N/A` prefixes, "no action needed" suggestions, "…is correct" titles) before threshold and cap
 
 **In progress**
 

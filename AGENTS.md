@@ -117,9 +117,11 @@ files. Prefer SDK-provided types over redefining shapes.
 - Exact assertions over loose matchers; assert whole values over substrings
   when output is deterministic. When fixtures and stubs produce deterministic
   results, assert the entire return value or call params — not just individual
-  fields. Asserting fragments is the cheap option; asserting the whole value
-  catches drift in formatting, structure, and attribution that field-level
-  checks miss.
+  fields. For large deterministic strings (prompts, rendered output), assert
+  the full section or constant in one `toContain` — not multiple fragments
+  that each check a phrase. Asserting fragments is the cheap option;
+  asserting the whole value catches drift in formatting, structure, and
+  attribution that field-level checks miss.
 - Two-bar rule: a test must (1) fail when the behavior breaks and (2) pass
   only because the intended behavior occurred. Four traps against bar 2:
   **silent no-op** (assert the trigger happened, not just that state was
