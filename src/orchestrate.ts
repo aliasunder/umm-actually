@@ -36,6 +36,7 @@ import {
   type PromptFile,
 } from "./review/prompt.js"
 import { filterNonFindings } from "./review/filter-non-findings.js"
+import { renderReviewSummary } from "./review/review-summary.js"
 import { selectFindings } from "./review/select-findings.js"
 
 export type ReviewContext = {
@@ -58,6 +59,7 @@ export type OrchestrateResult = {
   reviewUrl: string
   modelUsed: string
   skippedReason: string
+  reviewSummaryMarkdown: string | null
   costSummaryMarkdown: string | null
 }
 
@@ -195,6 +197,7 @@ const SKIPPED_RESULT_BASE: Omit<
 > = {
   findingsCount: 0,
   modelUsed: "",
+  reviewSummaryMarkdown: null,
   costSummaryMarkdown: null,
 }
 
@@ -209,6 +212,22 @@ export const orchestrate = async (
   // Step 1: fail-fast validation — throws before any network call
   const severityThreshold = resolveSeverityThreshold(config.severityThreshold)
   const phases = resolvePhases(config.phases)
+
+  logger.info("review settings from action inputs", {
+    model: config.model,
+    fallbackModel: config.fallbackModel || null,
+    severityThreshold: config.severityThreshold,
+    maxFindings: config.maxFindings ?? "uncapped",
+    traceRelatedFiles: config.traceRelatedFiles,
+    maxRelatedFiles: config.maxRelatedFiles,
+    maxRelatedDocs: config.maxRelatedDocs,
+    maxScanFiles: config.maxScanFiles,
+    maxScanBytes: config.maxScanBytes,
+    priorityDocs: config.priorityDocs,
+    contextBudgetTokens: config.contextBudgetTokens,
+    conventionsFile: config.conventionsFile,
+    costSummary: config.costSummary,
+  })
 
   // Step 2: event resolution
   const resolvedEvent = resolvePullRequestEvent(
@@ -332,6 +351,31 @@ export const orchestrate = async (
 
   const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
 
+  logger.info("context sent to model", {
+    conventionsFile: conventions ? config.conventionsFile : "not found",
+    changedFilesCount: changedFiles.length,
+    changedFilePaths: changedFiles.map((file) => file.path).join(", "),
+    relatedFilesCount: relatedFiles.length,
+    relatedFilePaths:
+      relatedFiles.map((file) => file.path).join(", ") || "none",
+    relatedFilesExcludedCount: relatedFilesResult.excludedByCapPaths.length,
+    relatedFilesExcludedPaths:
+      relatedFilesResult.excludedByCapPaths.join(", ") || "none",
+    priorityDocsReadCount: priorityDocFiles.length,
+    priorityDocPaths:
+      priorityDocFiles.map((file) => file.path).join(", ") || "none",
+    mentionMatchedDocsCount: mentionMatchedDocsResult.files.length,
+    mentionMatchedDocPaths:
+      mentionMatchedDocsResult.files.map((file) => file.path).join(", ") ||
+      "none",
+    docsExcludedCount: mentionMatchedDocsResult.excludedByCapPaths.length,
+    docsExcludedPaths:
+      mentionMatchedDocsResult.excludedByCapPaths.join(", ") || "none",
+    tokenBudgetTotal: config.contextBudgetTokens,
+    tokenBudgetUsedByDiff: diffTokens,
+    tokenBudgetRemainingForDocs: docRemainingTokens,
+  })
+
   const contextNotes: string[] = []
   const skippedPriorityDocs = config.priorityDocs.filter(
     (docPath) => !priorityDocFiles.some((file) => file.path === docPath),
@@ -374,9 +418,11 @@ export const orchestrate = async (
   const { findings: realFindings, droppedAsNonFinding } = filterNonFindings(
     structuredResult.review.findings,
   )
-  if (droppedAsNonFinding > 0) {
-    logger.info("filtered non-findings", { droppedAsNonFinding })
-  }
+  logger.info("non-finding filter applied to model output", {
+    totalFromModel: structuredResult.review.findings.length,
+    kept: realFindings.length,
+    droppedAsNonFinding,
+  })
 
   // Step 12.5: cross-run dedup — every run walks the same path; a first run
   // is just the case where no bot comments exist yet. Sources: the bot's
@@ -395,17 +441,29 @@ export const orchestrate = async (
     (finding) => !isDuplicateFinding(finding, existingAnchors),
   )
 
-  logger.info("cross-run dedup", {
-    isFirstRun: !issueState.statusCommentExists,
+  logger.info("cross-run dedup against prior bot comments", {
+    statusCommentFound: issueState.statusCommentExists,
     existingAnchorCount: existingAnchors.length,
-    findingsCount: realFindings.length,
-    newFindingsCount: newFindings.length,
+    findingsAfterFilter: realFindings.length,
+    findingsSurvivedDedup: newFindings.length,
   })
 
-  const { selected, droppedByCap } = selectFindings({
+  const {
+    selected,
+    droppedBelowThreshold,
+    droppedAsOverlapping,
+    droppedByCap,
+  } = selectFindings({
     findings: newFindings,
     severityThreshold,
     maxFindings: config.maxFindings,
+  })
+
+  logger.info("findings selected for posting", {
+    selected: selected.length,
+    droppedBelowThreshold,
+    droppedAsOverlapping,
+    droppedByCap: droppedByCap.length,
   })
 
   // Step 13: post findings — anchorable ones batch into a single review
@@ -487,11 +545,32 @@ export const orchestrate = async (
     })
   }
 
+  const reviewSummaryMarkdown = renderReviewSummary({
+    prContext,
+    conventionsFile: conventions ? config.conventionsFile : null,
+    changedFilePaths: changedFiles.map((file) => file.path),
+    relatedFilePaths: relatedFiles.map((file) => file.path),
+    relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
+    priorityDocPaths: priorityDocFiles.map((file) => file.path),
+    mentionMatchedDocPaths: mentionMatchedDocsResult.files.map(
+      (file) => file.path,
+    ),
+    docsExcludedPaths: mentionMatchedDocsResult.excludedByCapPaths,
+    totalFromModel: structuredResult.review.findings.length,
+    droppedAsNonFinding,
+    duplicatesRemoved: realFindings.length - newFindings.length,
+    droppedBelowThreshold,
+    droppedAsOverlapping,
+    droppedByCap: droppedByCap.length,
+    posted: postedCount,
+  })
+
   return {
     findingsCount: postedCount,
     reviewUrl: inlineOutcome.url,
     modelUsed,
     skippedReason: "",
+    reviewSummaryMarkdown,
     costSummaryMarkdown,
   }
 }

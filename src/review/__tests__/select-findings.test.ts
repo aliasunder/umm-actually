@@ -29,6 +29,7 @@ describe("selectFindings", () => {
     })
 
     expect(result.selected).toEqual([highOriginal])
+    expect(result.droppedAsOverlapping).toBe(1)
   })
 
   it("deduplicates overlapping line ranges of the same category", () => {
@@ -50,6 +51,7 @@ describe("selectFindings", () => {
     })
 
     expect(result.selected).toEqual([rangeFinding])
+    expect(result.droppedAsOverlapping).toBe(1)
   })
 
   it("deduplicates against an inverted range (end_line before line)", () => {

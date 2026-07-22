@@ -11,6 +11,15 @@ import { createPromptedGenerateFindings, orchestrate } from "./orchestrate.js"
 
 const logger = createLogger("umm-actually")
 
+process.on("unhandledRejection", (error) => {
+  logger.warn("unhandled promise rejection (likely SDK internal)", {
+    error:
+      error instanceof Error
+        ? `[${error.name}]: ${error.message}`
+        : String(error),
+  })
+})
+
 /**
  * Collects raw inputs at the SDK boundary. Strings come from getInput;
  * booleans come pre-parsed from getBooleanInput, which enforces the strict
@@ -86,8 +95,14 @@ try {
   core.setOutput("review_url", result.reviewUrl)
   core.setOutput("model_used", result.modelUsed)
   core.setOutput("skipped_reason", result.skippedReason)
-  if (config.costSummary && result.costSummaryMarkdown !== null) {
-    await core.summary.addRaw(result.costSummaryMarkdown).write()
+  if (result.reviewSummaryMarkdown) {
+    core.summary.addRaw(result.reviewSummaryMarkdown).addRaw("\n\n")
+  }
+  if (config.costSummary && result.costSummaryMarkdown) {
+    core.summary.addRaw(result.costSummaryMarkdown)
+  }
+  if (!core.summary.isEmptyBuffer()) {
+    await core.summary.write()
   }
 } catch (error) {
   core.setFailed(error instanceof Error ? error.message : String(error))
