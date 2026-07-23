@@ -1710,9 +1710,9 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      const priorComments = priorBotCommentsFrom(stubs)
-      expect(priorComments).toHaveLength(30)
-      expect(priorComments[29]).toBe("finding 39")
+      expect(priorBotCommentsFrom(stubs)).toEqual(
+        Array.from({ length: 30 }, (_, index) => `finding ${index + 10}`),
+      )
     })
 
     it("passes empty prior bot comments on a first run", async () => {
