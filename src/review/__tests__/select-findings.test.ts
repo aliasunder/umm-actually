@@ -14,8 +14,12 @@ describe("selectFindings", () => {
       maxFindings: undefined,
     })
 
-    expect(result.selected).toEqual([highFinding, mediumFinding])
-    expect(result.droppedBelowThreshold).toBe(1)
+    expect(result).toEqual({
+      selected: [highFinding, mediumFinding],
+      droppedBelowThreshold: 1,
+      droppedAsOverlapping: 0,
+      droppedByCap: [],
+    })
   })
 
   it("keeps the higher-severity finding when same-category findings overlap in a file", () => {
@@ -28,8 +32,12 @@ describe("selectFindings", () => {
       maxFindings: undefined,
     })
 
-    expect(result.selected).toEqual([highOriginal])
-    expect(result.droppedAsOverlapping).toBe(1)
+    expect(result).toEqual({
+      selected: [highOriginal],
+      droppedBelowThreshold: 0,
+      droppedAsOverlapping: 1,
+      droppedByCap: [],
+    })
   })
 
   it("deduplicates overlapping line ranges of the same category", () => {
@@ -50,8 +58,12 @@ describe("selectFindings", () => {
       maxFindings: undefined,
     })
 
-    expect(result.selected).toEqual([rangeFinding])
-    expect(result.droppedAsOverlapping).toBe(1)
+    expect(result).toEqual({
+      selected: [rangeFinding],
+      droppedBelowThreshold: 0,
+      droppedAsOverlapping: 1,
+      droppedByCap: [],
+    })
   })
 
   it("deduplicates against an inverted range (end_line before line)", () => {
@@ -72,7 +84,12 @@ describe("selectFindings", () => {
       maxFindings: undefined,
     })
 
-    expect(result.selected).toEqual([invertedRangeFinding])
+    expect(result).toEqual({
+      selected: [invertedRangeFinding],
+      droppedBelowThreshold: 0,
+      droppedAsOverlapping: 1,
+      droppedByCap: [],
+    })
   })
 
   it("does not deduplicate same-category overlapping findings in different files", () => {
@@ -85,7 +102,12 @@ describe("selectFindings", () => {
       maxFindings: undefined,
     })
 
-    expect(result.selected).toEqual([firstFileFinding, secondFileFinding])
+    expect(result).toEqual({
+      selected: [firstFileFinding, secondFileFinding],
+      droppedBelowThreshold: 0,
+      droppedAsOverlapping: 0,
+      droppedByCap: [],
+    })
   })
 
   it("does not deduplicate overlapping findings of different categories", () => {
@@ -101,7 +123,12 @@ describe("selectFindings", () => {
       maxFindings: undefined,
     })
 
-    expect(result.selected).toHaveLength(2)
+    expect(result).toEqual({
+      selected: [correctnessFinding, testsFinding],
+      droppedBelowThreshold: 0,
+      droppedAsOverlapping: 0,
+      droppedByCap: [],
+    })
   })
 
   it("sorts by severity descending, then file, then line", () => {
@@ -128,12 +155,12 @@ describe("selectFindings", () => {
       maxFindings: undefined,
     })
 
-    expect(result.selected).toEqual([
-      criticalLate,
-      mediumOtherFile,
-      mediumSameFileLater,
-      lowEarly,
-    ])
+    expect(result).toEqual({
+      selected: [criticalLate, mediumOtherFile, mediumSameFileLater, lowEarly],
+      droppedBelowThreshold: 0,
+      droppedAsOverlapping: 0,
+      droppedByCap: [],
+    })
   })
 
   it("posts every finding when no cap is provided", () => {
@@ -147,8 +174,12 @@ describe("selectFindings", () => {
       maxFindings: undefined,
     })
 
-    expect(result.selected).toHaveLength(25)
-    expect(result.droppedByCap).toEqual([])
+    expect(result).toEqual({
+      selected: manyFindings,
+      droppedBelowThreshold: 0,
+      droppedAsOverlapping: 0,
+      droppedByCap: [],
+    })
   })
 
   it("caps at max_findings keeping the most severe, and reports the dropped ones", () => {
@@ -162,18 +193,28 @@ describe("selectFindings", () => {
       maxFindings: 2,
     })
 
-    expect(result.selected).toEqual([criticalFinding, highFinding])
-    expect(result.droppedByCap).toEqual([lowFinding])
+    expect(result).toEqual({
+      selected: [criticalFinding, highFinding],
+      droppedBelowThreshold: 0,
+      droppedAsOverlapping: 0,
+      droppedByCap: [lowFinding],
+    })
   })
 
   it("does not report a cap drop when the cap exceeds the finding count", () => {
+    const finding = makeFinding()
+
     const result = selectFindings({
-      findings: [makeFinding()],
+      findings: [finding],
       severityThreshold: "low",
       maxFindings: 10,
     })
 
-    expect(result.selected).toHaveLength(1)
-    expect(result.droppedByCap).toEqual([])
+    expect(result).toEqual({
+      selected: [finding],
+      droppedBelowThreshold: 0,
+      droppedAsOverlapping: 0,
+      droppedByCap: [],
+    })
   })
 })

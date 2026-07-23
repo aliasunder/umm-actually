@@ -305,11 +305,16 @@ describe("buildUserPrompt", () => {
     })
 
     expect(userPrompt).toContain(
-      '<prior_bot_comments-abc123def456 note="findings already posted on this PR — do not re-report the same issues, even at different locations">',
+      [
+        '<prior_bot_comments-abc123def456 note="findings already posted on this PR — do not re-report the same issues, even at different locations">',
+        "**[high/correctness]** Fix null check\n\nDescription here.",
+        "",
+        "---",
+        "",
+        "**[medium/security]** Sanitize input\n\nAnother finding.",
+        "</prior_bot_comments-abc123def456>",
+      ].join("\n"),
     )
-    expect(userPrompt).toContain("Fix null check")
-    expect(userPrompt).toContain("Sanitize input")
-    expect(userPrompt).toContain("\n\n---\n\n")
   })
 
   it("places prior bot comments after the diff and before prior findings", () => {
