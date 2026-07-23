@@ -126,7 +126,8 @@ const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
 /**
  * Assembles the user message. Section order is stable → volatile so prefix
  * caching can help on providers that support it: metadata, conventions, file
- * contents, related files, related docs, then the diff. The diff is never
+ * contents, related files, related docs, diff, then prior bot comments and
+ * prior findings (most volatile — change between runs). The diff is never
  * truncated here — oversized PRs are skipped upstream rather than reviewed badly.
  */
 export const buildUserPrompt = ({

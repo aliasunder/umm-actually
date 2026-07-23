@@ -93,12 +93,12 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 
 ## Outputs
 
-| Output           | Description                                                               |
-| ---------------- | ------------------------------------------------------------------------- |
-| `findings_count` | Number of new findings posted (after threshold, cap, and cross-run dedup) |
-| `review_url`     | URL of the submitted review; empty when no review was posted              |
-| `model_used`     | Model that produced the accepted response                                 |
-| `skipped_reason` | Non-empty when the review was skipped (e.g. diff too large)               |
+| Output           | Description                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------- |
+| `findings_count` | Number of new findings posted (after non-finding filter, threshold, cap, and cross-run dedup) |
+| `review_url`     | URL of the submitted review; empty when no review was posted                                  |
+| `model_used`     | Model that produced the accepted response                                                     |
+| `skipped_reason` | Non-empty when the review was skipped (e.g. diff too large)                                   |
 
 ## How it works
 
