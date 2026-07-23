@@ -73,6 +73,7 @@ export type OrchestrateDeps = {
   generateFindings: GenerateFindings
 }
 
+/** Bounds token cost of prior bot comments in the prompt (~200 tokens each). */
 const PRIOR_COMMENT_CAP = 30
 
 /** Strips the trailing dedup anchor from a comment body so the model
