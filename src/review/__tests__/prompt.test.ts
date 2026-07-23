@@ -45,6 +45,7 @@ const makeUserPromptParts = () => ({
   annotatedDiff:
     "=== src/greeter.ts ===\n@@ -1,1 +1,1 @@\n     1 + export const greet",
   priorFindings: [],
+  priorBotComments: [],
   delimiterNonce: "abc123def456",
 })
 
@@ -286,6 +287,53 @@ describe("buildUserPrompt", () => {
       '<prior_findings-abc123def456 note="already reported by earlier phases — do not re-report">',
     )
     expect(userPrompt).toContain(priorFinding.title)
+  })
+
+  it("omits the prior bot comments section when empty", () => {
+    const userPrompt = buildUserPrompt(makeUserPromptParts())
+
+    expect(userPrompt).not.toContain("prior_bot_comments")
+  })
+
+  it("includes prior bot comments with a do-not-re-report instruction when present", () => {
+    const userPrompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      priorBotComments: [
+        "**[high/correctness]** Fix null check\n\nDescription here.",
+        "**[medium/security]** Sanitize input\n\nAnother finding.",
+      ],
+    })
+
+    expect(userPrompt).toContain(
+      [
+        '<prior_bot_comments-abc123def456 note="findings already posted on this PR — do not re-report the same issues, even at different locations">',
+        "**[high/correctness]** Fix null check\n\nDescription here.",
+        "",
+        "---",
+        "",
+        "**[medium/security]** Sanitize input\n\nAnother finding.",
+        "</prior_bot_comments-abc123def456>",
+      ].join("\n"),
+    )
+  })
+
+  it("places prior bot comments after the diff and before prior findings", () => {
+    const priorFinding = makeFinding()
+
+    const userPrompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      priorFindings: [priorFinding],
+      priorBotComments: ["**[high/correctness]** Some prior finding"],
+    })
+
+    const diffIndex = userPrompt.indexOf("diff-abc123def456")
+    const botCommentsIndex = userPrompt.indexOf(
+      "prior_bot_comments-abc123def456",
+    )
+    const priorFindingsIndex = userPrompt.indexOf("prior_findings-abc123def456")
+
+    expect(diffIndex).toBeLessThan(botCommentsIndex)
+    expect(botCommentsIndex).toBeLessThan(priorFindingsIndex)
   })
 
   it("labels related files with their inclusion reason", () => {

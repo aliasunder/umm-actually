@@ -126,7 +126,8 @@ const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
 /**
  * Assembles the user message. Section order is stable → volatile so prefix
  * caching can help on providers that support it: metadata, conventions, file
- * contents, related files, related docs, then the diff. The diff is never
+ * contents, related files, related docs, diff, then prior bot comments and
+ * prior findings (most volatile — change between runs). The diff is never
  * truncated here — oversized PRs are skipped upstream rather than reviewed badly.
  */
 export const buildUserPrompt = ({
@@ -137,6 +138,7 @@ export const buildUserPrompt = ({
   relatedDocs,
   annotatedDiff,
   priorFindings,
+  priorBotComments,
   delimiterNonce,
 }: {
   prContext: PrContext
@@ -146,6 +148,7 @@ export const buildUserPrompt = ({
   relatedDocs: PromptFile[]
   annotatedDiff: string
   priorFindings: Finding[]
+  priorBotComments: string[]
   /** Per-run random tag suffix — see generateDelimiterNonce. */
   delimiterNonce: string
 }): string => {
@@ -153,6 +156,7 @@ export const buildUserPrompt = ({
   const conventionsTag = `conventions-${delimiterNonce}`
   const diffTag = `diff-${delimiterNonce}`
   const priorFindingsTag = `prior_findings-${delimiterNonce}`
+  const priorBotCommentsTag = `prior_bot_comments-${delimiterNonce}`
 
   // Title, description, and branch names are PR-author-controlled — wrapped
   // like every other untrusted section so they can't sit in instruction position
@@ -191,6 +195,11 @@ export const buildUserPrompt = ({
       ? ""
       : `<${priorFindingsTag} note="already reported by earlier phases — do not re-report">\n${JSON.stringify(priorFindings, null, 2)}\n</${priorFindingsTag}>`
 
+  const priorBotCommentsSection =
+    priorBotComments.length === 0
+      ? ""
+      : `<${priorBotCommentsTag} note="findings already posted on this PR — do not re-report the same issues, even at different locations">\n${priorBotComments.join("\n\n---\n\n")}\n</${priorBotCommentsTag}>`
+
   const sections = [
     metadataSection,
     conventionsSection,
@@ -198,6 +207,7 @@ export const buildUserPrompt = ({
     relatedFilesSection,
     relatedDocsSection,
     `<${diffTag} note="line numbers shown are new-file line numbers">\n${annotatedDiff}\n</${diffTag}>`,
+    priorBotCommentsSection,
     priorFindingsSection,
   ]
 

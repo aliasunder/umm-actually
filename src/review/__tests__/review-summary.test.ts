@@ -174,4 +174,14 @@ describe("renderReviewSummary", () => {
     expect(summary).toContain("`abc123d`")
     expect(summary).not.toContain(baseStats.prContext.headSha)
   })
+
+  it("escapes pipe characters in paths so they cannot break the markdown table", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      changedFilePaths: ["src/a|b.ts"],
+    })
+
+    expect(summary).toContain("| Changed files | 1 | src/a\\|b.ts |")
+    expect(summary).not.toContain("| src/a|b.ts |")
+  })
 })

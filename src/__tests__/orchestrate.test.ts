@@ -1648,6 +1648,81 @@ describe("orchestrate", () => {
         data: { error: "[Error]: API rate limit" },
       })
     })
+
+    const priorBotCommentsFrom = (stubs: RecordingStubs): string[] => {
+      const context = stubs.generateFindingsCalls[0]
+      if (!context) {
+        throw new Error("expected at least one generateFindings call")
+      }
+      return context.priorBotComments
+    }
+
+    it("passes prior bot comment bodies (anchor-stripped) to generateFindings", async () => {
+      const commentBody =
+        "**[high/correctness]** Fix null check\n\nDescription.\n\n<!-- umm-actually:src/greeter.ts:correctness:99 -->"
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotReviewComments: async () => [
+            existingComment(commentBody, { line: 99 }),
+          ],
+          fetchBotIssueComments: async () => [
+            statusComment,
+            issueFinding("src/other.ts:security:50"),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(priorBotCommentsFrom(stubs)).toEqual([
+        "**[high/correctness]** Fix null check\n\nDescription.",
+        "finding text",
+      ])
+    })
+
+    it("excludes the status comment from prior bot comments", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotIssueComments: async () => [statusComment],
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(priorBotCommentsFrom(stubs)).toEqual([])
+    })
+
+    it("caps prior bot comments at 30", async () => {
+      const comments = Array.from({ length: 40 }, (_, index) =>
+        existingComment(
+          `finding ${index}\n\n<!-- umm-actually:src/a.ts:correctness:${index + 1} -->`,
+          { line: index + 1 },
+        ),
+      )
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotReviewComments: async () => comments,
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(priorBotCommentsFrom(stubs)).toEqual(
+        Array.from({ length: 30 }, (_, index) => `finding ${index + 10}`),
+      )
+    })
+
+    it("passes empty prior bot comments on a first run", async () => {
+      const stubs = makeOrchestrateDeps()
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(priorBotCommentsFrom(stubs)).toEqual([])
+    })
   })
 })
 
@@ -1690,6 +1765,7 @@ describe("createPromptedGenerateFindings", () => {
       relatedDocs: [],
       annotatedDiff: annotateDiff(files),
       priorFindings: [],
+      priorBotComments: [],
     })
 
     expect(requestReviewCalls).toHaveLength(1)
@@ -1736,6 +1812,7 @@ describe("createPromptedGenerateFindings", () => {
       relatedDocs: [],
       annotatedDiff: annotated,
       priorFindings: [],
+      priorBotComments: [],
     })
 
     const call = first(requestReviewCalls)
@@ -1777,6 +1854,7 @@ describe("createPromptedGenerateFindings", () => {
       relatedDocs: [],
       annotatedDiff: annotated,
       priorFindings: [],
+      priorBotComments: [],
     }
 
     await generate(context)
