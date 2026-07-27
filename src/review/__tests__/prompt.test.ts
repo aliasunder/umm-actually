@@ -67,6 +67,9 @@ describe("buildSystemPrompt", () => {
     expect(systemPrompt).toContain("DIMENSION 3 — TEST QUALITY & COVERAGE")
     expect(systemPrompt).toContain("DIMENSION 4 — SUBTLE BUG PATTERNS")
     expect(systemPrompt).toContain("For CI/workflow files")
+    expect(systemPrompt).toContain(
+      "REPORTING RULES — these override intuition:",
+    )
     expect(systemPrompt).toContain('fill the "analysis" field')
     expect(systemPrompt).toContain("Severity rubric:")
     expect(systemPrompt).toContain(
