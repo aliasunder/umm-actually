@@ -28,6 +28,12 @@ describe("resolvePhases", () => {
     ])
   })
 
+  it("returns a resolvable phase for the combined input", () => {
+    const phases = resolvePhases("combined")
+    expect(phases).toHaveLength(1)
+    expect(phases[0]?.id).toBeTruthy()
+  })
+
   it("rejects an unknown phases value with remediation", () => {
     expect(() => resolvePhases("correctness,tests")).toThrow(
       'unknown phases value "correctness,tests" — V1 supports only "combined"',
