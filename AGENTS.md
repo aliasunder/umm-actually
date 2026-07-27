@@ -167,6 +167,43 @@ files. Prefer SDK-provided types over redefining shapes.
 - Adding a concept (env var, input, file, feature) means sweeping every
   doc that lists its peers.
 
+## Review instruction authoring
+
+The bot's system-prompt instructions live in `src/review/phases.ts`
+(dimension constants + reporting rules) and `src/review/prompt.ts`
+(identity/scope, proof-of-work, severity rubric, output discipline). When
+writing or updating a review instruction, follow this formula — each
+element is here because its absence measurably cost findings in live runs:
+
+- **Trigger, not preference.** Action + condition + boundary: "when you see
+  X → derive/trace Y → flag if Z. Boundary: keep quiet when W." Preference
+  statements ("prefer exact assertions") get skipped; procedural triggers
+  fire. The boundary is what separates a finding from noise — never ship a
+  trigger without one.
+- **Name literal scan targets.** Spell out the exact tokens the model
+  should pattern-match in a diff (`toBeTruthy`, `.catch(() => {})`,
+  `${VAR:-}`). A rule whose tokens never appear in the instruction text
+  relies on concept-matching, which misses.
+- **Wrong/Right micro-examples on high-yield rules.** A few-line pair
+  steers the model harder than a paragraph of prose. Budget them — the
+  system prompt loads on every review call.
+- **Proof-of-work coupling for skippable checklists.** A check the model
+  can silently skip needs a required enumeration in the "analysis" field
+  (quote each doc sentence checked; name each changed it() and its
+  derivable exact value). Skipping must be visible in the output, not just
+  discouraged.
+- **Single-call constraint.** Every check must be resolvable by reasoning
+  over the prompt-provided files — no instruction may assume tools, test
+  runs, grep, or repository access beyond the prompt context.
+- **Drift-guard the load-bearing rules.** Each rule that matters gets a
+  targeted fragment assertion in `src/review/__tests__/phases.test.ts`
+  (test-owned strings, whitespace-normalized) so accidental removal fails
+  the suite.
+- **Validate live with a planted finding.** Before trusting a new check,
+  plant a violation it should catch on a PR (self-review builds from the
+  branch, so the PR's own instructions review it), verify the catch, then
+  revert the plant.
+
 ## CI conventions
 
 - Pin third-party actions to full commit SHAs with a version comment.

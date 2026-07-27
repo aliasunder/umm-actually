@@ -131,6 +131,16 @@ For test files, audit each it() individually:
   unique to the intended path), wrong-item (seeding several items then
   asserting only that "something came back" — demand the specific expected
   item by path, id, or content).
+- Loose-matcher trigger: when a new or changed test uses toBeTruthy,
+  toBeDefined, toBeNull, toBeGreaterThanOrEqual(0), toBeGreaterThan(0),
+  expect.anything(), or toHaveLength plus index-picked property checks,
+  derive what the exact expected value would be from the code under test —
+  if it is derivable, flag it: the test must assert the exact value.
+  Wrong (passes even when the resolved value is not the intended one):
+    expect(phases).toHaveLength(1)
+    expect(phases[0]?.id).toBeTruthy()
+  Right (locks the value — any drift fails):
+    expect(phases).toEqual([expectedCombinedPhase])
 - Assert the whole value: multiple expect() calls picking properties off the
   same result are weaker than one toEqual on the full shape — decomposition
   misses extra items, ordering, and structural drift. Boundary:
@@ -219,23 +229,27 @@ live path can mutate or delete the entries it will process.
 related file already exports a bounded or shared helper for the same job,
 flag the miss.`
 
-export const CI_WORKFLOW_CHECKS = `For CI/workflow files (.yml), also check: action pinning (full commit SHA
-with a version comment, not mutable tags — and flag inconsistency when some
-uses: lines are pinned while siblings float); permissions least privilege
-measured against what the steps actually use (when every step authenticates
-via an App token, the default GITHUB_TOKEN needs at most read); multi-trigger
-event guards (with more than one event in on:, each job or step that only
-makes sense for one trigger needs an if: on github.event_name); secrets
-scoped to step-level env, never job-level; persist-credentials: false on
-checkout unless the job pushes; untrusted input (PR titles/bodies, comments,
-branch names) passed via quoted env vars, never interpolated into run:
-commands; concurrency blocks on deploy workflows; if: conditions referencing
-only context visible at evaluation time (step-level env is not — GitHub
-evaluates if: before the step runs); step and job names that match what the
-step actually does (an always-skipped "Configure X" step is a
-description-vs-implementation bug); and run: shell logic that survives
-bash -e — a failing "[ test ] && cmd" short-circuit aborts the job; use
-if/then/fi.`
+export const CI_WORKFLOW_CHECKS = `For CI/workflow files (.yml), also check:
+- Action pinning: every uses: line carries a full commit SHA with a version
+  comment, not a mutable tag — and flag inconsistency when some lines are
+  pinned while siblings float.
+- Permissions least privilege measured against what the steps actually use:
+  when every step authenticates via an App token, the default GITHUB_TOKEN
+  needs at most read.
+- Multi-trigger event guards: with more than one event in on:, each job or
+  step that only makes sense for one trigger needs an if: on
+  github.event_name.
+- Secrets scoped to step-level env, never job-level.
+- persist-credentials: false on checkout unless the job pushes.
+- Untrusted input (PR titles/bodies, comments, branch names) passed via
+  quoted env vars, never interpolated into run: commands.
+- concurrency blocks on deploy workflows.
+- if: conditions reference only context visible at evaluation time —
+  step-level env is not; GitHub evaluates if: before the step runs.
+- Step and job names match what the step actually does — an always-skipped
+  "Configure X" step is a description-vs-implementation bug.
+- run: shell logic survives bash -e — a failing "[ test ] && cmd"
+  short-circuit aborts the job; use if/then/fi.`
 
 export const REPORTING_RULES = `REPORTING RULES — these override intuition:
 - No silent skipping: every issue found during analysis is reported,

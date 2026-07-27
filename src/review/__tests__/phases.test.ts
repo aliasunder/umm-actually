@@ -36,6 +36,14 @@ describe("resolvePhases", () => {
 })
 
 describe("DIMENSION_CORRECTNESS_SECURITY", () => {
+  it("carries the filesystem containment and symlinked-root rules", () => {
+    const normalized = DIMENSION_CORRECTNESS_SECURITY.replace(/\s+/g, " ")
+    expect(normalized).toContain("realpath-style containment")
+    expect(normalized).toContain(
+      "a symlinked search root bypasses per-entry validation",
+    )
+  })
+
   it("includes the unchanged-doc staleness instruction", () => {
     expect(DIMENSION_CORRECTNESS_SECURITY.replace(/\s+/g, " ")).toContain(
       "When unchanged documentation files are provided as context",
@@ -62,6 +70,16 @@ describe("DIMENSION_CORRECTNESS_SECURITY", () => {
 })
 
 describe("DIMENSION_CODE_QUALITY", () => {
+  it("carries the structure triggers beyond immutability — optional chaining, thunks, loops, boolean mode params", () => {
+    const normalized = DIMENSION_CODE_QUALITY.replace(/\s+/g, " ")
+    expect(normalized).toContain("optional chaining (value?.prop ?? fallback)")
+    expect(normalized).toContain("accept T directly")
+    expect(normalized).toContain("for...of")
+    expect(normalized).toContain(
+      "A boolean mode parameter → the function does two things; split it",
+    )
+  })
+
   it("gates immutability findings on readability, exempting honest-loop mutation", () => {
     expect(DIMENSION_CODE_QUALITY.replace(/\s+/g, " ")).toContain(
       "a const-declared Set/array mutated via .add()/.push() in an honest loop is fine",
@@ -79,6 +97,14 @@ describe("DIMENSION_CODE_QUALITY", () => {
 })
 
 describe("DIMENSION_TEST_QUALITY", () => {
+  it("names the loose matchers as scan targets and demands the exact derivable value", () => {
+    const normalized = DIMENSION_TEST_QUALITY.replace(/\s+/g, " ")
+    expect(normalized).toContain(
+      "toBeTruthy, toBeDefined, toBeNull, toBeGreaterThanOrEqual(0), toBeGreaterThan(0), expect.anything()",
+    )
+    expect(normalized).toContain("the test must assert the exact value")
+  })
+
   it("names all four two-bar traps including wrong-item", () => {
     const normalized = DIMENSION_TEST_QUALITY.replace(/\s+/g, " ")
     expect(normalized).toContain("silent no-op")
@@ -98,6 +124,15 @@ describe("DIMENSION_TEST_QUALITY", () => {
 })
 
 describe("DIMENSION_SUBTLE_BUGS", () => {
+  it("carries the SQL, merge-asymmetry, and TOCTOU sub-checks", () => {
+    const normalized = DIMENSION_SUBTLE_BUGS.replace(/\s+/g, " ")
+    expect(normalized).toContain("COUNT(*) vs COUNT(DISTINCT)")
+    expect(normalized).toContain(
+      "apply filters and limits equivalently to each source BEFORE merging",
+    )
+    expect(normalized).toContain("TOCTOU gaps between stat/readdir")
+  })
+
   it("requires mechanism language to be earned by the implementation", () => {
     expect(DIMENSION_SUBTLE_BUGS.replace(/\s+/g, " ")).toContain(
       "Mechanism language must be earned",
@@ -111,6 +146,16 @@ describe("DIMENSION_SUBTLE_BUGS", () => {
     expect(DIMENSION_SUBTLE_BUGS.replace(/\s+/g, " ")).toContain(
       "must resolve against the current document after restructuring",
     )
+  })
+})
+
+describe("CI_WORKFLOW_CHECKS", () => {
+  it("carries the bash -e short-circuit and if:-evaluation-time rules", () => {
+    const normalized = CI_WORKFLOW_CHECKS.replace(/\s+/g, " ")
+    expect(normalized).toContain(
+      'a failing "[ test ] && cmd" short-circuit aborts the job',
+    )
+    expect(normalized).toContain("GitHub evaluates if: before the step runs")
   })
 })
 
