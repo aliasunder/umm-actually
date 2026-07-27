@@ -189,6 +189,45 @@ describe("readChangedFiles", () => {
     })
   })
 
+  it("includes changed lockfiles as diff-only by name, not size — a tiny lockfile is still demoted and consumes no budget", async () => {
+    const appContent = "export const app = 1"
+    const { root, cleanup } = await makeTempWorkspace({
+      "package-lock.json": '{"lockfileVersion": 3}',
+      "packages/cli/yarn.lock": "# yarn lockfile v1",
+      "src/app.ts": appContent,
+    })
+    const contextReader = createContextReader(
+      defaultConfig(root),
+      createTestLogger(),
+    )
+
+    try {
+      const result = await contextReader.readChangedFiles({
+        changedPaths: [
+          "package-lock.json",
+          "packages/cli/yarn.lock",
+          "src/app.ts",
+        ],
+        budgetTokens: 10_000,
+      })
+
+      expect(result).toEqual({
+        files: [
+          { path: "package-lock.json", content: "", includedAs: "diff-only" },
+          {
+            path: "packages/cli/yarn.lock",
+            content: "",
+            includedAs: "diff-only",
+          },
+          { path: "src/app.ts", content: appContent, includedAs: "full" },
+        ],
+        remainingTokens: 10_000 - estimateTokens(appContent),
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
   it("demotes a file whose byte size exceeds the byte budget before reading it", async () => {
     // Multibyte content: 400 chars fit a 100-token budget, but 1200 UTF-8
     // bytes exceed it — only the stat-first byte guard demotes this file;

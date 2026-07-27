@@ -49,6 +49,27 @@ export type ContextReader = {
   }) => Promise<RelatedFilesResult>
 }
 
+/** Machine-generated dependency lockfiles are always included diff-only:
+ *  near-zero review value as full text, and a single one can consume most
+ *  of the context budget — starving the files the review is actually about. */
+const LOCKFILE_BASENAMES = new Set([
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "bun.lock",
+  // binary, so typically absent from parsed text diffs — defense in depth
+  // against diff sources that do surface a path for it
+  "bun.lockb",
+  "deno.lock",
+  "composer.lock",
+  "Cargo.lock",
+  "Gemfile.lock",
+  "poetry.lock",
+  "uv.lock",
+  "go.sum",
+])
+
 const SCANNABLE_EXTENSIONS = new Set([
   ".ts",
   ".tsx",
@@ -295,9 +316,13 @@ export const createContextReader = (
     let remainingTokens = budgetTokens
 
     for (const changedPath of changedPaths) {
+      if (LOCKFILE_BASENAMES.has(posix.basename(changedPath))) {
+        files.push({ path: changedPath, content: "", includedAs: "diff-only" })
+        continue
+      }
       const absolutePath = resolveUnderRoot(changedPath)
-      // Stat before reading: a changed lockfile or bundle can be arbitrarily
-      // large, and the token check below only runs after the full read. UTF-8
+      // Stat before reading: a changed bundle or generated file can be
+      // arbitrarily large, and the token check below only runs after the full read. UTF-8
       // bytes ≥ chars, so a file whose bytes exceed the remaining character
       // budget can never fit — demote it without pulling it into memory.
       // A failed stat (e.g. deleted file) falls through to the read path,
