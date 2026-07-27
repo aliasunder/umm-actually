@@ -7,12 +7,43 @@ on:
 permissions:
   contents: read
 
+# Queue, never cancel: the release job's own tag force-moves retrigger this
+# workflow (App-token pushes are not suppressed the way GITHUB_TOKEN pushes
+# are), and a cancelling retrigger could kill the real run between its tag
+# push and its GitHub Release step. Retriggered runs skip via the gate below.
 concurrency:
   group: release
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  # Idempotency gate: the digest-flip commit is the marker that a release
+  # already completed for this tag. First run on a tag sees `image:
+  # Dockerfile` and proceeds; the runs retriggered by this workflow's own
+  # semver and major-tag force-pushes see the digest pin and skip — without
+  # this, each retrigger would rebuild and overwrite the just-published
+  # GHCR artifacts with different bits.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      already-pinned: ${{ steps.check.outputs.already-pinned }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check whether the tag already points at a digest-pinned commit
+        id: check
+        run: |
+          if grep -qF "image: docker://" action.yml; then
+            echo "already-pinned=true" >> "$GITHUB_OUTPUT"
+            echo "Release already completed for this tag — skipping."
+          else
+            echo "already-pinned=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-push:
+    needs: gate
+    if: needs.gate.outputs.already-pinned == 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: read
