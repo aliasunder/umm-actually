@@ -257,7 +257,7 @@ describe("buildUserPrompt", () => {
     })
 
     expect(userPrompt).toContain(
-      '<file-abc123def456 path="src/huge.ts" note="full content omitted: too large — see diff">',
+      '<file-abc123def456 path="src/huge.ts" note="full content omitted — see diff">',
     )
   })
 

@@ -115,7 +115,7 @@ const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
   const fileTag = `file-${delimiterNonce}`
   const pathAttribute = escapeAttributeValue(file.path)
   if (file.includedAs === "diff-only") {
-    return `<${fileTag} path="${pathAttribute}" note="full content omitted: too large — see diff">\n</${fileTag}>`
+    return `<${fileTag} path="${pathAttribute}" note="full content omitted — see diff">\n</${fileTag}>`
   }
   const reasonAttribute = file.reason
     ? ` reason="${escapeAttributeValue(file.reason)}"`
