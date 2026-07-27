@@ -67,6 +67,9 @@ describe("buildSystemPrompt", () => {
     expect(systemPrompt).toContain("DIMENSION 3 — TEST QUALITY & COVERAGE")
     expect(systemPrompt).toContain("DIMENSION 4 — SUBTLE BUG PATTERNS")
     expect(systemPrompt).toContain("For CI/workflow files")
+    expect(systemPrompt).toContain(
+      "REPORTING RULES — these override intuition:",
+    )
     expect(systemPrompt).toContain('fill the "analysis" field')
     expect(systemPrompt).toContain("Severity rubric:")
     expect(systemPrompt).toContain(
@@ -254,7 +257,7 @@ describe("buildUserPrompt", () => {
     })
 
     expect(userPrompt).toContain(
-      '<file-abc123def456 path="src/huge.ts" note="full content omitted: too large — see diff">',
+      '<file-abc123def456 path="src/huge.ts" note="full content omitted — see diff">',
     )
   })
 
