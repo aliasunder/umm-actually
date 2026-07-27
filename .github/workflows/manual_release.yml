@@ -1,0 +1,79 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: read
+
+# Serializes double-dispatches. Deliberately NOT the release.yml "release"
+# group: release.yml cancels in-progress runs in its group, and this run is
+# still finishing when the tag push triggers it.
+concurrency:
+  group: manual-release
+  cancel-in-progress: false
+
+jobs:
+  bump-and-tag:
+    runs-on: ubuntu-latest
+    steps:
+      # The tag push must authenticate as the release App: pushes made with
+      # the default GITHUB_TOKEN do not trigger workflows, so release.yml
+      # would never fire on the new tag.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_PRIVATE_KEY }}
+          permission-contents: write
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: true
+
+      - name: Calculate next version
+        id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          CURRENT=$(jq -r '.version' package.json)
+          if [ "$CURRENT" = "null" ] || [ -z "$CURRENT" ]; then
+            echo "::error::package.json has no version field; cannot compute next version"
+            exit 1
+          fi
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEXT="${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Bumping $CURRENT -> $NEXT ($BUMP)"
+
+      - name: Bump package.json and package-lock.json
+        env:
+          NEXT: ${{ steps.next.outputs.version }}
+        run: npm version "$NEXT" --no-git-tag-version
+
+      - name: Commit, tag, and push
+        env:
+          NEXT: ${{ steps.next.outputs.version }}
+        run: |
+          git config user.name "umm-actually[bot]"
+          git config user.email "umm-actually[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "release: v$NEXT"
+          git tag "v$NEXT"
+          git push origin HEAD --tags
