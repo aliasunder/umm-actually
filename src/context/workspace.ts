@@ -58,6 +58,8 @@ const LOCKFILE_BASENAMES = new Set([
   "yarn.lock",
   "pnpm-lock.yaml",
   "bun.lock",
+  // binary, so typically absent from parsed text diffs — defense in depth
+  // against diff sources that do surface a path for it
   "bun.lockb",
   "deno.lock",
   "composer.lock",
@@ -319,8 +321,8 @@ export const createContextReader = (
         continue
       }
       const absolutePath = resolveUnderRoot(changedPath)
-      // Stat before reading: a changed lockfile or bundle can be arbitrarily
-      // large, and the token check below only runs after the full read. UTF-8
+      // Stat before reading: a changed bundle or generated file can be
+      // arbitrarily large, and the token check below only runs after the full read. UTF-8
       // bytes ≥ chars, so a file whose bytes exceed the remaining character
       // budget can never fit — demote it without pulling it into memory.
       // A failed stat (e.g. deleted file) falls through to the read path,
