@@ -214,7 +214,6 @@ export const buildUserPrompt = ({
   return sections.filter((section) => section !== "").join("\n\n")
 }
 
-/** Estimates prompt size with the provider's tokenizer, so budget
- *  decisions match the model's real token accounting. */
+/** Order-of-magnitude token estimate for budget decisions. */
 export const estimateTokens = (text: string): number =>
   Math.ceil(text.length / CHARS_PER_TOKEN)
