@@ -87,6 +87,7 @@ export type OctokitLike = {
 export type CheckRunConclusion = "success" | "neutral" | "failure"
 
 export type CheckRunOutput = { title: string; summary: string }
+
 export type DiffFetchResult =
   { kind: "ok"; diff: string } | { kind: "too_large" }
 
@@ -548,6 +549,7 @@ export const createGithubClient = (
     return { checkRunId: parsed.data.id }
   }
 
+  /** Marks the check run as completed with a conclusion and details page. */
   const updateCheckRun = async ({
     checkRunId,
     conclusion,

@@ -229,9 +229,6 @@ const SKIPPED_RESULT_BASE: Omit<
   costSummaryMarkdown: null,
 }
 
-/** The branded check's name in the PR checks list. */
-const CHECK_RUN_NAME = "umm-actually"
-
 type CheckRunHandle = { checkRunId: number } | null
 
 /** Best-effort: a token without `checks: write` (the permission is optional
@@ -240,6 +237,7 @@ const createCheckRunSafely = async (
   { githubClient, headSha }: { githubClient: GithubClient; headSha: string },
   logger: Logger,
 ): Promise<CheckRunHandle> => {
+  const CHECK_RUN_NAME = "umm-actually"
   try {
     const checkRun = await githubClient.createCheckRun({
       headSha,
@@ -295,7 +293,7 @@ const completeCheckRunSafely = async (
  *  Findings and skips conclude `neutral` — the review is informational,
  *  not a merge gate — so `success` is reserved for a clean review and
  *  `failure` for the pipeline itself erroring. */
-const checkRunCompletion = ({
+const resolveCheckRunCompletion = ({
   result,
   costSummaryMarkdown,
 }: {
@@ -749,7 +747,7 @@ export const orchestrate = async (
       { deps, prContext, severityThreshold, phases },
       logger,
     )
-    const completion = checkRunCompletion({
+    const completion = resolveCheckRunCompletion({
       result,
       costSummaryMarkdown: config.costSummary
         ? result.costSummaryMarkdown
