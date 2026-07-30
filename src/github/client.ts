@@ -62,8 +62,33 @@ export type OctokitLike = {
         body: string
       }): Promise<{ data: unknown }>
     }
+    checks: {
+      create(params: {
+        owner: string
+        repo: string
+        name: string
+        head_sha: string
+        status: "in_progress"
+      }): Promise<{ data: unknown }>
+      update(params: {
+        owner: string
+        repo: string
+        check_run_id: number
+        status: "completed"
+        conclusion: CheckRunConclusion
+        output: CheckRunOutput
+      }): Promise<{ data: unknown }>
+    }
   }
 }
+
+/** The conclusion grades the run, not the code: a completed review is
+ *  `success` regardless of findings, a skip is `neutral`, and `failure`
+ *  is reserved for the pipeline itself erroring. */
+export type CheckRunConclusion = "success" | "neutral" | "failure"
+
+export type CheckRunOutput = { title: string; summary: string }
+
 export type DiffFetchResult =
   { kind: "ok"; diff: string } | { kind: "too_large" }
 
@@ -118,6 +143,15 @@ export type GithubClient = {
     body: string
     anchor: string
   }) => Promise<UpsertCommentResult>
+  createCheckRun: (params: {
+    headSha: string
+    name: string
+  }) => Promise<{ checkRunId: number }>
+  updateCheckRun: (params: {
+    checkRunId: number
+    conclusion: CheckRunConclusion
+    output: CheckRunOutput
+  }) => Promise<void>
 }
 
 /** The pullRequestEventSchema fields minus the event wrapper — what the REST
@@ -143,6 +177,8 @@ const reviewCommentListSchema = z.array(
     user: z.object({ login: z.string() }).nullable(),
   }),
 )
+
+const checkRunResponseSchema = z.object({ id: z.int().positive() })
 
 const issueCommentListSchema = z.array(
   z.object({
@@ -489,6 +525,51 @@ export const createGithubClient = (
     return { url: parsed.data.html_url, created: true }
   }
 
+  /** Opens the check run under the token's App identity, which is what puts
+   *  the app avatar on the checks list instead of the generic Actions logo.
+   *  Requires `checks: write` on the token — callers treat a rejection as
+   *  a degradation, not a review failure. */
+  const createCheckRun = async ({
+    headSha,
+    name,
+  }: {
+    headSha: string
+    name: string
+  }): Promise<{ checkRunId: number }> => {
+    const response = await octokit.rest.checks.create({
+      owner,
+      repo,
+      name,
+      head_sha: headSha,
+      status: "in_progress",
+    })
+    const parsed = checkRunResponseSchema.safeParse(response.data)
+    if (!parsed.success) {
+      throw new Error("unexpected check run response shape")
+    }
+    return { checkRunId: parsed.data.id }
+  }
+
+  /** Marks the check run as completed with a conclusion and details page. */
+  const updateCheckRun = async ({
+    checkRunId,
+    conclusion,
+    output,
+  }: {
+    checkRunId: number
+    conclusion: CheckRunConclusion
+    output: CheckRunOutput
+  }): Promise<void> => {
+    await octokit.rest.checks.update({
+      owner,
+      repo,
+      check_run_id: checkRunId,
+      status: "completed",
+      conclusion,
+      output,
+    })
+  }
+
   return {
     fetchPullRequest,
     fetchDiff,
@@ -498,5 +579,7 @@ export const createGithubClient = (
     fetchBotReviewComments,
     fetchBotIssueComments,
     upsertSummaryComment,
+    createCheckRun,
+    updateCheckRun,
   }
 }

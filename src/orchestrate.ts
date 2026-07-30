@@ -6,7 +6,11 @@ import {
 } from "./diff/commentable-lines.js"
 import { annotateDiff } from "./diff/annotate-diff.js"
 import type { Logger } from "./logger.js"
-import type { GithubClient } from "./github/client.js"
+import type {
+  CheckRunConclusion,
+  CheckRunOutput,
+  GithubClient,
+} from "./github/client.js"
 import { resolvePullRequestEvent, type PrContext } from "./github/event.js"
 import type {
   OpenRouterClient,
@@ -26,7 +30,11 @@ import {
   type AnchorEntry,
   type ReviewComment,
 } from "./review/comment-mapping.js"
-import { resolveSeverityThreshold, type Finding } from "./review/finding.js"
+import {
+  resolveSeverityThreshold,
+  type Finding,
+  type FindingSeverity,
+} from "./review/finding.js"
 import { resolvePhases, type ReviewPhase } from "./review/phases.js"
 import {
   buildSystemPrompt,
@@ -221,60 +229,128 @@ const SKIPPED_RESULT_BASE: Omit<
   costSummaryMarkdown: null,
 }
 
-/** Runs the full review pipeline — event resolution through review posting —
- *  with all I/O injected through deps so the pipeline is fully testable. */
-export const orchestrate = async (
-  deps: OrchestrateDeps,
+type CheckRunHandle = { checkRunId: number } | null
+
+/** Best-effort: a token without `checks: write` (the permission is optional
+ *  for consumers) must degrade to an unbranded run, never fail the review. */
+const createCheckRunSafely = async (
+  { githubClient, headSha }: { githubClient: GithubClient; headSha: string },
+  logger: Logger,
+): Promise<CheckRunHandle> => {
+  const CHECK_RUN_NAME = "umm-actually"
+  try {
+    const checkRun = await githubClient.createCheckRun({
+      headSha,
+      name: CHECK_RUN_NAME,
+    })
+    logger.info("check run created", { checkRunId: checkRun.checkRunId })
+    return checkRun
+  } catch (createError) {
+    logger.warn("failed to create check run — review continues without one", {
+      error: describeError(createError),
+    })
+    return null
+  }
+}
+
+/** No-op without a handle; an update failure only costs the check its
+ *  conclusion (it lingers in progress), so it never masks the review
+ *  outcome or the pipeline error being propagated. */
+const completeCheckRunSafely = async (
+  {
+    githubClient,
+    checkRun,
+    conclusion,
+    output,
+  }: {
+    githubClient: GithubClient
+    checkRun: CheckRunHandle
+    conclusion: CheckRunConclusion
+    output: CheckRunOutput
+  },
+  logger: Logger,
+): Promise<void> => {
+  if (!checkRun) return
+  try {
+    await githubClient.updateCheckRun({
+      checkRunId: checkRun.checkRunId,
+      conclusion,
+      output,
+    })
+    logger.info("check run completed", {
+      checkRunId: checkRun.checkRunId,
+      conclusion,
+    })
+  } catch (updateError) {
+    logger.warn("failed to complete check run — it will linger in progress", {
+      checkRunId: checkRun.checkRunId,
+      error: describeError(updateError),
+    })
+  }
+}
+
+/** Maps the pipeline outcome to the check's conclusion and details page.
+ *  The conclusion grades the run, not the code: a completed review is
+ *  `success` whether or not it posted findings (the count lives in the
+ *  title), a skip is `neutral` (no review happened), and `failure` is
+ *  reserved for the pipeline itself erroring. */
+const resolveCheckRunCompletion = ({
+  result,
+  costSummaryMarkdown,
+}: {
+  result: OrchestrateResult
+  costSummaryMarkdown: string | null
+}): { conclusion: CheckRunConclusion; output: CheckRunOutput } => {
+  const costSection = costSummaryMarkdown ? `\n\n${costSummaryMarkdown}` : ""
+  if (result.skippedReason) {
+    return {
+      conclusion: "neutral",
+      output: {
+        title: `Skipped — ${result.skippedReason}`,
+        summary: `Review skipped: ${result.skippedReason}${costSection}`,
+      },
+    }
+  }
+  if (result.findingsCount === 0) {
+    return {
+      conclusion: "success",
+      output: {
+        title: "No findings above threshold",
+        summary: `Reviewed with \`${result.modelUsed}\` — no findings above threshold.${costSection}`,
+      },
+    }
+  }
+  const findingsLabel =
+    result.findingsCount === 1
+      ? "1 finding"
+      : `${result.findingsCount} findings`
+  return {
+    conclusion: "success",
+    output: {
+      title: findingsLabel,
+      summary: `Reviewed with \`${result.modelUsed}\` — ${findingsLabel} posted.${costSection}`,
+    },
+  }
+}
+
+/** Steps 4–14: diff fetch through status comment — everything downstream of
+ *  PR-context resolution, extracted so orchestrate can bracket it with the
+ *  check-run lifecycle. */
+const runReviewPipeline = async (
+  {
+    deps,
+    prContext,
+    severityThreshold,
+    phases,
+  }: {
+    deps: OrchestrateDeps
+    prContext: PrContext
+    severityThreshold: FindingSeverity
+    phases: ReviewPhase[]
+  },
   logger: Logger,
 ): Promise<OrchestrateResult> => {
   const { config, githubClient, contextReader, generateFindings } = deps
-
-  // Step 1: fail-fast validation — throws before any network call
-  const severityThreshold = resolveSeverityThreshold(config.severityThreshold)
-  const phases = resolvePhases(config.phases)
-
-  logger.info("review settings from action inputs", {
-    model: config.model,
-    fallbackModel: config.fallbackModel || null,
-    severityThreshold: config.severityThreshold,
-    maxFindings: config.maxFindings ?? "uncapped",
-    traceRelatedFiles: config.traceRelatedFiles,
-    maxRelatedFiles: config.maxRelatedFiles,
-    maxRelatedDocs: config.maxRelatedDocs,
-    maxScanFiles: config.maxScanFiles,
-    maxScanBytes: config.maxScanBytes,
-    priorityDocs: config.priorityDocs,
-    contextBudgetTokens: config.contextBudgetTokens,
-    conventionsFile: config.conventionsFile,
-    costSummary: config.costSummary,
-  })
-
-  // Step 2: event resolution
-  const resolvedEvent = resolvePullRequestEvent(
-    {
-      eventName: deps.eventName,
-      payload: deps.payload,
-      prNumberOverride: config.prNumberOverride,
-    },
-    logger,
-  )
-
-  if (resolvedEvent.kind === "not_a_pr") {
-    logger.info("not a PR event — skipping", { reason: resolvedEvent.reason })
-    return {
-      ...SKIPPED_RESULT_BASE,
-      reviewUrl: "",
-      skippedReason: resolvedEvent.reason,
-    }
-  }
-
-  // Step 3: PR context
-  const prContext: PrContext =
-    resolvedEvent.kind === "complete"
-      ? resolvedEvent.context
-      : await githubClient.fetchPullRequest({
-          prNumber: resolvedEvent.prNumber,
-        })
 
   const postSkipReview = async (reason: string): Promise<OrchestrateResult> => {
     const body = buildSkipBody(reason)
@@ -604,6 +680,103 @@ export const orchestrate = async (
     skippedReason: "",
     reviewSummaryMarkdown,
     costSummaryMarkdown,
+  }
+}
+
+/** Runs the full review pipeline — event resolution through review posting —
+ *  with all I/O injected through deps so the pipeline is fully testable.
+ *  Brackets the pipeline with the branded check run: created once the head
+ *  SHA is known, completed with the outcome (or `failure` on a thrown
+ *  pipeline error, which still propagates). */
+export const orchestrate = async (
+  deps: OrchestrateDeps,
+  logger: Logger,
+): Promise<OrchestrateResult> => {
+  const { config, githubClient } = deps
+
+  // Step 1: fail-fast validation — throws before any network call
+  const severityThreshold = resolveSeverityThreshold(config.severityThreshold)
+  const phases = resolvePhases(config.phases)
+
+  logger.info("review settings from action inputs", {
+    model: config.model,
+    fallbackModel: config.fallbackModel || null,
+    severityThreshold: config.severityThreshold,
+    maxFindings: config.maxFindings ?? "uncapped",
+    traceRelatedFiles: config.traceRelatedFiles,
+    maxRelatedFiles: config.maxRelatedFiles,
+    maxRelatedDocs: config.maxRelatedDocs,
+    maxScanFiles: config.maxScanFiles,
+    maxScanBytes: config.maxScanBytes,
+    priorityDocs: config.priorityDocs,
+    contextBudgetTokens: config.contextBudgetTokens,
+    conventionsFile: config.conventionsFile,
+    costSummary: config.costSummary,
+  })
+
+  // Step 2: event resolution
+  const resolvedEvent = resolvePullRequestEvent(
+    {
+      eventName: deps.eventName,
+      payload: deps.payload,
+      prNumberOverride: config.prNumberOverride,
+    },
+    logger,
+  )
+
+  if (resolvedEvent.kind === "not_a_pr") {
+    logger.info("not a PR event — skipping", { reason: resolvedEvent.reason })
+    return {
+      ...SKIPPED_RESULT_BASE,
+      reviewUrl: "",
+      skippedReason: resolvedEvent.reason,
+    }
+  }
+
+  // Step 3: PR context
+  const prContext: PrContext =
+    resolvedEvent.kind === "complete"
+      ? resolvedEvent.context
+      : await githubClient.fetchPullRequest({
+          prNumber: resolvedEvent.prNumber,
+        })
+
+  // Step 3.5: open the branded check run now that the head SHA is known
+  const checkRun = await createCheckRunSafely(
+    { githubClient, headSha: prContext.headSha },
+    logger,
+  )
+
+  try {
+    const result = await runReviewPipeline(
+      { deps, prContext, severityThreshold, phases },
+      logger,
+    )
+    const completion = resolveCheckRunCompletion({
+      result,
+      costSummaryMarkdown: config.costSummary
+        ? result.costSummaryMarkdown
+        : null,
+    })
+    await completeCheckRunSafely(
+      { githubClient, checkRun, ...completion },
+      logger,
+    )
+    return result
+  } catch (pipelineError) {
+    await completeCheckRunSafely(
+      {
+        githubClient,
+        checkRun,
+        conclusion: "failure",
+        output: {
+          title: "Error — review did not complete",
+          summary: describeError(pipelineError),
+        },
+      },
+      logger,
+    )
+    throw pipelineError
   }
 }
 

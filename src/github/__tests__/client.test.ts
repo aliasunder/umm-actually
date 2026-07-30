@@ -24,6 +24,8 @@ const makeOctokitStub = ({
   listCommentsResponses = [],
   createCommentResponses = [],
   updateCommentResponses = [],
+  checksCreateResponses = [],
+  checksUpdateResponses = [],
   graphqlResponses = [],
 }: {
   getResponses?: StubResponse[]
@@ -32,6 +34,8 @@ const makeOctokitStub = ({
   listCommentsResponses?: StubResponse[]
   createCommentResponses?: StubResponse[]
   updateCommentResponses?: StubResponse[]
+  checksCreateResponses?: StubResponse[]
+  checksUpdateResponses?: StubResponse[]
   graphqlResponses?: GraphqlResponse[]
 } = {}) => {
   const getCalls: Record<string, unknown>[] = []
@@ -40,6 +44,8 @@ const makeOctokitStub = ({
   const listCommentsCalls: Record<string, unknown>[] = []
   const createCommentCalls: Record<string, unknown>[] = []
   const updateCommentCalls: Record<string, unknown>[] = []
+  const checksCreateCalls: Record<string, unknown>[] = []
+  const checksUpdateCalls: Record<string, unknown>[] = []
   const graphqlCalls: {
     query: string
     parameters?: Record<string, unknown>
@@ -121,6 +127,24 @@ const makeOctokitStub = ({
           )
         },
       },
+      checks: {
+        create: async (params) => {
+          checksCreateCalls.push(params)
+          return takeNext(
+            checksCreateResponses,
+            checksCreateCalls.length,
+            "checks.create",
+          )
+        },
+        update: async (params) => {
+          checksUpdateCalls.push(params)
+          return takeNext(
+            checksUpdateResponses,
+            checksUpdateCalls.length,
+            "checks.update",
+          )
+        },
+      },
     },
   }
 
@@ -132,6 +156,8 @@ const makeOctokitStub = ({
     listCommentsCalls,
     createCommentCalls,
     updateCommentCalls,
+    checksCreateCalls,
+    checksUpdateCalls,
     graphqlCalls,
   }
 }
@@ -1240,5 +1266,94 @@ describe("upsertSummaryComment", () => {
     })
 
     expect(result).toEqual({ url: commentUrl, created: true })
+  })
+})
+
+describe("createCheckRun", () => {
+  it("creates an in-progress check run and returns its id", async () => {
+    const stub = makeOctokitStub({
+      checksCreateResponses: [{ data: { id: 987 } }],
+    })
+    const { client } = makeClient(stub)
+
+    const result = await client.createCheckRun({
+      headSha: "abc123def456",
+      name: "umm-actually",
+    })
+
+    expect(result).toEqual({ checkRunId: 987 })
+    expect(stub.checksCreateCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        name: "umm-actually",
+        head_sha: "abc123def456",
+        status: "in_progress",
+      },
+    ])
+  })
+
+  it("throws on an unexpected response shape", async () => {
+    const stub = makeOctokitStub({
+      checksCreateResponses: [{ data: { html_url: "no id here" } }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.createCheckRun({ headSha: "abc123def456", name: "umm-actually" }),
+    ).rejects.toThrow("unexpected check run response shape")
+  })
+
+  it("propagates a permission rejection to the caller", async () => {
+    const stub = makeOctokitStub({
+      checksCreateResponses: [{ error: makeStatusError(403) }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.createCheckRun({ headSha: "abc123def456", name: "umm-actually" }),
+    ).rejects.toThrow("HTTP 403")
+  })
+})
+
+describe("updateCheckRun", () => {
+  it("completes the check run with the given conclusion and output", async () => {
+    const stub = makeOctokitStub({ checksUpdateResponses: [{ data: {} }] })
+    const { client } = makeClient(stub)
+
+    await client.updateCheckRun({
+      checkRunId: 987,
+      conclusion: "neutral",
+      output: { title: "2 finding(s)", summary: "Reviewed with `test/model`" },
+    })
+
+    expect(stub.checksUpdateCalls).toEqual([
+      {
+        owner: "aliasunder",
+        repo: "fixture",
+        check_run_id: 987,
+        status: "completed",
+        conclusion: "neutral",
+        output: {
+          title: "2 finding(s)",
+          summary: "Reviewed with `test/model`",
+        },
+      },
+    ])
+  })
+
+  it("propagates an update rejection to the caller", async () => {
+    const stub = makeOctokitStub({
+      checksUpdateResponses: [{ error: makeStatusError(403) }],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.updateCheckRun({
+        checkRunId: 987,
+        conclusion: "success",
+        output: { title: "No findings above threshold", summary: "clean" },
+      }),
+    ).rejects.toThrow("HTTP 403")
   })
 })
