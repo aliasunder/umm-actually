@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs"
 import parseDiff from "parse-diff"
 import { describe, expect, it } from "vitest"
 import type { ActionConfig } from "../config.js"
-import type { GithubClient } from "../github/client.js"
+import type {
+  CheckRunConclusion,
+  CheckRunOutput,
+  GithubClient,
+} from "../github/client.js"
 import type { PrContext } from "../github/event.js"
 import type { ContextReader } from "../context/workspace.js"
 import type {
@@ -264,6 +268,14 @@ type UpsertSummaryCommentParams = {
   anchor: string
 }
 
+type CreateCheckRunParams = { headSha: string; name: string }
+
+type UpdateCheckRunParams = {
+  checkRunId: number
+  conclusion: CheckRunConclusion
+  output: CheckRunOutput
+}
+
 type RecordingStubs = {
   deps: OrchestrateDeps
   fetchPullRequestCalls: { prNumber: number }[]
@@ -274,6 +286,8 @@ type RecordingStubs = {
   fetchBotReviewCommentsCalls: { prNumber: number }[]
   fetchBotIssueCommentsCalls: { prNumber: number }[]
   upsertSummaryCommentCalls: UpsertSummaryCommentParams[]
+  createCheckRunCalls: CreateCheckRunParams[]
+  updateCheckRunCalls: UpdateCheckRunParams[]
   readConventionsCalls: { conventionsFile: string }[]
   readChangedFilesCalls: ReadChangedFilesParams[]
   findRelatedFilesCalls: FindRelatedFilesParams[]
@@ -301,6 +315,8 @@ const makeOrchestrateDeps = (
   const fetchBotReviewCommentsCalls: { prNumber: number }[] = []
   const fetchBotIssueCommentsCalls: { prNumber: number }[] = []
   const upsertSummaryCommentCalls: UpsertSummaryCommentParams[] = []
+  const createCheckRunCalls: CreateCheckRunParams[] = []
+  const updateCheckRunCalls: UpdateCheckRunParams[] = []
   const readConventionsCalls: { conventionsFile: string }[] = []
   const readChangedFilesCalls: ReadChangedFilesParams[] = []
   const findRelatedFilesCalls: FindRelatedFilesParams[] = []
@@ -350,6 +366,13 @@ const makeOrchestrateDeps = (
         url: "https://github.com/test/comment/1",
         created: true,
       }
+    },
+    createCheckRun: async (params) => {
+      createCheckRunCalls.push(params)
+      return { checkRunId: 555 }
+    },
+    updateCheckRun: async (params) => {
+      updateCheckRunCalls.push(params)
     },
     ...overrides.githubClient,
   }
@@ -402,6 +425,8 @@ const makeOrchestrateDeps = (
     fetchBotReviewCommentsCalls,
     fetchBotIssueCommentsCalls,
     upsertSummaryCommentCalls,
+    createCheckRunCalls,
+    updateCheckRunCalls,
     readConventionsCalls,
     readChangedFilesCalls,
     findRelatedFilesCalls,
@@ -1722,6 +1747,177 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(priorBotCommentsFrom(stubs)).toEqual([])
+    })
+  })
+
+  describe("check run lifecycle", () => {
+    it("creates the check run with the head SHA and completes it neutral with the findings count", async () => {
+      const stubs = makeOrchestrateDeps()
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.createCheckRunCalls).toEqual([
+        { headSha: fixturePrContext.headSha, name: "umm-actually" },
+      ])
+      expect(stubs.updateCheckRunCalls).toEqual([
+        {
+          checkRunId: 555,
+          conclusion: "neutral",
+          output: {
+            title: `${expectedSelection.selected.length} finding(s)`,
+            summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} finding(s) posted.\n\n${expectedCostSummary}`,
+          },
+        },
+      ])
+    })
+
+    it("completes success when the review posts no findings", async () => {
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "clean", findings: [] },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.updateCheckRunCalls).toEqual([
+        {
+          checkRunId: 555,
+          conclusion: "success",
+          output: {
+            title: "No findings above threshold",
+            summary: `Reviewed with \`test/model\` — no findings above threshold.\n\n${expectedCostSummary}`,
+          },
+        },
+      ])
+    })
+
+    it("omits the cost section when cost_summary is disabled", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { costSummary: false },
+        fixtureResult: {
+          review: { analysis: "clean", findings: [] },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.updateCheckRunCalls).toEqual([
+        {
+          checkRunId: 555,
+          conclusion: "success",
+          output: {
+            title: "No findings above threshold",
+            summary:
+              "Reviewed with `test/model` — no findings above threshold.",
+          },
+        },
+      ])
+    })
+
+    it("completes neutral with the skip reason on skip paths", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "too_large" as const }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.updateCheckRunCalls).toEqual([
+        {
+          checkRunId: 555,
+          conclusion: "neutral",
+          output: {
+            title: "Skipped — diff exceeds GitHub's diff API limits",
+            summary: "Review skipped: diff exceeds GitHub's diff API limits",
+          },
+        },
+      ])
+    })
+
+    it("creates no check run for non-PR events", async () => {
+      const stubs = makeOrchestrateDeps({
+        eventName: "push",
+        payload: {},
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.createCheckRunCalls).toEqual([])
+      expect(stubs.updateCheckRunCalls).toEqual([])
+    })
+
+    it("creates no check run when input validation fails", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { severityThreshold: "invalid" },
+      })
+      const logger = createTestLogger()
+
+      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow("severity")
+      expect(stubs.createCheckRunCalls).toEqual([])
+    })
+
+    it("completes failure and rethrows when the pipeline errors", async () => {
+      const stubs = makeOrchestrateDeps({
+        generateFindings: async () => {
+          throw new Error("model exploded")
+        },
+      })
+      const logger = createTestLogger()
+
+      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+        "model exploded",
+      )
+      expect(stubs.updateCheckRunCalls).toEqual([
+        {
+          checkRunId: 555,
+          conclusion: "failure",
+          output: {
+            title: "Error — review did not complete",
+            summary: "[Error]: model exploded",
+          },
+        },
+      ])
+    })
+
+    it("continues the review without a check run when creation fails", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          createCheckRun: async () => {
+            throw new Error("HTTP 403")
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(expectedSelection.selected),
+      ])
+      expect(stubs.updateCheckRunCalls).toEqual([])
+    })
+
+    it("returns the review result even when completing the check run fails", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          updateCheckRun: async () => {
+            throw new Error("HTTP 500")
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(expectedSelection.selected.length)
     })
   })
 })
