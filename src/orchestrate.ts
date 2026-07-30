@@ -290,9 +290,10 @@ const completeCheckRunSafely = async (
 }
 
 /** Maps the pipeline outcome to the check's conclusion and details page.
- *  Findings and skips conclude `neutral` — the review is informational,
- *  not a merge gate — so `success` is reserved for a clean review and
- *  `failure` for the pipeline itself erroring. */
+ *  The conclusion grades the run, not the code: a completed review is
+ *  `success` whether or not it posted findings (the count lives in the
+ *  title), a skip is `neutral` (no review happened), and `failure` is
+ *  reserved for the pipeline itself erroring. */
 const resolveCheckRunCompletion = ({
   result,
   costSummaryMarkdown,
@@ -320,7 +321,7 @@ const resolveCheckRunCompletion = ({
     }
   }
   return {
-    conclusion: "neutral",
+    conclusion: "success",
     output: {
       title: `${result.findingsCount} finding(s)`,
       summary: `Reviewed with \`${result.modelUsed}\` — ${result.findingsCount} finding(s) posted.${costSection}`,

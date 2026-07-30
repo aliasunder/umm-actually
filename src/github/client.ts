@@ -82,8 +82,9 @@ export type OctokitLike = {
   }
 }
 
-/** The check never gates merge: findings and skips conclude `neutral`,
- *  `failure` is reserved for the pipeline itself erroring. */
+/** The conclusion grades the run, not the code: a completed review is
+ *  `success` regardless of findings, a skip is `neutral`, and `failure`
+ *  is reserved for the pipeline itself erroring. */
 export type CheckRunConclusion = "success" | "neutral" | "failure"
 
 export type CheckRunOutput = { title: string; summary: string }

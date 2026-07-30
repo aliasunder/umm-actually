@@ -114,7 +114,7 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 7. Filters remaining findings by severity threshold, deduplicates overlapping findings within the run, and caps if configured
 8. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
 9. Posts one review with inline comments (invisible body); beyond-diff findings post as standalone PR comments; every run upserts a status comment with cross-run totals
-10. Completes the check run with the outcome — `success` for a clean review, `neutral` for findings or a skip (the review is informational, not a merge gate), `failure` only when the pipeline itself errors
+10. Completes the check run with the outcome — the conclusion grades the run, not the code: `success` for any completed review (with or without findings — the count is in the check title), `neutral` for a skip, `failure` only when the pipeline itself errors
 
 ## Non-finding filter
 

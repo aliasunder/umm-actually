@@ -1751,7 +1751,7 @@ describe("orchestrate", () => {
   })
 
   describe("check run lifecycle", () => {
-    it("creates the check run with the head SHA and completes it neutral with the findings count", async () => {
+    it("creates the check run with the head SHA and completes it success with the findings count", async () => {
       const stubs = makeOrchestrateDeps()
       const logger = createTestLogger()
 
@@ -1763,7 +1763,7 @@ describe("orchestrate", () => {
       expect(stubs.updateCheckRunCalls).toEqual([
         {
           checkRunId: 555,
-          conclusion: "neutral",
+          conclusion: "success",
           output: {
             title: `${expectedSelection.selected.length} finding(s)`,
             summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} finding(s) posted.\n\n${expectedCostSummary}`,
