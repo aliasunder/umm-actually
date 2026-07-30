@@ -1765,8 +1765,26 @@ describe("orchestrate", () => {
           checkRunId: 555,
           conclusion: "success",
           output: {
-            title: `${expectedSelection.selected.length} finding(s)`,
-            summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} finding(s) posted.\n\n${expectedCostSummary}`,
+            title: `${expectedSelection.selected.length} findings`,
+            summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.\n\n${expectedCostSummary}`,
+          },
+        },
+      ])
+    })
+
+    it("titles the check with the singular form for exactly one finding", async () => {
+      const stubs = makeOrchestrateDeps({ config: { maxFindings: 1 } })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.updateCheckRunCalls).toEqual([
+        {
+          checkRunId: 555,
+          conclusion: "success",
+          output: {
+            title: "1 finding",
+            summary: `Reviewed with \`test/model\` — 1 finding posted.\n\n${expectedCostSummary}`,
           },
         },
       ])

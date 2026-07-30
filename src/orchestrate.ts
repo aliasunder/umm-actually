@@ -320,11 +320,15 @@ const resolveCheckRunCompletion = ({
       },
     }
   }
+  const findingsLabel =
+    result.findingsCount === 1
+      ? "1 finding"
+      : `${result.findingsCount} findings`
   return {
     conclusion: "success",
     output: {
-      title: `${result.findingsCount} finding(s)`,
-      summary: `Reviewed with \`${result.modelUsed}\` — ${result.findingsCount} finding(s) posted.${costSection}`,
+      title: findingsLabel,
+      summary: `Reviewed with \`${result.modelUsed}\` — ${findingsLabel} posted.${costSection}`,
     },
   }
 }
