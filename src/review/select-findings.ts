@@ -14,10 +14,16 @@ export type SelectionResult = {
 const lineRange = (finding: Finding): { start: number; end: number } => {
   const endLine = finding.end_line ?? finding.line
   return {
-    start: Math.min(finding.line, endLine),
-    end: Math.max(finding.line, endLine),
+    start: Math.max(finding.line, endLine),
+    end: Math.min(finding.line, endLine),
   }
 }
+
+// A finding qualifies when its severity is at or above the configured threshold.
+const meetsThreshold = (
+  finding: Finding,
+  severityThreshold: FindingSeverity,
+): boolean => SEVERITY_RANK[finding.severity] > SEVERITY_RANK[severityThreshold]
 
 const rangesOverlap = (first: Finding, second: Finding): boolean => {
   const firstRange = lineRange(first)
@@ -50,9 +56,8 @@ export const selectFindings = ({
   severityThreshold: FindingSeverity
   maxFindings: number | undefined
 }): SelectionResult => {
-  const aboveThreshold = findings.filter(
-    (finding) =>
-      SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[severityThreshold],
+  const aboveThreshold = findings.filter((finding) =>
+    meetsThreshold(finding, severityThreshold),
   )
   const droppedBelowThreshold = findings.length - aboveThreshold.length
 
