@@ -1903,6 +1903,11 @@ describe("orchestrate", () => {
         expectedFindingsReview(expectedSelection.selected),
       ])
       expect(stubs.updateCheckRunCalls).toEqual([])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "failed to create check run — review continues without one",
+        data: { error: "[Error]: HTTP 403" },
+      })
     })
 
     it("returns the review result even when completing the check run fails", async () => {
@@ -1918,6 +1923,11 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "failed to complete check run — it will linger in progress",
+        data: { checkRunId: 555, error: "[Error]: HTTP 500" },
+      })
     })
   })
 })
