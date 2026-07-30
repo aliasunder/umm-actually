@@ -45,6 +45,8 @@ jobs:
           private-key: ${{ secrets.UMM_PRIVATE_KEY }}
           permission-contents: read
           permission-pull-requests: write
+          # Optional — enables the branded check run (App avatar in the checks list)
+          permission-checks: write
 
       - uses: ./
         with:

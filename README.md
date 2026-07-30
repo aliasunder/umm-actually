@@ -12,12 +12,15 @@ LLM-powered pull request review as a GitHub Action. One consolidated review per 
 - Model-agnostic via OpenRouter — pick your model, see your per-call costs
 - Findings that can't be anchored to the diff (e.g. callers outside the changed files) are posted as standalone comments on the PR
 - PRs with oversized diffs are skipped gracefully with a body-only review stating the reason
+- Reports as its **own branded check run** in the PR checks list — the App's avatar, the findings count as the check title, and the outcome (with per-run cost) on the check's details page
 
 ## Setup
 
 umm-actually runs as a Docker-based action. It needs a GitHub token (for fetching the diff and posting the review) and an OpenRouter API key.
 
 For the best experience, use a [GitHub App](https://docs.github.com/en/apps/creating-github-apps) installation token so reviews are attributed to a bot identity rather than a personal account.
+
+Granting the App **Checks: Read & write** additionally puts the review in the PR checks list as a branded check run (the App's avatar instead of the generic Actions logo). The permission is optional — without `checks: write` on the token, the review runs unbranded and everything else works the same.
 
 ## Usage
 
@@ -102,7 +105,7 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 
 ## How it works
 
-1. Resolves the PR from the triggering event (supports `pull_request`, `pull_request_target`, and `issue_comment` events)
+1. Resolves the PR from the triggering event (supports `pull_request`, `pull_request_target`, and `issue_comment` events), then opens a check run under the token's identity (best-effort — skipped when the token lacks `checks: write`)
 2. Fetches the unified diff via the GitHub API — PRs that exceed the API's diff size limit are skipped
 3. Reads the conventions file and changed source files (token-budgeted), traces imports to find related code files, and scans doc files (`.md`, `.json`) for mentions of changed paths
 4. Builds a structured prompt with randomized delimiter nonces (prompt injection defense); on re-runs, prior bot comment bodies are included so the model can self-suppress conceptual duplicates. Sends it to OpenRouter
@@ -111,6 +114,7 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 7. Filters remaining findings by severity threshold, deduplicates overlapping findings within the run, and caps if configured
 8. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
 9. Posts one review with inline comments (invisible body); beyond-diff findings post as standalone PR comments; every run upserts a status comment with cross-run totals
+10. Completes the check run with the outcome — `success` for a clean review, `neutral` for findings or a skip (the review is informational, not a merge gate), `failure` only when the pipeline itself errors
 
 ## Non-finding filter
 
