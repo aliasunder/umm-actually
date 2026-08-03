@@ -121,8 +121,15 @@ export const coalesceAnchors = (anchors: AnchorEntry[]): AnchorEntry[] => {
   }, [])
 }
 
-const findingTag = (finding: Finding): string =>
-  `**[${finding.severity}/${finding.category}]** ${finding.title}`
+/** Title-first header: bold title, then one plain-language metadata line.
+ *  Every axis names itself ("Medium severity", "high confidence") because
+ *  consumer repos have no decoder — the schema and rubric live in this
+ *  repo, not where the finding is read. */
+const findingHeader = (finding: Finding): string => {
+  const severityLabel = `${finding.severity.charAt(0).toUpperCase()}${finding.severity.slice(1)} severity`
+  const categoryLabel = finding.category.replaceAll("_", " ")
+  return `**${finding.title}**\n${severityLabel} · ${categoryLabel} · ${finding.confidence} confidence`
+}
 
 const suggestionBlock = (finding: Finding): string => {
   if (!finding.suggestion) return ""
@@ -146,7 +153,7 @@ const renderCommentBody = (
     ? `\n\n_Anchored near line ${snappedFromLine} (the reported line is not part of the diff)._`
     : ""
   const anchor = `\n\n<!-- umm-actually:${computeAnchorKey(finding)} -->`
-  return `${findingTag(finding)} _(confidence: ${finding.confidence})_
+  return `${findingHeader(finding)}
 
 ${finding.description}
 
@@ -289,7 +296,7 @@ export const STATUS_ANCHOR = "<!-- umm-actually-status -->"
  *  a visible event to PR watchers, unlike an in-place status update. Carries
  *  its dedup anchor like any inline comment. */
 export const renderStandaloneFinding = (finding: Finding): string => {
-  return `${findingTag(finding)} _(confidence: ${finding.confidence})_
+  return `${findingHeader(finding)}
 
 \`${finding.file}:${finding.line}\` — beyond the diff's line ranges, in code the changes touch or depend on.
 

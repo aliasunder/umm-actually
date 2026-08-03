@@ -46,7 +46,8 @@ describe("mapFindingsToReview", () => {
         path: "src/greeter.ts",
         line: 145,
         side: "RIGHT",
-        body: `**[medium/correctness]** Whitespace-only keys pass the empty-key guard _(confidence: high)_
+        body: `**Whitespace-only keys pass the empty-key guard**
+Medium severity · correctness · high confidence
 
 The guard rejects only the exact empty string.
 
@@ -264,8 +265,8 @@ describe("renderStandaloneFinding", () => {
 
     const body = renderStandaloneFinding(finding)
 
-    expect(body)
-      .toBe(`**[medium/correctness]** Whitespace-only keys pass the empty-key guard _(confidence: high)_
+    expect(body).toBe(`**Whitespace-only keys pass the empty-key guard**
+Medium severity · correctness · high confidence
 
 \`src/untouched.ts:30\` — beyond the diff's line ranges, in code the changes touch or depend on.
 
@@ -274,6 +275,21 @@ The guard rejects only the exact empty string.
 **Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
 
 <!-- umm-actually:src/untouched.ts:correctness:30 -->`)
+  })
+
+  it("humanizes multi-word category slugs in the header but keeps the raw slug in the anchor", () => {
+    const finding = makeFinding({
+      file: "src/untouched.ts",
+      line: 30,
+      category: "subtle_bugs",
+    })
+
+    const body = renderStandaloneFinding(finding)
+
+    expect(body).toContain("Medium severity · subtle bugs · high confidence")
+    expect(body).toContain(
+      "<!-- umm-actually:src/untouched.ts:subtle_bugs:30 -->",
+    )
   })
 
   it("renders the suggestion fence between failure scenario and anchor", () => {
@@ -285,8 +301,8 @@ The guard rejects only the exact empty string.
 
     const body = renderStandaloneFinding(finding)
 
-    expect(body)
-      .toBe(`**[medium/correctness]** Whitespace-only keys pass the empty-key guard _(confidence: high)_
+    expect(body).toBe(`**Whitespace-only keys pass the empty-key guard**
+Medium severity · correctness · high confidence
 
 \`src/untouched.ts:30\` — beyond the diff's line ranges, in code the changes touch or depend on.
 
