@@ -84,6 +84,24 @@ describe("buildSystemPrompt", () => {
     )
   })
 
+  it("carries the full severity rubric including the behavioral-tradeoff low tier", () => {
+    const systemPrompt = buildSystemPrompt({ phase: combinedPhase })
+
+    expect(systemPrompt).toContain(
+      [
+        "Severity rubric:",
+        "- critical: exploitable security issue, data loss, or corruption",
+        "- high: incorrect behavior on realistic input",
+        "- medium: convention violation with a concrete failure mode, or a test that",
+        "  passes for the wrong reason or cannot fail for the behavior its name",
+        "  claims (loose or decomposed assertions on a derivable exact value)",
+        "- low: convention or readability issue grounded in the conventions file, or",
+        "  a minor behavioral tradeoff with bounded impact (a judgment call worth",
+        "  surfacing, not a defect)",
+      ].join("\n"),
+    )
+  })
+
   it("bans declarative confirmation titles and non-action suggestions in the output discipline", () => {
     const systemPrompt = buildSystemPrompt({ phase: combinedPhase })
 

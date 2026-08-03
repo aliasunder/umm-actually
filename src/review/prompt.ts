@@ -44,7 +44,9 @@ const SEVERITY_RUBRIC = `Severity rubric:
 - medium: convention violation with a concrete failure mode, or a test that
   passes for the wrong reason or cannot fail for the behavior its name
   claims (loose or decomposed assertions on a derivable exact value)
-- low: convention or readability issue grounded in the conventions file
+- low: convention or readability issue grounded in the conventions file, or
+  a minor behavioral tradeoff with bounded impact (a judgment call worth
+  surfacing, not a defect)
 
 Confidence reflects how certain you are the finding is real (high = verified
 against the code shown; low = plausible but depends on unseen code).
