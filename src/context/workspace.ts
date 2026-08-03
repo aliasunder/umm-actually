@@ -397,7 +397,14 @@ export const createContextReader = (
           return filePaths
         }
         const fileStats = await stat(path.join(resolvedRoot, entryPath))
-        if (fileStats.size > config.maxScanBytes) continue
+        if (fileStats.size > config.maxScanBytes) {
+          logger.info("skipped oversized file during workspace scan", {
+            path: entryPath,
+            bytes: fileStats.size,
+            maxScanBytes: config.maxScanBytes,
+          })
+          continue
+        }
         filePaths.push(entryPath)
       }
     }
