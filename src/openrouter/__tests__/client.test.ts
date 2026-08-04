@@ -113,6 +113,7 @@ describe("requestReview", () => {
             { role: "system", content: "system prompt" },
             { role: "user", content: "user prompt" },
           ],
+          maxCompletionTokens: 128_000,
           responseFormat: {
             type: "json_schema",
             jsonSchema: {
