@@ -36,6 +36,7 @@ export type StructuredReviewResult = {
 export type ChatRequestSubset = {
   model: string
   messages: { role: "system" | "user"; content: string }[]
+  maxCompletionTokens: number
   responseFormat: {
     type: "json_schema"
     jsonSchema: {
@@ -147,6 +148,8 @@ const buildChatRequest = ({
     { role: "system", content: systemPrompt },
     { role: "user", content: userPrompt },
   ],
+  // High ceiling — providers clamp to each model's actual max output
+  maxCompletionTokens: 128_000,
   responseFormat: {
     type: "json_schema",
     jsonSchema: {
