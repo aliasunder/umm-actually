@@ -14,10 +14,16 @@ const NON_FINDING_PREFIX = /^(?:n\/?a|not applicable|placeholder)\b/i
  *  of the guards catch this input" never match, while observed confirmations
  *  (always separator-delimited, e.g. "No failure — the code handles…") do. */
 const CONFIRMATION_PREFIX =
-  /^(?:none|no failure|no concrete failure scenario|no bug|no action needed|no change needed)\s*(?:[—–:.-]|$)/i
+  /^(?:none|not a finding|no failure|no concrete failure scenario|no bug|no (?:further )?action needed|no change needed)\s*(?:[—–:.-]|$)/i
 
 /** Declarative confirmation titles — "…is correct" / "…is accurate" — end-anchored. */
 const CONFIRMATION_TITLE_SUFFIX = /\bis\s+(?:correct|accurate)\s*\.?\s*$/i
+
+/** Prior-finding resolution confirmations — "Prior bot finding addressed: …"
+ *  — start-anchored with a required resolution verb, so real findings about
+ *  prior-comment handling ("Prior bot comments cap drops newest…") survive. */
+const CONFIRMATION_TITLE_PREFIX =
+  /^prior (?:bot )?findings? (?:addressed|resolved|fixed)\b/i
 
 /** Conclusions leaked to the end of a rambling failure_scenario
  *  ("…No bug here.", "…my analysis was wrong.") — self-referential verdicts
@@ -39,6 +45,7 @@ const isNonFinding = (finding: Finding): boolean => {
   const failureScenario = finding.failure_scenario.trim()
   if (hasNonFindingSignal(title)) return true
   if (CONFIRMATION_TITLE_SUFFIX.test(title)) return true
+  if (CONFIRMATION_TITLE_PREFIX.test(title)) return true
   if (hasNonFindingSignal(failureScenario)) return true
   if (CONFIRMATION_SCENARIO_SUFFIX.test(failureScenario)) return true
   if (finding.suggestion && hasNonFindingSignal(finding.suggestion.trim())) {
