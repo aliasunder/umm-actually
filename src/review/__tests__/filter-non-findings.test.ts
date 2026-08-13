@@ -412,6 +412,16 @@ describe("filterNonFindings", () => {
     expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
   })
 
+  it("drops a finding whose title starts with 'Prior finding fixed'", () => {
+    const finding = makeFinding({
+      title: "Prior finding fixed — null check added to the retry loop",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
   it("drops a finding whose failure_scenario starts with 'Not a finding —'", () => {
     const finding = makeFinding({
       failure_scenario:
