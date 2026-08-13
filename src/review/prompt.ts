@@ -69,13 +69,15 @@ const OUTPUT_DISCIPLINE = `OUTPUT DISCIPLINE — field constraints:
   there is no finding — do not emit it.
 - "failure_scenario": a concrete input or state that triggers the problem
   and what goes wrong. A failure_scenario starting with "N/A", "None",
-  "Not applicable", or "Placeholder" means there is no real finding — do
-  not emit the finding at all.
+  "Not a finding", "Not applicable", or "Placeholder" means there is no
+  real finding — do not emit the finding at all.
 
 HARD PROHIBITION — do not report a finding whose conclusion is "no bug",
-"this is correct", "working as designed", "correct behavior", or any
-equivalent. If your analysis concludes the code is correct, record that
-conclusion in "analysis" and move on — do not emit a finding for it.`
+"this is correct", "working as designed", "correct behavior", "a prior
+finding is now addressed", or any equivalent. If your analysis concludes
+the code is correct — including that a previously posted bot comment has
+been resolved by this revision — record that conclusion in "analysis" and
+move on — do not emit a finding for it.`
 
 const ANCHORING_CONTRACT = `Line anchoring: "line" and "end_line" use the new-file line numbers printed in
 the annotated diff. For inline placement, reference only numbers that appear
@@ -204,7 +206,7 @@ export const buildUserPrompt = ({
   const priorBotCommentsSection =
     priorBotComments.length === 0
       ? ""
-      : `<${priorBotCommentsTag} note="findings already posted on this PR — do not re-report the same issues, even at different locations">\n${priorBotComments.join("\n\n---\n\n")}\n</${priorBotCommentsTag}>`
+      : `<${priorBotCommentsTag} note="findings already posted on this PR — do not re-report the same issues, even at different locations, and do not report that any of them are now addressed">\n${priorBotComments.join("\n\n---\n\n")}\n</${priorBotCommentsTag}>`
 
   const sections = [
     metadataSection,

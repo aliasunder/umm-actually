@@ -120,8 +120,8 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 
 Models sometimes report "findings" that conclude the code is fine — titled `N/A — …` or `…is correct`, with suggestions like "No action needed". The system prompt prohibits these, but models don't always comply, so every finding also passes a deterministic filter before severity threshold, cross-run dedup, and cap. A finding is dropped when:
 
-- its **title**, **failure_scenario**, or **suggestion** starts with a non-finding signal — `N/A`, `not applicable`, `placeholder`, or a separator-delimited confirmation phrase (`none — …`, `no failure — …`, `no concrete failure scenario — …`, `no bug — …`, `no action needed — …`, `no change needed — …`)
-- its **title** ends with a declarative confirmation — `…is correct` or `…is accurate`
+- its **title**, **failure_scenario**, or **suggestion** starts with a non-finding signal — `N/A`, `not applicable`, `placeholder`, or a separator-delimited confirmation phrase (`none — …`, `not a finding — …`, `no failure — …`, `no concrete failure scenario — …`, `no bug — …`, `no (further) action needed — …`, `no change needed — …`)
+- its **title** ends with a declarative confirmation — `…is correct` or `…is accurate` — or starts with a prior-finding resolution confirmation — `Prior (bot) finding(s) addressed/resolved/fixed …`
 - its **failure_scenario** ends with a leaked conclusion — `…no bug` / `…no bug here` or `…analysis was wrong`
 
 The patterns are deliberately anchored to the start or end of a field, so real findings survive: a scenario like "No failure occurs until the third retry…" or "None of the guards catch this input" never matches. Dropped counts are logged per run (`non-finding filter applied to model output`).

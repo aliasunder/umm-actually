@@ -389,4 +389,68 @@ describe("filterNonFindings", () => {
 
     expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
   })
+
+  // --- Prior-finding resolution confirmations (observed live 2026-08-13) ---
+
+  it("drops a finding whose title starts with 'Prior bot finding addressed:'", () => {
+    const finding = makeFinding({
+      title: "Prior bot finding addressed: cache now keyed by vault path",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose title starts with 'Prior findings resolved'", () => {
+    const finding = makeFinding({
+      title: "Prior findings resolved by the vaultPath-keyed cache",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose failure_scenario starts with 'Not a finding —'", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "Not a finding — confirmation that a prior issue is fixed. A second vault's config is correctly returned via the keyed cache.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose suggestion starts with 'No further action needed —'", () => {
+    const finding = makeFinding({
+      suggestion: "No further action needed — the retry path is covered.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("keeps a finding whose title mentions prior bot comments without a resolution verb", () => {
+    const finding = makeFinding({
+      title: "Prior bot findings are dropped when the comment cap truncates",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  it("keeps a finding whose failure_scenario starts with 'No further retries'", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "No further retries occur after the third failure — requests are dropped silently.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
 })
