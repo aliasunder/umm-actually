@@ -53,6 +53,5 @@ jobs:
           github_token: ${{ steps.app-token.outputs.token }}
           openrouter_api_key: ${{ secrets.OPENROUTER_KEY }}
           model: ${{ vars.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4-6' }}
-          # Explicit fallback needed: bare vars pass "" when unset, which would
-          # override the action default and fail positive-integer validation
-          request_timeout_seconds: ${{ vars.UMM_REQUEST_TIMEOUT_SECONDS || '600' }}
+          # Unset passes "" — the action treats empty as its 600 default
+          request_timeout_seconds: ${{ vars.UMM_REQUEST_TIMEOUT_SECONDS }}

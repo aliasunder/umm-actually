@@ -26,7 +26,13 @@ const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
  *  request would time out instantly instead of being bounded. */
 const maxTimeoutSeconds = 2_147_483
 
+/** Mirrors the action.yml default — keep the two in sync. */
+const defaultRequestTimeoutSeconds = 600
+
 const timerSafeSeconds = z.string().transform((value, ctx) => {
+  // Empty string means "not provided": workflows wiring a bare unset repo
+  // variable pass "", which would otherwise override the action.yml default.
+  if (!value) return defaultRequestTimeoutSeconds
   const parsed = parsePositiveInteger(value, ctx)
   if (parsed > maxTimeoutSeconds) {
     ctx.addIssue({
