@@ -61,7 +61,10 @@ export type OpenRouterLike = {
     ): Promise<unknown>
   }
   generations?: {
-    getGeneration(request: { id: string }): Promise<unknown>
+    getGeneration(
+      request: { id: string },
+      options?: { timeoutMs?: number },
+    ): Promise<unknown>
   }
 }
 
@@ -309,7 +312,10 @@ export const createOpenRouterClient = (
   ): Promise<number | null> => {
     if (sdk.generations === undefined) return null
     const lookup = await toResult(
-      sdk.generations.getGeneration({ id: generationId }),
+      sdk.generations.getGeneration(
+        { id: generationId },
+        { timeoutMs: requestTimeoutMs },
+      ),
     )
     if (!lookup.ok) {
       logger.warn("generation cost lookup failed", {

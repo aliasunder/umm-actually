@@ -48,7 +48,10 @@ const makeSdkStub = ({
     chatRequest: ChatRequestSubset
     options: { timeoutMs?: number } | undefined
   }[] = []
-  const generationCalls: { id: string }[] = []
+  const generationCalls: {
+    id: string
+    options: { timeoutMs?: number } | undefined
+  }[] = []
 
   const takeNext = (
     queue: StubResponse[],
@@ -71,8 +74,8 @@ const makeSdkStub = ({
       },
     },
     generations: {
-      getGeneration: async (request) => {
-        generationCalls.push(request)
+      getGeneration: async (request, options) => {
+        generationCalls.push({ ...request, options })
         return takeNext(
           generationResponses,
           generationCalls.length,
@@ -407,7 +410,9 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams)
 
-    expect(stub.generationCalls).toEqual([{ id: "gen-no-cost" }])
+    expect(stub.generationCalls).toEqual([
+      { id: "gen-no-cost", options: { timeoutMs: 45_000 } },
+    ])
     expect(result.attempts[0]?.costUsd).toBe(0.0399)
   })
 
