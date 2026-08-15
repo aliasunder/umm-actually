@@ -81,6 +81,22 @@ describe("parseConfig", () => {
     ).toThrow('requestTimeoutSeconds: "0" is not a positive integer')
   })
 
+  it("accepts a request_timeout_seconds at the timer-cap ceiling", () => {
+    const config = parseConfig(
+      makeRawInputs({ requestTimeoutSeconds: "2147483" }),
+    )
+
+    expect(config.requestTimeoutSeconds).toBe(2147483)
+  })
+
+  it("rejects a request_timeout_seconds whose milliseconds exceed the timer cap", () => {
+    expect(() =>
+      parseConfig(makeRawInputs({ requestTimeoutSeconds: "2147484" })),
+    ).toThrow(
+      'requestTimeoutSeconds: "2147484" exceeds the 2147483-second cap (2^31−1 ms timer limit)',
+    )
+  })
+
   it("rejects an empty context_budget_tokens", () => {
     expect(() =>
       parseConfig(makeRawInputs({ contextBudgetTokens: "" })),
