@@ -194,6 +194,7 @@ const baseConfig: ActionConfig = {
   openrouterApiKey: "sk-test",
   model: "test/model",
   fallbackModel: "",
+  requestTimeoutSeconds: 600,
   maxFindings: undefined,
   severityThreshold: "low",
   conventionsFile: "AGENTS.md",

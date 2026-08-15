@@ -55,10 +55,16 @@ export type ChatRequestSubset = {
  */
 export type OpenRouterLike = {
   chat: {
-    send(request: { chatRequest: ChatRequestSubset }): Promise<unknown>
+    send(
+      request: { chatRequest: ChatRequestSubset },
+      options?: { timeoutMs?: number },
+    ): Promise<unknown>
   }
   generations?: {
-    getGeneration(request: { id: string }): Promise<unknown>
+    getGeneration(
+      request: { id: string },
+      options?: { timeoutMs?: number },
+    ): Promise<unknown>
   }
 }
 
@@ -186,7 +192,16 @@ const summarizeAttempts = (attempts: ModelAttempt[]): string =>
   attempts.map(describeAttempt).join("; ")
 
 export const createOpenRouterClient = (
-  { sdk }: { sdk: OpenRouterLike },
+  {
+    sdk,
+    requestTimeoutMs,
+  }: {
+    sdk: OpenRouterLike
+    /** Per-attempt cap — a timed-out request aborts as a status-less
+     *  (retryable) api_error and flows into the retry/fallback ladder,
+     *  instead of hanging the job until the runner's 6-hour kill. */
+    requestTimeoutMs: number
+  },
   logger: Logger,
 ): OpenRouterClient => {
   const attemptOnce = async ({
@@ -196,7 +211,9 @@ export const createOpenRouterClient = (
     chatRequest: ChatRequestSubset
     model: string
   }): Promise<SingleAttempt> => {
-    const sendResult = await toResult(sdk.chat.send({ chatRequest }))
+    const sendResult = await toResult(
+      sdk.chat.send({ chatRequest }, { timeoutMs: requestTimeoutMs }),
+    )
     if (!sendResult.ok) {
       const statusCode = errorStatusCode(sendResult.error)
       const abort = statusCode !== undefined && ABORT_STATUSES.has(statusCode)
@@ -295,7 +312,10 @@ export const createOpenRouterClient = (
   ): Promise<number | null> => {
     if (sdk.generations === undefined) return null
     const lookup = await toResult(
-      sdk.generations.getGeneration({ id: generationId }),
+      sdk.generations.getGeneration(
+        { id: generationId },
+        { timeoutMs: requestTimeoutMs },
+      ),
     )
     if (!lookup.ok) {
       logger.warn("generation cost lookup failed", {

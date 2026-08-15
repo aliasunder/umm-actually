@@ -44,8 +44,14 @@ const makeSdkStub = ({
   sendResponses: StubResponse[]
   generationResponses?: StubResponse[]
 }) => {
-  const sendCalls: { chatRequest: ChatRequestSubset }[] = []
-  const generationCalls: { id: string }[] = []
+  const sendCalls: {
+    chatRequest: ChatRequestSubset
+    options: { timeoutMs?: number } | undefined
+  }[] = []
+  const generationCalls: {
+    id: string
+    options: { timeoutMs?: number } | undefined
+  }[] = []
 
   const takeNext = (
     queue: StubResponse[],
@@ -62,14 +68,14 @@ const makeSdkStub = ({
 
   const sdk: OpenRouterLike = {
     chat: {
-      send: async (request) => {
-        sendCalls.push(request)
+      send: async (request, options) => {
+        sendCalls.push({ ...request, options })
         return takeNext(sendResponses, sendCalls.length, "chat.send")
       },
     },
     generations: {
-      getGeneration: async (request) => {
-        generationCalls.push(request)
+      getGeneration: async (request, options) => {
+        generationCalls.push({ ...request, options })
         return takeNext(
           generationResponses,
           generationCalls.length,
@@ -84,7 +90,10 @@ const makeSdkStub = ({
 
 const makeClient = (stub: { sdk: OpenRouterLike }) => {
   const logger = createTestLogger()
-  const client = createOpenRouterClient({ sdk: stub.sdk }, logger)
+  const client = createOpenRouterClient(
+    { sdk: stub.sdk, requestTimeoutMs: 45_000 },
+    logger,
+  )
   return { client, logger }
 }
 
@@ -99,7 +108,7 @@ const requestParams = {
 }
 
 describe("requestReview", () => {
-  it("sends the strict json_schema response format with the review schema", async () => {
+  it("sends the strict json_schema response format with the review schema and per-attempt timeout", async () => {
     const stub = makeSdkStub({ sendResponses: [{ value: acceptedChatResult }] })
     const { client } = makeClient(stub)
 
@@ -124,6 +133,7 @@ describe("requestReview", () => {
           },
           stream: false,
         },
+        options: { timeoutMs: 45_000 },
       },
     ])
   })
@@ -400,7 +410,9 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams)
 
-    expect(stub.generationCalls).toEqual([{ id: "gen-no-cost" }])
+    expect(stub.generationCalls).toEqual([
+      { id: "gen-no-cost", options: { timeoutMs: 45_000 } },
+    ])
     expect(result.attempts[0]?.costUsd).toBe(0.0399)
   })
 

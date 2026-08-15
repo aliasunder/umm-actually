@@ -31,6 +31,7 @@ const collectRawInputs = (): RawInputs => ({
   openrouterApiKey: core.getInput("openrouter_api_key", { required: true }),
   model: core.getInput("model"),
   fallbackModel: core.getInput("fallback_model"),
+  requestTimeoutSeconds: core.getInput("request_timeout_seconds"),
   maxFindings: core.getInput("max_findings"),
   severityThreshold: core.getInput("severity_threshold"),
   conventionsFile: core.getInput("conventions_file"),
@@ -78,7 +79,10 @@ try {
       generateFindings: createPromptedGenerateFindings(
         {
           openrouterClient: createOpenRouterClient(
-            { sdk: new OpenRouter({ apiKey: config.openrouterApiKey }) },
+            {
+              sdk: new OpenRouter({ apiKey: config.openrouterApiKey }),
+              requestTimeoutMs: config.requestTimeoutSeconds * 1000,
+            },
             logger,
           ),
           model: config.model,

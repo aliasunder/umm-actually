@@ -21,11 +21,35 @@ const optionalPositiveInteger = z
 
 const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
 
+/** Ceiling that keeps seconds × 1000 within the 2^31−1 ms timer cap —
+ *  beyond it, timer implementations clamp the delay to ~1 ms and every
+ *  request would time out instantly instead of being bounded. */
+const maxTimeoutSeconds = 2_147_483
+
+/** Mirrors the action.yml default — keep the two in sync. */
+const defaultRequestTimeoutSeconds = 600
+
+const timerSafeSeconds = z.string().transform((value, ctx) => {
+  // Empty string means "not provided": workflows wiring a bare unset repo
+  // variable pass "", which would otherwise override the action.yml default.
+  if (!value) return defaultRequestTimeoutSeconds
+  const parsed = parsePositiveInteger(value, ctx)
+  if (parsed > maxTimeoutSeconds) {
+    ctx.addIssue({
+      code: "custom",
+      message: `"${value}" exceeds the ${maxTimeoutSeconds}-second cap (2^31−1 ms timer limit)`,
+    })
+    return z.NEVER
+  }
+  return parsed
+})
+
 const configSchema = z.object({
   githubToken: z.string().min(1, "github_token is required"),
   openrouterApiKey: z.string().min(1, "openrouter_api_key is required"),
   model: z.string().min(1, "model must not be empty"),
   fallbackModel: z.string(),
+  requestTimeoutSeconds: timerSafeSeconds,
   maxFindings: optionalPositiveInteger,
   // Shape-only, like phases: the value is validated by its domain owner
   // (review/finding.ts resolveSeverityThreshold) at startup
