@@ -20,6 +20,10 @@ inputs:
     description: Model to retry with if the primary model fails the structured-output ladder
     required: false
     default: ""
+  request_timeout_seconds:
+    description: Per-attempt timeout for a single model request, in seconds. A timed-out attempt aborts the HTTP call and advances the retry/fallback ladder instead of hanging the job
+    required: false
+    default: "600"
   max_findings:
     description: Cap on posted findings, highest severity first. Empty = uncapped (all validated findings post)
     required: false

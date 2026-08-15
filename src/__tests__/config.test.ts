@@ -6,6 +6,7 @@ const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   openrouterApiKey: "sk-or-testkey",
   model: "anthropic/claude-sonnet-4-6",
   fallbackModel: "",
+  requestTimeoutSeconds: "600",
   maxFindings: "",
   severityThreshold: "low",
   conventionsFile: "AGENTS.md",
@@ -31,6 +32,7 @@ describe("parseConfig", () => {
       openrouterApiKey: "sk-or-testkey",
       model: "anthropic/claude-sonnet-4-6",
       fallbackModel: "",
+      requestTimeoutSeconds: 600,
       maxFindings: undefined,
       severityThreshold: "low",
       conventionsFile: "AGENTS.md",
@@ -71,6 +73,12 @@ describe("parseConfig", () => {
     expect(() => parseConfig(makeRawInputs({ maxFindings: "many" }))).toThrow(
       'maxFindings: "many" is not a positive integer',
     )
+  })
+
+  it("rejects a zero request_timeout_seconds", () => {
+    expect(() =>
+      parseConfig(makeRawInputs({ requestTimeoutSeconds: "0" })),
+    ).toThrow('requestTimeoutSeconds: "0" is not a positive integer')
   })
 
   it("rejects an empty context_budget_tokens", () => {

@@ -26,6 +26,7 @@ const configSchema = z.object({
   openrouterApiKey: z.string().min(1, "openrouter_api_key is required"),
   model: z.string().min(1, "model must not be empty"),
   fallbackModel: z.string(),
+  requestTimeoutSeconds: requiredPositiveInteger,
   maxFindings: optionalPositiveInteger,
   // Shape-only, like phases: the value is validated by its domain owner
   // (review/finding.ts resolveSeverityThreshold) at startup
