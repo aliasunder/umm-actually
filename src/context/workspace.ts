@@ -40,6 +40,7 @@ export type ContextReader = {
   readPriorityDocs: (params: {
     priorityDocs: string[]
     budgetTokens: number
+    excludePaths: string[]
   }) => Promise<BudgetedFiles>
   findRelatedDocs: (params: {
     changedPaths: string[]
@@ -490,20 +491,39 @@ export const createContextReader = (
   }
 
   /** Reads explicitly named documentation files, independent of mention
-   *  matching or traceRelatedFiles. Budget-tracked like readChangedFiles. */
+   *  matching or traceRelatedFiles. Budget-tracked like readChangedFiles.
+   *  excludePaths carries every path a higher-priority channel already claimed
+   *  (changed files, related files, the conventions file) so a doc's full text
+   *  is never rendered twice. Skipping on path presence rather than on
+   *  successful inclusion is lossless: this budget is what survives all changed
+   *  files, so a file demoted to diff-only there can never fit here, and an
+   *  unreadable or binary file fails the second read for the same reason it
+   *  failed the first. The one path that could still succeed is a lockfile,
+   *  force-demoted upstream precisely so its full text stays out. */
   const readPriorityDocs = async ({
     priorityDocs,
     budgetTokens,
+    excludePaths,
   }: {
     priorityDocs: string[]
     budgetTokens: number
+    excludePaths: string[]
   }): Promise<BudgetedFiles> => {
     const files: PromptFile[] = []
+    const excludePathSet = new Set(
+      excludePaths.map((excludePath) => posix.normalize(excludePath)),
+    )
     // Sequential state by design: priority order determines budget priority,
     // and each file's inclusion depends on the budget left by files before it.
     let remainingTokens = budgetTokens
 
     for (const docPath of priorityDocs) {
+      if (excludePathSet.has(posix.normalize(docPath))) {
+        logger.info("priority doc already in context — skipping re-read", {
+          path: docPath,
+        })
+        continue
+      }
       const content = await readPriorityDocOrNull(
         docPath,
         remainingTokens * CHARS_PER_TOKEN,

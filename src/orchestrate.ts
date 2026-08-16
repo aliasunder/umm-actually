@@ -30,6 +30,7 @@ import {
   type AnchorEntry,
   type ReviewComment,
 } from "./review/comment-mapping.js"
+import { buildContextNotes } from "./review/context-notes.js"
 import {
   resolveSeverityThreshold,
   type Finding,
@@ -430,10 +431,20 @@ const runReviewPipeline = async (
   )
   const docBudgetTokens = Math.max(0, remainingTokens - relatedFilesTokens)
 
+  // Every path a higher-priority channel already claimed. A priority doc found
+  // here is in the prompt already; re-reading it would render its full text a
+  // second time and spend the budget twice.
+  const priorityDocsInContext = [
+    ...changedFiles.map((file) => file.path),
+    ...relatedFiles.map((file) => file.path),
+    ...(conventions ? [config.conventionsFile] : []),
+  ]
+
   const { files: priorityDocFiles, remainingTokens: docRemainingTokens } =
     await contextReader.readPriorityDocs({
       priorityDocs: config.priorityDocs,
       budgetTokens: docBudgetTokens,
+      excludePaths: priorityDocsInContext,
     })
 
   const mentionMatchedDocsResult = config.traceRelatedFiles
@@ -472,25 +483,13 @@ const runReviewPipeline = async (
     tokenBudgetRemainingForDocs: docRemainingTokens,
   })
 
-  const contextNotes: string[] = []
-  const skippedPriorityDocs = config.priorityDocs.filter(
-    (docPath) => !priorityDocFiles.some((file) => file.path === docPath),
-  )
-  if (skippedPriorityDocs.length > 0) {
-    contextNotes.push(
-      `Priority docs not included: ${skippedPriorityDocs.map((docPath) => `\`${docPath}\``).join(", ")} (missing, unreadable, or over budget)`,
-    )
-  }
-  if (relatedFilesResult.excludedByCapPaths.length > 0) {
-    contextNotes.push(
-      `${relatedFilesResult.excludedByCapPaths.length} related file(s) excluded by \`max_related_files\` cap: ${relatedFilesResult.excludedByCapPaths.map((filePath) => `\`${filePath}\``).join(", ")}`,
-    )
-  }
-  if (mentionMatchedDocsResult.excludedByCapPaths.length > 0) {
-    contextNotes.push(
-      `${mentionMatchedDocsResult.excludedByCapPaths.length} related doc(s) excluded by \`max_related_docs\` cap: ${mentionMatchedDocsResult.excludedByCapPaths.map((docPath) => `\`${docPath}\``).join(", ")}`,
-    )
-  }
+  const contextNotes = buildContextNotes({
+    priorityDocs: config.priorityDocs,
+    priorityDocsInContext,
+    priorityDocsRead: priorityDocFiles,
+    relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
+    docsExcludedPaths: mentionMatchedDocsResult.excludedByCapPaths,
+  })
 
   // Step 9.5: fetch prior bot comments — needed both for the prompt (the
   // model sees what's already posted and self-suppresses conceptual dupes)

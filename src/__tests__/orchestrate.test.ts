@@ -254,6 +254,7 @@ const first = <T>(array: T[]): T => {
 type ReadPriorityDocsParams = {
   priorityDocs: string[]
   budgetTokens: number
+  excludePaths: string[]
 }
 
 type FindRelatedDocsParams = {
@@ -1020,6 +1021,92 @@ describe("orchestrate", () => {
             "1 related doc(s) excluded by `max_related_docs` cap: `docs/capped.md`",
           ],
         }),
+      ])
+    })
+
+    it("omits a priority doc already in context as a changed file", async () => {
+      // Reproduces vault-cortex PR #397: the doc budget is exhausted, so the
+      // priority-doc read returns nothing — but README.md is already in full
+      // context as a changed file and must not be reported as missing.
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: ["README.md", "MISSING.md"] },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [
+              {
+                path: "README.md",
+                content: "# Readme",
+                includedAs: "full" as const,
+              },
+            ],
+            remainingTokens: 0,
+          }),
+          readPriorityDocs: async (params) => ({
+            files: [],
+            remainingTokens: params.budgetTokens,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+          contextNotes: [
+            "Priority docs not included: `MISSING.md` (missing, unreadable, or over budget)",
+          ],
+        }),
+      ])
+    })
+
+    it("excludes changed files, related files, and conventions from the priority-doc read", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          traceRelatedFiles: true,
+          conventionsFile: "AGENTS.md",
+          priorityDocs: ["README.md"],
+        },
+        contextReader: {
+          findRelatedFiles: async () => ({
+            files: [
+              {
+                path: "src/caller.ts",
+                content: "import { greet } from './greeter.js'",
+                includedAs: "full" as const,
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
+        "src/greeter.ts",
+        "src/caller.ts",
+        "AGENTS.md",
+      ])
+    })
+
+    it("omits the conventions file from the priority-doc exclusions when it is not found", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md", priorityDocs: ["README.md"] },
+        contextReader: {
+          readConventions: async () => null,
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
+        "src/greeter.ts",
       ])
     })
   })
