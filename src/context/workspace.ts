@@ -32,6 +32,7 @@ export type ContextReader = {
   readChangedFiles: (params: {
     changedPaths: string[]
     budgetTokens: number
+    diffOnlyPaths: string[]
   }) => Promise<BudgetedFiles>
   findRelatedFiles: (params: {
     changedPaths: string[]
@@ -304,19 +305,36 @@ export const createContextReader = (
     }
   }
 
+  /** diffOnlyPaths carries changed files whose full text another prompt
+   *  section already renders (today: the conventions file). Demoting them here
+   *  rather than after the fact means their budget is never spent, so it flows
+   *  to related files and docs instead. */
   const readChangedFiles = async ({
     changedPaths,
     budgetTokens,
+    diffOnlyPaths,
   }: {
     changedPaths: string[]
     budgetTokens: number
+    diffOnlyPaths: string[]
   }): Promise<BudgetedFiles> => {
     const files: PromptFile[] = []
+    const diffOnlyPathSet = new Set(
+      diffOnlyPaths.map((diffOnlyPath) => posix.normalize(diffOnlyPath)),
+    )
     // Sequential state by design: diff order is priority order, and each
     // file's inclusion depends on the budget left by the files before it.
     let remainingTokens = budgetTokens
 
     for (const changedPath of changedPaths) {
+      if (diffOnlyPathSet.has(posix.normalize(changedPath))) {
+        logger.info(
+          "changed file already rendered in full elsewhere — including diff-only",
+          { path: changedPath },
+        )
+        files.push({ path: changedPath, content: "", includedAs: "diff-only" })
+        continue
+      }
       if (LOCKFILE_BASENAMES.has(posix.basename(changedPath))) {
         files.push({ path: changedPath, content: "", includedAs: "diff-only" })
         continue

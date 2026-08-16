@@ -4,6 +4,7 @@ import { resolvePhases } from "../phases.js"
 import {
   buildSystemPrompt,
   buildUserPrompt,
+  conventionsRenderInFull,
   estimateTokens,
   generateDelimiterNonce,
 } from "../prompt.js"
@@ -420,5 +421,34 @@ describe("estimateTokens", () => {
   it("estimates four characters per token, rounding up", () => {
     expect(estimateTokens("12345678")).toBe(2)
     expect(estimateTokens("123456789")).toBe(3)
+  })
+})
+
+describe("conventionsRenderInFull", () => {
+  // 8_000 tokens × 4 chars/token — the same cap buildUserPrompt truncates at.
+  const conventionsCharacterCap = 32_000
+
+  it("reports full rendering for conventions exactly at the cap", () => {
+    expect(conventionsRenderInFull("c".repeat(conventionsCharacterCap))).toBe(
+      true,
+    )
+  })
+
+  it("reports truncated rendering one character past the cap", () => {
+    expect(
+      conventionsRenderInFull("c".repeat(conventionsCharacterCap + 1)),
+    ).toBe(false)
+  })
+
+  it("agrees with what buildUserPrompt actually renders", () => {
+    const oversizedConventions = "c".repeat(conventionsCharacterCap + 1)
+
+    const prompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      conventions: oversizedConventions,
+    })
+
+    expect(conventionsRenderInFull(oversizedConventions)).toBe(false)
+    expect(prompt).toContain("[conventions truncated at ~8000 tokens]")
   })
 })

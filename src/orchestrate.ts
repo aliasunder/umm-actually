@@ -40,6 +40,7 @@ import { resolvePhases, type ReviewPhase } from "./review/phases.js"
 import {
   buildSystemPrompt,
   buildUserPrompt,
+  conventionsRenderInFull,
   estimateTokens,
   generateDelimiterNonce,
   type PromptFile,
@@ -410,11 +411,21 @@ const runReviewPipeline = async (
     conventionsFile: config.conventionsFile,
   })
 
+  // The conventions file has its own prompt section. When that section carries
+  // the whole file, a changed conventions file would be rendered twice — so the
+  // changed-files channel carries it diff-only. When the section is truncated
+  // instead, the changed-files copy is the only full one and stays full.
+  const conventionsAlreadyRenderedInFull =
+    conventions !== null && conventionsRenderInFull(conventions)
+
   const fileBudgetTokens = config.contextBudgetTokens - diffTokens
   const { files: changedFiles, remainingTokens } =
     await contextReader.readChangedFiles({
       changedPaths,
       budgetTokens: fileBudgetTokens,
+      diffOnlyPaths: conventionsAlreadyRenderedInFull
+        ? [config.conventionsFile]
+        : [],
     })
 
   const relatedFilesResult = config.traceRelatedFiles

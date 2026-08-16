@@ -231,6 +231,7 @@ type PostIssueCommentParams = {
 type ReadChangedFilesParams = {
   changedPaths: string[]
   budgetTokens: number
+  diffOnlyPaths: string[]
 }
 
 type FindRelatedFilesParams = {
@@ -1092,6 +1093,36 @@ describe("orchestrate", () => {
         "src/caller.ts",
         "AGENTS.md",
       ])
+    })
+
+    it("renders a changed conventions file diff-only when its own section carries it whole", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md" },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual([
+        "AGENTS.md",
+      ])
+    })
+
+    it("keeps a changed conventions file full when its own section is truncated", async () => {
+      // Over the 8k-token conventions cap: the conventions section holds only
+      // a truncated head, so the changed-files copy is the sole full text and
+      // demoting it would lose the tail.
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md" },
+        contextReader: {
+          readConventions: async () => "c".repeat(32_001),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual([])
     })
 
     it("omits the conventions file from the priority-doc exclusions when it is not found", async () => {

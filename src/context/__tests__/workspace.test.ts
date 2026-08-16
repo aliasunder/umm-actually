@@ -154,6 +154,7 @@ describe("readChangedFiles", () => {
     const result = await contextReader.readChangedFiles({
       changedPaths: ["src/greeter.ts", "src/registry.ts"],
       budgetTokens: 10_000,
+      diffOnlyPaths: [],
     })
 
     expect(result).toEqual({
@@ -178,6 +179,7 @@ describe("readChangedFiles", () => {
     const result = await contextReader.readChangedFiles({
       changedPaths: ["src/caller.ts", "src/greeter.ts"],
       budgetTokens: estimateTokens(greeterContent),
+      diffOnlyPaths: [],
     })
 
     expect(result).toEqual({
@@ -186,6 +188,45 @@ describe("readChangedFiles", () => {
         { path: "src/greeter.ts", content: greeterContent, includedAs: "full" },
       ],
       remainingTokens: 0,
+    })
+  })
+
+  it("includes a diffOnlyPaths entry as diff-only and spends no budget on it", async () => {
+    const { contextReader, logger } = makeReader()
+
+    const result = await contextReader.readChangedFiles({
+      changedPaths: ["AGENTS.md", "src/greeter.ts"],
+      budgetTokens: 10_000,
+      diffOnlyPaths: ["AGENTS.md"],
+    })
+
+    expect(result).toEqual({
+      files: [
+        { path: "AGENTS.md", content: "", includedAs: "diff-only" },
+        { path: "src/greeter.ts", content: greeterContent, includedAs: "full" },
+      ],
+      remainingTokens: 10_000 - estimateTokens(greeterContent),
+    })
+    expect(logger.messages).toContainEqual({
+      level: "info",
+      message:
+        "changed file already rendered in full elsewhere — including diff-only",
+      data: { path: "AGENTS.md" },
+    })
+  })
+
+  it("normalizes diffOnlyPaths before matching changed paths", async () => {
+    const { contextReader } = makeReader()
+
+    const result = await contextReader.readChangedFiles({
+      changedPaths: ["AGENTS.md"],
+      budgetTokens: 10_000,
+      diffOnlyPaths: ["./AGENTS.md"],
+    })
+
+    expect(result).toEqual({
+      files: [{ path: "AGENTS.md", content: "", includedAs: "diff-only" }],
+      remainingTokens: 10_000,
     })
   })
 
@@ -209,6 +250,7 @@ describe("readChangedFiles", () => {
           "src/app.ts",
         ],
         budgetTokens: 10_000,
+        diffOnlyPaths: [],
       })
 
       expect(result).toEqual({
@@ -245,6 +287,7 @@ describe("readChangedFiles", () => {
       const result = await contextReader.readChangedFiles({
         changedPaths: ["src/large.ts"],
         budgetTokens: estimateTokens(multibyteContent),
+        diffOnlyPaths: [],
       })
 
       expect(result).toEqual({
@@ -262,6 +305,7 @@ describe("readChangedFiles", () => {
     const result = await contextReader.readChangedFiles({
       changedPaths: ["src/missing.ts"],
       budgetTokens: 10_000,
+      diffOnlyPaths: [],
     })
 
     expect(result.files).toEqual([
@@ -289,6 +333,7 @@ describe("readChangedFiles", () => {
       const result = await contextReader.readChangedFiles({
         changedPaths: ["src/locked.ts"],
         budgetTokens: 10_000,
+        diffOnlyPaths: [],
       })
 
       expect(result.files).toEqual([
@@ -313,6 +358,7 @@ describe("readChangedFiles", () => {
     const result = await contextReader.readChangedFiles({
       changedPaths: ["src/data.bin"],
       budgetTokens: 10_000,
+      diffOnlyPaths: [],
     })
 
     expect(result.files).toEqual([
@@ -330,6 +376,7 @@ describe("readChangedFiles", () => {
       contextReader.readChangedFiles({
         changedPaths: ["../../etc/passwd"],
         budgetTokens: 10_000,
+        diffOnlyPaths: [],
       }),
     ).rejects.toThrow(new Error("path escapes the workspace: ../../etc/passwd"))
   })
@@ -357,6 +404,7 @@ describe("readChangedFiles", () => {
       const result = await contextReader.readChangedFiles({
         changedPaths: ["src/leak.ts"],
         budgetTokens: 10_000,
+        diffOnlyPaths: [],
       })
 
       expect(result.files).toEqual([
@@ -386,6 +434,7 @@ describe("readChangedFiles", () => {
       const result = await contextReader.readChangedFiles({
         changedPaths: ["leak.ts"],
         budgetTokens: 10_000,
+        diffOnlyPaths: [],
       })
 
       expect(result.files).toEqual([
