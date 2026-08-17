@@ -1185,6 +1185,40 @@ describe("orchestrate", () => {
       ])
     })
 
+    it("excludes an over-cap conventions file from priority docs when it is changed in the PR", async () => {
+      // Over the 8k-token cap + changed + in priority_docs: the changed-files
+      // channel keeps the full copy (conventions section truncates), and the
+      // priority-doc channel skips via the changed-files path in
+      // priorityDocsInContext — one full copy, no double-render. The
+      // conventions contribution to priorityDocsInContext is absent (over-cap),
+      // but the changed-files contribution supplies it.
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md", priorityDocs: ["AGENTS.md"] },
+        contextReader: {
+          readConventions: async () => "c".repeat(32_001),
+          readChangedFiles: async () => ({
+            files: [
+              fixtureChangedFile,
+              {
+                path: "AGENTS.md",
+                content: "c".repeat(32_001),
+                includedAs: "full" as const,
+              },
+            ],
+            remainingTokens: 10_000,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
+        "src/greeter.ts",
+        "AGENTS.md",
+      ])
+    })
+
     it("omits the conventions file from the priority-doc exclusions when it is not found", async () => {
       const stubs = makeOrchestrateDeps({
         config: { conventionsFile: "AGENTS.md", priorityDocs: ["README.md"] },
