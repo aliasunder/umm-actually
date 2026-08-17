@@ -49,7 +49,7 @@ inputs:
     required: false
     default: "true"
   priority_docs:
-    description: Comma-separated repo-relative paths always included in review context. A doc already in context as a changed file, a related file, or the conventions file (when that section carries the whole file) is not read again (empty = disabled)
+    description: Comma-separated repo-relative paths always included in review context. A doc whose full text is already in context — as a full-content changed file, a related file, or the conventions file (when that section carries the whole file) — is not read again; a diff-only changed file is still read here (empty = disabled)
     required: false
     default: "README.md"
   max_scan_files:

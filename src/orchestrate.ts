@@ -442,15 +442,16 @@ const runReviewPipeline = async (
   )
   const docBudgetTokens = Math.max(0, remainingTokens - relatedFilesTokens)
 
-  // Every path a higher-priority channel already claimed — including
-  // diff-only changed files, whose budget cannot fit a re-read here anyway.
-  // A priority doc found here is in the prompt already; re-reading it would
-  // render its full text a second time and spend the budget twice. The
-  // conventions file counts only when its section carries the whole file —
-  // when that section truncates, its full text has NOT been sent, and the
-  // priority-doc channel is the one that can still supply it.
+  // Every path whose full text a higher-priority channel already sent.
+  // Diff-only changed files are excluded — only diff hunks reached the
+  // prompt, so the priority-doc channel should still attempt a full read
+  // (maxScanBytes and the doc budget are different caps). The conventions
+  // file counts only when its section carries the whole file — when that
+  // section truncates, its full text has NOT been sent.
   const priorityDocsInContext = [
-    ...changedFiles.map((file) => file.path),
+    ...changedFiles
+      .filter((file) => file.includedAs === "full")
+      .map((file) => file.path),
     ...relatedFiles.map((file) => file.path),
     ...(conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []),
   ]

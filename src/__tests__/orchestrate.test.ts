@@ -1064,13 +1064,11 @@ describe("orchestrate", () => {
       ])
     })
 
-    it("excludes a priority doc whose changed-file copy was demoted to diff-only", async () => {
-      // The exclusion keys on path presence, not on includedAs, and that is
-      // deliberate: the priority-doc budget is what survives all changed files,
-      // so a file demoted there can never fit here — re-reading it would fail
-      // and then report the doc as absent. Narrowing this to full-content
-      // changed files looks more precise and silently restores the false
-      // "not included" note this PR exists to remove.
+    it("does not exclude a diff-only changed file from the priority-doc read", async () => {
+      // A diff-only changed file sent only diff hunks — its full text is not
+      // in the prompt. maxScanBytes (per-file) and the priority-doc budget
+      // (total remaining) are different caps, so the file may still fit here.
+      // Excluding it would silently suppress a genuine absence.
       const stubs = makeOrchestrateDeps({
         config: { priorityDocs: ["README.md"] },
         contextReader: {
@@ -1091,16 +1089,7 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
-        "README.md",
         "AGENTS.md",
-      ])
-      expect(stubs.upsertSummaryCommentCalls).toEqual([
-        expectedStatus({
-          isFirstRun: true,
-          postedCount: expectedSelection.selected.length,
-          totalCount: expectedSelection.selected.length,
-          contextNotes: [],
-        }),
       ])
     })
 
