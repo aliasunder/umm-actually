@@ -336,16 +336,15 @@ describe("requestReview", () => {
     })
     const { client } = makeClient(stub)
 
-    const resultPromise = client.requestReview({
-      ...requestParams,
-      fallbackModel: null,
-    })
+    // Attach the rejection handler BEFORE advancing timers so the
+    // rejection is never unhandled (Node flags unhandled rejections
+    // between ticks in CI).
+    const assertion = expect(
+      client.requestReview({ ...requestParams, fallbackModel: null }),
+    ).rejects.toThrow("review request failed")
 
-    // Attempt 1 fires immediately; the 429 triggers the retry path.
-    // Advance past the 1s delay so attempt 2 fires.
     await vi.advanceTimersByTimeAsync(1_000)
-
-    await expect(resultPromise).rejects.toThrow("review request failed")
+    await assertion
     expect(stub.sendCalls).toHaveLength(2)
     vi.useRealTimers()
   })
