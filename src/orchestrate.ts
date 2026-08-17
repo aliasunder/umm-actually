@@ -1,3 +1,4 @@
+import { posix } from "node:path"
 import parseDiff from "parse-diff"
 import type { ActionConfig } from "./config.js"
 import {
@@ -40,6 +41,7 @@ import { resolvePhases, type ReviewPhase } from "./review/phases.js"
 import {
   buildSystemPrompt,
   buildUserPrompt,
+  CONVENTIONS_TOKEN_CAP,
   conventionsRenderInFull,
   estimateTokens,
   generateDelimiterNonce,
@@ -463,6 +465,32 @@ const runReviewPipeline = async (
       excludePaths: priorityDocsInContext,
     })
 
+  // When the conventions section truncated but priority docs read the full
+  // file, suppress the truncated head — the full copy in the priority-docs
+  // section is strictly better, and rendering both wastes ~8K tokens.
+  const conventionsReadInFullByPriorityDocs =
+    conventions !== null &&
+    !conventionsAlreadyRenderedInFull &&
+    priorityDocFiles.some(
+      (file) =>
+        posix.normalize(file.path) === posix.normalize(config.conventionsFile),
+    )
+
+  if (conventionsReadInFullByPriorityDocs) {
+    logger.info(
+      "conventions file read in full by priority-doc channel — suppressing truncated conventions section to avoid duplication",
+      {
+        conventionsFile: config.conventionsFile,
+        conventionsTokenCap: CONVENTIONS_TOKEN_CAP,
+        conventionsLength: conventions.length,
+      },
+    )
+  }
+
+  const conventionsForPrompt = conventionsReadInFullByPriorityDocs
+    ? null
+    : conventions
+
   const mentionMatchedDocsResult = config.traceRelatedFiles
     ? await contextReader.findRelatedDocs({
         changedPaths,
@@ -475,7 +503,11 @@ const runReviewPipeline = async (
   const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
 
   logger.info("context sent to model", {
-    conventionsFile: conventions ? config.conventionsFile : "not found",
+    conventionsFile: conventions
+      ? conventionsReadInFullByPriorityDocs
+        ? `${config.conventionsFile} (suppressed — full copy in priority docs)`
+        : config.conventionsFile
+      : "not found",
     changedFilesCount: changedFiles.length,
     changedFilePaths: changedFiles.map((file) => file.path).join(", "),
     relatedFilesCount: relatedFiles.length,
@@ -533,7 +565,7 @@ const runReviewPipeline = async (
   const structuredResult = await generateFindings({
     prContext,
     phase,
-    conventions,
+    conventions: conventionsForPrompt,
     changedFiles,
     relatedFiles,
     relatedDocs,

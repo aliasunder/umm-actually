@@ -13,7 +13,7 @@ export type PromptFile = {
 
 /** ~4 chars per token — the standard rough heuristic; we only need order-of-magnitude. */
 export const CHARS_PER_TOKEN = 4
-const CONVENTIONS_TOKEN_CAP = 8_000
+export const CONVENTIONS_TOKEN_CAP = 8_000
 
 /** Whether the conventions section will carry the file's complete text rather
  *  than a truncated head. A conventions file that also changed in the PR is

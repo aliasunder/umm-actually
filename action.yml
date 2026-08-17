@@ -33,7 +33,7 @@ inputs:
     required: false
     default: low
   conventions_file:
-    description: Repo-relative path to the conventions file included in the prompt (truncated at ~8000 tokens). When it also changed in the PR and this section carries the whole file, the changed-files copy is included diff-only so its text is not sent twice; when this section truncates, the changed-files copy stays full so the tail is not lost
+    description: Repo-relative path to the conventions file included in the prompt (truncated at ~8000 tokens). When it also changed in the PR and this section carries the whole file, the changed-files copy is included diff-only so its text is not sent twice; when this section truncates, the changed-files copy stays full so the tail is not lost. When priority_docs reads the full file, the truncated conventions section is suppressed to avoid duplication
     required: false
     default: AGENTS.md
   phases:

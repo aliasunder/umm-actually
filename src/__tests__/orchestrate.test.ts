@@ -1208,6 +1208,54 @@ describe("orchestrate", () => {
       ])
     })
 
+    it("suppresses the truncated conventions section when priority docs read the full file", async () => {
+      // Over-cap conventions + listed in priority_docs + not excluded from
+      // readPriorityDocs (because conventionsAlreadyRenderedInFull is false).
+      // Priority docs read it in full → the truncated conventions section is
+      // suppressed to avoid 8K tokens of redundant content.
+      const overCapConventions = "c".repeat(32_001)
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md", priorityDocs: ["AGENTS.md"] },
+        contextReader: {
+          readConventions: async () => overCapConventions,
+          readPriorityDocs: async () => ({
+            files: [
+              {
+                path: "AGENTS.md",
+                content: overCapConventions,
+                includedAs: "full" as const,
+              },
+            ],
+            remainingTokens: 0,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.conventions).toBeNull()
+    })
+
+    it("keeps the conventions section when priority docs do not read the file", async () => {
+      // Over-cap conventions + NOT in priority_docs → priority docs don't read
+      // it, so the truncated conventions section is the only copy. Keep it.
+      const overCapConventions = "c".repeat(32_001)
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md", priorityDocs: ["README.md"] },
+        contextReader: {
+          readConventions: async () => overCapConventions,
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.conventions).toBe(overCapConventions)
+    })
+
     it("omits the conventions file from the priority-doc exclusions when it is not found", async () => {
       const stubs = makeOrchestrateDeps({
         config: { conventionsFile: "AGENTS.md", priorityDocs: ["README.md"] },
