@@ -57,13 +57,13 @@ export type OpenRouterLike = {
   chat: {
     send(
       request: { chatRequest: ChatRequestSubset },
-      options?: { timeoutMs?: number },
+      options?: { timeoutMs?: number; retries?: { strategy: string } },
     ): Promise<unknown>
   }
   generations?: {
     getGeneration(
       request: { id: string },
-      options?: { timeoutMs?: number },
+      options?: { timeoutMs?: number; retries?: { strategy: string } },
     ): Promise<unknown>
   }
 }
@@ -212,7 +212,10 @@ export const createOpenRouterClient = (
     model: string
   }): Promise<SingleAttempt> => {
     const sendResult = await toResult(
-      sdk.chat.send({ chatRequest }, { timeoutMs: requestTimeoutMs }),
+      sdk.chat.send(
+        { chatRequest },
+        { timeoutMs: requestTimeoutMs, retries: { strategy: "none" } },
+      ),
     )
     if (!sendResult.ok) {
       const statusCode = errorStatusCode(sendResult.error)
@@ -314,7 +317,7 @@ export const createOpenRouterClient = (
     const lookup = await toResult(
       sdk.generations.getGeneration(
         { id: generationId },
-        { timeoutMs: requestTimeoutMs },
+        { timeoutMs: requestTimeoutMs, retries: { strategy: "none" } },
       ),
     )
     if (!lookup.ok) {
