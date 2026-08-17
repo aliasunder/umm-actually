@@ -57,13 +57,19 @@ export type OpenRouterLike = {
   chat: {
     send(
       request: { chatRequest: ChatRequestSubset },
-      options?: { timeoutMs?: number; retries?: { strategy: string } },
+      options?: {
+        timeoutMs?: number
+        retries?: { strategy: "backoff" | "none" }
+      },
     ): Promise<unknown>
   }
   generations?: {
     getGeneration(
       request: { id: string },
-      options?: { timeoutMs?: number; retries?: { strategy: string } },
+      options?: {
+        timeoutMs?: number
+        retries?: { strategy: "backoff" | "none" }
+      },
     ): Promise<unknown>
   }
 }
@@ -102,6 +108,11 @@ const ABORT_STATUSES = new Set([401, 402, 403])
 const RETRYABLE_STATUSES = new Set([408, 429])
 
 const MAX_ATTEMPTS_PER_MODEL = 2
+
+/** Fixed delay before retrying a transient failure (429, 5xx, timeout).
+ *  The SDK's own backoff was disabled to fix the timeout bug; this replaces
+ *  it at the action layer so a brief rate-limit burst has a recovery window. */
+const RETRY_DELAY_MS = 1_000
 
 /** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs
  *  and future SDK versions need no instanceof on SDK internals. */
@@ -394,6 +405,7 @@ export const createOpenRouterClient = (
           )
         }
         if (!attemptResult.retryable) break
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
         attemptNumber++
       }
     }
