@@ -32,6 +32,7 @@ export type ContextReader = {
   readChangedFiles: (params: {
     changedPaths: string[]
     budgetTokens: number
+    diffOnlyPaths: string[]
   }) => Promise<BudgetedFiles>
   findRelatedFiles: (params: {
     changedPaths: string[]
@@ -40,6 +41,7 @@ export type ContextReader = {
   readPriorityDocs: (params: {
     priorityDocs: string[]
     budgetTokens: number
+    excludePaths: string[]
   }) => Promise<BudgetedFiles>
   findRelatedDocs: (params: {
     changedPaths: string[]
@@ -303,19 +305,36 @@ export const createContextReader = (
     }
   }
 
+  /** diffOnlyPaths carries changed files whose full text another prompt
+   *  section already renders (today: the conventions file). Demoting them here
+   *  rather than after the fact means their budget is never spent, so it flows
+   *  to related files and docs instead. */
   const readChangedFiles = async ({
     changedPaths,
     budgetTokens,
+    diffOnlyPaths,
   }: {
     changedPaths: string[]
     budgetTokens: number
+    diffOnlyPaths: string[]
   }): Promise<BudgetedFiles> => {
     const files: PromptFile[] = []
+    const diffOnlyPathSet = new Set(
+      diffOnlyPaths.map((diffOnlyPath) => posix.normalize(diffOnlyPath)),
+    )
     // Sequential state by design: diff order is priority order, and each
     // file's inclusion depends on the budget left by the files before it.
     let remainingTokens = budgetTokens
 
     for (const changedPath of changedPaths) {
+      if (diffOnlyPathSet.has(posix.normalize(changedPath))) {
+        logger.info(
+          "changed file already rendered in full elsewhere — including diff-only",
+          { path: changedPath },
+        )
+        files.push({ path: changedPath, content: "", includedAs: "diff-only" })
+        continue
+      }
       if (LOCKFILE_BASENAMES.has(posix.basename(changedPath))) {
         files.push({ path: changedPath, content: "", includedAs: "diff-only" })
         continue
@@ -490,20 +509,53 @@ export const createContextReader = (
   }
 
   /** Reads explicitly named documentation files, independent of mention
-   *  matching or traceRelatedFiles. Budget-tracked like readChangedFiles. */
+   *  matching or traceRelatedFiles. Budget-tracked like readChangedFiles.
+   *  excludePaths carries every path a higher-priority channel already claimed
+   *  (changed files, related files, the conventions file when its section
+   *  carries the whole file) so a doc's full text
+   *  is never rendered twice. Skipping on path presence rather than on
+   *  successful inclusion is lossless: this budget is what survives all changed
+   *  files, so a file demoted to diff-only there can never fit here, and an
+   *  unreadable or binary file fails the second read for the same reason it
+   *  failed the first. The one path that could still succeed is a lockfile,
+   *  force-demoted upstream precisely so its full text stays out. */
   const readPriorityDocs = async ({
     priorityDocs,
     budgetTokens,
+    excludePaths,
   }: {
     priorityDocs: string[]
     budgetTokens: number
+    excludePaths: string[]
   }): Promise<BudgetedFiles> => {
     const files: PromptFile[] = []
+    const excludePathSet = new Set(
+      excludePaths.map((excludePath) => posix.normalize(excludePath)),
+    )
+    // Config parsing splits and trims priority_docs but does not dedupe, so
+    // two spellings of one path ("README.md, ./README.md") would otherwise be
+    // read and rendered twice — the at-most-once invariant has to hold at the
+    // read boundary, not only in the status note.
+    const seenDocPaths = new Set<string>()
     // Sequential state by design: priority order determines budget priority,
     // and each file's inclusion depends on the budget left by files before it.
     let remainingTokens = budgetTokens
 
     for (const docPath of priorityDocs) {
+      const normalizedDocPath = posix.normalize(docPath)
+      if (excludePathSet.has(normalizedDocPath)) {
+        logger.info("priority doc already in context — skipping re-read", {
+          path: docPath,
+        })
+        continue
+      }
+      if (seenDocPaths.has(normalizedDocPath)) {
+        logger.info("priority doc listed more than once — skipping duplicate", {
+          path: docPath,
+        })
+        continue
+      }
+      seenDocPaths.add(normalizedDocPath)
       const content = await readPriorityDocOrNull(
         docPath,
         remainingTokens * CHARS_PER_TOKEN,

@@ -231,6 +231,7 @@ type PostIssueCommentParams = {
 type ReadChangedFilesParams = {
   changedPaths: string[]
   budgetTokens: number
+  diffOnlyPaths: string[]
 }
 
 type FindRelatedFilesParams = {
@@ -254,6 +255,7 @@ const first = <T>(array: T[]): T => {
 type ReadPriorityDocsParams = {
   priorityDocs: string[]
   budgetTokens: number
+  excludePaths: string[]
 }
 
 type FindRelatedDocsParams = {
@@ -1020,6 +1022,253 @@ describe("orchestrate", () => {
             "1 related doc(s) excluded by `max_related_docs` cap: `docs/capped.md`",
           ],
         }),
+      ])
+    })
+
+    it("omits a priority doc already in context as a changed file", async () => {
+      // Reproduces vault-cortex PR #397: the doc budget is exhausted, so the
+      // priority-doc read returns nothing — but README.md is already in full
+      // context as a changed file and must not be reported as missing.
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: ["README.md", "MISSING.md"] },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [
+              {
+                path: "README.md",
+                content: "# Readme",
+                includedAs: "full" as const,
+              },
+            ],
+            remainingTokens: 0,
+          }),
+          readPriorityDocs: async (params) => ({
+            files: [],
+            remainingTokens: params.budgetTokens,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+          contextNotes: [
+            "Priority docs not included: `MISSING.md` (missing, unreadable, or over budget)",
+          ],
+        }),
+      ])
+    })
+
+    it("does not exclude a diff-only changed file from the priority-doc read", async () => {
+      // A diff-only changed file sent only diff hunks — its full text is not
+      // in the prompt. maxScanBytes (per-file) and the priority-doc budget
+      // (total remaining) are different caps, so the file may still fit here.
+      // Excluding it would silently suppress a genuine absence.
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: ["README.md"] },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [
+              {
+                path: "README.md",
+                content: "",
+                includedAs: "diff-only" as const,
+              },
+            ],
+            remainingTokens: 0,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
+        "AGENTS.md",
+      ])
+    })
+
+    it("excludes changed files, related files, and conventions from the priority-doc read", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          traceRelatedFiles: true,
+          conventionsFile: "AGENTS.md",
+          priorityDocs: ["README.md"],
+        },
+        contextReader: {
+          findRelatedFiles: async () => ({
+            files: [
+              {
+                path: "src/caller.ts",
+                content: "import { greet } from './greeter.js'",
+                includedAs: "full" as const,
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
+        "src/greeter.ts",
+        "src/caller.ts",
+        "AGENTS.md",
+      ])
+    })
+
+    it("renders a changed conventions file diff-only when its own section carries it whole", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md" },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual([
+        "AGENTS.md",
+      ])
+    })
+
+    it("keeps a changed conventions file full when its own section is truncated", async () => {
+      // Over the 8k-token conventions cap: the conventions section holds only
+      // a truncated head, so the changed-files copy is the sole full text and
+      // demoting it would lose the tail.
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md" },
+        contextReader: {
+          readConventions: async () => "c".repeat(32_001),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual([])
+    })
+
+    it("omits the conventions file from the priority-doc exclusions when its section is truncated", async () => {
+      // Over the 8k-token cap: the conventions section carries only a
+      // truncated head, so its full text was never sent. Excluding it from the
+      // priority-doc read would drop the tail silently — the priority-doc
+      // channel is the one that can still supply it.
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md", priorityDocs: ["AGENTS.md"] },
+        contextReader: {
+          readConventions: async () => "c".repeat(32_001),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
+        "src/greeter.ts",
+      ])
+    })
+
+    it("excludes an over-cap conventions file from priority docs when it is changed in the PR", async () => {
+      // Over the 8k-token cap + changed + in priority_docs: the changed-files
+      // channel keeps the full copy (conventions section truncates), and the
+      // priority-doc channel skips via the changed-files path in
+      // priorityDocsInContext — one full copy, no double-render. The
+      // conventions contribution to priorityDocsInContext is absent (over-cap),
+      // but the changed-files contribution supplies it.
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md", priorityDocs: ["AGENTS.md"] },
+        contextReader: {
+          readConventions: async () => "c".repeat(32_001),
+          readChangedFiles: async () => ({
+            files: [
+              fixtureChangedFile,
+              {
+                path: "AGENTS.md",
+                content: "c".repeat(32_001),
+                includedAs: "full" as const,
+              },
+            ],
+            remainingTokens: 10_000,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
+        "src/greeter.ts",
+        "AGENTS.md",
+      ])
+    })
+
+    it("suppresses the truncated conventions section when priority docs read the full file", async () => {
+      // Over-cap conventions + listed in priority_docs + not excluded from
+      // readPriorityDocs (because conventionsAlreadyRenderedInFull is false).
+      // Priority docs read it in full → the truncated conventions section is
+      // suppressed to avoid 8K tokens of redundant content.
+      const overCapConventions = "c".repeat(32_001)
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md", priorityDocs: ["AGENTS.md"] },
+        contextReader: {
+          readConventions: async () => overCapConventions,
+          readPriorityDocs: async () => ({
+            files: [
+              {
+                path: "AGENTS.md",
+                content: overCapConventions,
+                includedAs: "full" as const,
+              },
+            ],
+            remainingTokens: 0,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.conventions).toBeNull()
+    })
+
+    it("keeps the conventions section when priority docs do not read the file", async () => {
+      // Over-cap conventions + NOT in priority_docs → priority docs don't read
+      // it, so the truncated conventions section is the only copy. Keep it.
+      const overCapConventions = "c".repeat(32_001)
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md", priorityDocs: ["README.md"] },
+        contextReader: {
+          readConventions: async () => overCapConventions,
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.conventions).toBe(overCapConventions)
+    })
+
+    it("omits the conventions file from the priority-doc exclusions when it is not found", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md", priorityDocs: ["README.md"] },
+        contextReader: {
+          readConventions: async () => null,
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
+        "src/greeter.ts",
       ])
     })
   })

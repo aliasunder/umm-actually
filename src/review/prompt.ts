@@ -13,7 +13,16 @@ export type PromptFile = {
 
 /** ~4 chars per token — the standard rough heuristic; we only need order-of-magnitude. */
 export const CHARS_PER_TOKEN = 4
-const CONVENTIONS_TOKEN_CAP = 8_000
+export const CONVENTIONS_TOKEN_CAP = 8_000
+
+/** Whether the conventions section will carry the file's complete text rather
+ *  than a truncated head. A conventions file that also changed in the PR is
+ *  rendered by the changed-files channel too — the caller uses this to decide
+ *  which of the two copies is the full one, so exactly one full copy is ever
+ *  sent. Shares CONVENTIONS_TOKEN_CAP with the truncation itself so the two
+ *  cannot drift. */
+export const conventionsRenderInFull = (conventions: string): boolean =>
+  conventions.length <= CONVENTIONS_TOKEN_CAP * CHARS_PER_TOKEN
 
 const IDENTITY_AND_SCOPE = `You are umm-actually, a code review bot. You review the changes in a pull
 request. You are skeptical: code being in the diff is not evidence it is correct.

@@ -154,6 +154,7 @@ describe("readChangedFiles", () => {
     const result = await contextReader.readChangedFiles({
       changedPaths: ["src/greeter.ts", "src/registry.ts"],
       budgetTokens: 10_000,
+      diffOnlyPaths: [],
     })
 
     expect(result).toEqual({
@@ -178,6 +179,7 @@ describe("readChangedFiles", () => {
     const result = await contextReader.readChangedFiles({
       changedPaths: ["src/caller.ts", "src/greeter.ts"],
       budgetTokens: estimateTokens(greeterContent),
+      diffOnlyPaths: [],
     })
 
     expect(result).toEqual({
@@ -186,6 +188,45 @@ describe("readChangedFiles", () => {
         { path: "src/greeter.ts", content: greeterContent, includedAs: "full" },
       ],
       remainingTokens: 0,
+    })
+  })
+
+  it("includes a diffOnlyPaths entry as diff-only and spends no budget on it", async () => {
+    const { contextReader, logger } = makeReader()
+
+    const result = await contextReader.readChangedFiles({
+      changedPaths: ["AGENTS.md", "src/greeter.ts"],
+      budgetTokens: 10_000,
+      diffOnlyPaths: ["AGENTS.md"],
+    })
+
+    expect(result).toEqual({
+      files: [
+        { path: "AGENTS.md", content: "", includedAs: "diff-only" },
+        { path: "src/greeter.ts", content: greeterContent, includedAs: "full" },
+      ],
+      remainingTokens: 10_000 - estimateTokens(greeterContent),
+    })
+    expect(logger.messages).toContainEqual({
+      level: "info",
+      message:
+        "changed file already rendered in full elsewhere — including diff-only",
+      data: { path: "AGENTS.md" },
+    })
+  })
+
+  it("normalizes diffOnlyPaths before matching changed paths", async () => {
+    const { contextReader } = makeReader()
+
+    const result = await contextReader.readChangedFiles({
+      changedPaths: ["AGENTS.md"],
+      budgetTokens: 10_000,
+      diffOnlyPaths: ["./AGENTS.md"],
+    })
+
+    expect(result).toEqual({
+      files: [{ path: "AGENTS.md", content: "", includedAs: "diff-only" }],
+      remainingTokens: 10_000,
     })
   })
 
@@ -209,6 +250,7 @@ describe("readChangedFiles", () => {
           "src/app.ts",
         ],
         budgetTokens: 10_000,
+        diffOnlyPaths: [],
       })
 
       expect(result).toEqual({
@@ -245,6 +287,7 @@ describe("readChangedFiles", () => {
       const result = await contextReader.readChangedFiles({
         changedPaths: ["src/large.ts"],
         budgetTokens: estimateTokens(multibyteContent),
+        diffOnlyPaths: [],
       })
 
       expect(result).toEqual({
@@ -262,6 +305,7 @@ describe("readChangedFiles", () => {
     const result = await contextReader.readChangedFiles({
       changedPaths: ["src/missing.ts"],
       budgetTokens: 10_000,
+      diffOnlyPaths: [],
     })
 
     expect(result.files).toEqual([
@@ -289,6 +333,7 @@ describe("readChangedFiles", () => {
       const result = await contextReader.readChangedFiles({
         changedPaths: ["src/locked.ts"],
         budgetTokens: 10_000,
+        diffOnlyPaths: [],
       })
 
       expect(result.files).toEqual([
@@ -313,6 +358,7 @@ describe("readChangedFiles", () => {
     const result = await contextReader.readChangedFiles({
       changedPaths: ["src/data.bin"],
       budgetTokens: 10_000,
+      diffOnlyPaths: [],
     })
 
     expect(result.files).toEqual([
@@ -330,6 +376,7 @@ describe("readChangedFiles", () => {
       contextReader.readChangedFiles({
         changedPaths: ["../../etc/passwd"],
         budgetTokens: 10_000,
+        diffOnlyPaths: [],
       }),
     ).rejects.toThrow(new Error("path escapes the workspace: ../../etc/passwd"))
   })
@@ -357,6 +404,7 @@ describe("readChangedFiles", () => {
       const result = await contextReader.readChangedFiles({
         changedPaths: ["src/leak.ts"],
         budgetTokens: 10_000,
+        diffOnlyPaths: [],
       })
 
       expect(result.files).toEqual([
@@ -386,6 +434,7 @@ describe("readChangedFiles", () => {
       const result = await contextReader.readChangedFiles({
         changedPaths: ["leak.ts"],
         budgetTokens: 10_000,
+        diffOnlyPaths: [],
       })
 
       expect(result.files).toEqual([
@@ -999,6 +1048,7 @@ describe("readPriorityDocs", () => {
       const result = await reader.readPriorityDocs({
         priorityDocs: ["README.md"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(result).toEqual({
@@ -1032,6 +1082,7 @@ describe("readPriorityDocs", () => {
       const result = await reader.readPriorityDocs({
         priorityDocs: ["README.md"],
         budgetTokens: estimateTokens(multibyteContent),
+        excludePaths: [],
       })
 
       expect(result).toEqual({
@@ -1059,6 +1110,7 @@ describe("readPriorityDocs", () => {
       const result = await reader.readPriorityDocs({
         priorityDocs: ["README.md"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })
@@ -1083,6 +1135,7 @@ describe("readPriorityDocs", () => {
       const result = await reader.readPriorityDocs({
         priorityDocs: ["../../etc/passwd"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })
@@ -1108,6 +1161,7 @@ describe("readPriorityDocs", () => {
       const result = await reader.readPriorityDocs({
         priorityDocs: ["README.md"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })
@@ -1143,6 +1197,7 @@ describe("readPriorityDocs", () => {
       const result = await reader.readPriorityDocs({
         priorityDocs: ["README.md"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })
@@ -1170,6 +1225,7 @@ describe("readPriorityDocs", () => {
       const result = await reader.readPriorityDocs({
         priorityDocs: ["README.md"],
         budgetTokens: 1,
+        excludePaths: [],
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 1 })
@@ -1189,6 +1245,135 @@ describe("readPriorityDocs", () => {
       const result = await reader.readPriorityDocs({
         priorityDocs: ["README.md"],
         budgetTokens: 100_000,
+        excludePaths: [],
+      })
+
+      expect(result).toEqual({ files: [], remainingTokens: 100_000 })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("skips a doc listed in excludePaths and reads the rest", async () => {
+    const guideContent = "# Guide"
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": "# Already a changed file",
+      "GUIDE.md": guideContent,
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md", "GUIDE.md"],
+        budgetTokens: 100_000,
+        excludePaths: ["README.md"],
+      })
+
+      expect(result).toEqual({
+        files: [
+          {
+            path: "GUIDE.md",
+            content: guideContent,
+            includedAs: "full",
+            reason: "priority documentation",
+          },
+        ],
+        remainingTokens: 100_000 - estimateTokens(guideContent),
+      })
+      expect(logger.messages).toContainEqual({
+        level: "info",
+        message: "priority doc already in context — skipping re-read",
+        data: { path: "README.md" },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("reads a doc once when priority_docs names it under two spellings", async () => {
+    const readmeContent = "# Listed twice"
+    const guideContent = "# Guide"
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": readmeContent,
+      "GUIDE.md": guideContent,
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md", "./README.md", "GUIDE.md"],
+        budgetTokens: 100_000,
+        excludePaths: [],
+      })
+
+      expect(result).toEqual({
+        files: [
+          {
+            path: "README.md",
+            content: readmeContent,
+            includedAs: "full",
+            reason: "priority documentation",
+          },
+          {
+            path: "GUIDE.md",
+            content: guideContent,
+            includedAs: "full",
+            reason: "priority documentation",
+          },
+        ],
+        remainingTokens:
+          100_000 -
+          estimateTokens(readmeContent) -
+          estimateTokens(guideContent),
+      })
+      expect(logger.messages).toContainEqual({
+        level: "info",
+        message: "priority doc listed more than once — skipping duplicate",
+        data: { path: "./README.md" },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("normalizes excludePaths before comparing against priority docs", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": "# Already a changed file",
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["./README.md"],
+        budgetTokens: 100_000,
+        excludePaths: ["README.md"],
+      })
+
+      expect(result).toEqual({ files: [], remainingTokens: 100_000 })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("leaves the token budget untouched for an excluded doc", async () => {
+    // The point of the exclusion is that the doc's tokens are spent once, by
+    // the channel that already claimed it — a skip that still decremented the
+    // budget would starve findRelatedDocs for no gain.
+    const readmeContent = "# A reasonably long readme body to spend budget on"
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": readmeContent,
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md"],
+        budgetTokens: 100_000,
+        excludePaths: ["README.md"],
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })
@@ -1208,6 +1393,7 @@ describe("readPriorityDocs", () => {
       const result = await reader.readPriorityDocs({
         priorityDocs: [],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })

@@ -1,3 +1,4 @@
+import { posix } from "node:path"
 import parseDiff from "parse-diff"
 import type { ActionConfig } from "./config.js"
 import {
@@ -30,6 +31,7 @@ import {
   type AnchorEntry,
   type ReviewComment,
 } from "./review/comment-mapping.js"
+import { buildContextNotes } from "./review/context-notes.js"
 import {
   resolveSeverityThreshold,
   type Finding,
@@ -39,6 +41,8 @@ import { resolvePhases, type ReviewPhase } from "./review/phases.js"
 import {
   buildSystemPrompt,
   buildUserPrompt,
+  CONVENTIONS_TOKEN_CAP,
+  conventionsRenderInFull,
   estimateTokens,
   generateDelimiterNonce,
   type PromptFile,
@@ -409,11 +413,21 @@ const runReviewPipeline = async (
     conventionsFile: config.conventionsFile,
   })
 
+  // The conventions file has its own prompt section. When that section carries
+  // the whole file, a changed conventions file would be rendered twice — so the
+  // changed-files channel carries it diff-only. When the section is truncated
+  // instead, the changed-files copy is the only full one and stays full.
+  const conventionsAlreadyRenderedInFull =
+    conventions !== null && conventionsRenderInFull(conventions)
+
   const fileBudgetTokens = config.contextBudgetTokens - diffTokens
   const { files: changedFiles, remainingTokens } =
     await contextReader.readChangedFiles({
       changedPaths,
       budgetTokens: fileBudgetTokens,
+      diffOnlyPaths: conventionsAlreadyRenderedInFull
+        ? [config.conventionsFile]
+        : [],
     })
 
   const relatedFilesResult = config.traceRelatedFiles
@@ -430,11 +444,52 @@ const runReviewPipeline = async (
   )
   const docBudgetTokens = Math.max(0, remainingTokens - relatedFilesTokens)
 
+  // Every path whose full text a higher-priority channel already sent.
+  // Diff-only changed files are excluded — only diff hunks reached the
+  // prompt, so the priority-doc channel should still attempt a full read
+  // (maxScanBytes and the doc budget are different caps). The conventions
+  // file counts only when its section carries the whole file — when that
+  // section truncates, its full text has NOT been sent.
+  const priorityDocsInContext = [
+    ...changedFiles
+      .filter((file) => file.includedAs === "full")
+      .map((file) => file.path),
+    ...relatedFiles.map((file) => file.path),
+    ...(conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []),
+  ]
+
   const { files: priorityDocFiles, remainingTokens: docRemainingTokens } =
     await contextReader.readPriorityDocs({
       priorityDocs: config.priorityDocs,
       budgetTokens: docBudgetTokens,
+      excludePaths: priorityDocsInContext,
     })
+
+  // When the conventions section truncated but priority docs read the full
+  // file, suppress the truncated head — the full copy in the priority-docs
+  // section is strictly better, and rendering both wastes ~8K tokens.
+  const conventionsReadInFullByPriorityDocs =
+    conventions !== null &&
+    !conventionsAlreadyRenderedInFull &&
+    priorityDocFiles.some(
+      (file) =>
+        posix.normalize(file.path) === posix.normalize(config.conventionsFile),
+    )
+
+  if (conventionsReadInFullByPriorityDocs) {
+    logger.info(
+      "conventions file read in full by priority-doc channel — suppressing truncated conventions section to avoid duplication",
+      {
+        conventionsFile: config.conventionsFile,
+        conventionsTokenCap: CONVENTIONS_TOKEN_CAP,
+        conventionsLength: conventions.length,
+      },
+    )
+  }
+
+  const conventionsForPrompt = conventionsReadInFullByPriorityDocs
+    ? null
+    : conventions
 
   const mentionMatchedDocsResult = config.traceRelatedFiles
     ? await contextReader.findRelatedDocs({
@@ -448,7 +503,11 @@ const runReviewPipeline = async (
   const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
 
   logger.info("context sent to model", {
-    conventionsFile: conventions ? config.conventionsFile : "not found",
+    conventionsFile: conventions
+      ? conventionsReadInFullByPriorityDocs
+        ? `${config.conventionsFile} (suppressed — full copy in priority docs)`
+        : config.conventionsFile
+      : "not found",
     changedFilesCount: changedFiles.length,
     changedFilePaths: changedFiles.map((file) => file.path).join(", "),
     relatedFilesCount: relatedFiles.length,
@@ -472,25 +531,13 @@ const runReviewPipeline = async (
     tokenBudgetRemainingForDocs: docRemainingTokens,
   })
 
-  const contextNotes: string[] = []
-  const skippedPriorityDocs = config.priorityDocs.filter(
-    (docPath) => !priorityDocFiles.some((file) => file.path === docPath),
-  )
-  if (skippedPriorityDocs.length > 0) {
-    contextNotes.push(
-      `Priority docs not included: ${skippedPriorityDocs.map((docPath) => `\`${docPath}\``).join(", ")} (missing, unreadable, or over budget)`,
-    )
-  }
-  if (relatedFilesResult.excludedByCapPaths.length > 0) {
-    contextNotes.push(
-      `${relatedFilesResult.excludedByCapPaths.length} related file(s) excluded by \`max_related_files\` cap: ${relatedFilesResult.excludedByCapPaths.map((filePath) => `\`${filePath}\``).join(", ")}`,
-    )
-  }
-  if (mentionMatchedDocsResult.excludedByCapPaths.length > 0) {
-    contextNotes.push(
-      `${mentionMatchedDocsResult.excludedByCapPaths.length} related doc(s) excluded by \`max_related_docs\` cap: ${mentionMatchedDocsResult.excludedByCapPaths.map((docPath) => `\`${docPath}\``).join(", ")}`,
-    )
-  }
+  const contextNotes = buildContextNotes({
+    priorityDocs: config.priorityDocs,
+    priorityDocsInContext,
+    priorityDocsRead: priorityDocFiles,
+    relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
+    docsExcludedPaths: mentionMatchedDocsResult.excludedByCapPaths,
+  })
 
   // Step 9.5: fetch prior bot comments — needed both for the prompt (the
   // model sees what's already posted and self-suppresses conceptual dupes)
@@ -518,7 +565,7 @@ const runReviewPipeline = async (
   const structuredResult = await generateFindings({
     prContext,
     phase,
-    conventions,
+    conventions: conventionsForPrompt,
     changedFiles,
     relatedFiles,
     relatedDocs,
