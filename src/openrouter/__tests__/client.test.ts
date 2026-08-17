@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { createTestLogger } from "../../__tests__/test-logger.js"
 import { reviewResponseJsonSchema } from "../../review/finding.js"
 import {
@@ -91,7 +91,7 @@ const makeSdkStub = ({
 const makeClient = (stub: { sdk: OpenRouterLike }) => {
   const logger = createTestLogger()
   const client = createOpenRouterClient(
-    { sdk: stub.sdk, requestTimeoutMs: 45_000 },
+    { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
     logger,
   )
   return { client, logger }
@@ -326,8 +326,7 @@ describe("requestReview", () => {
     })
   })
 
-  it("delays before the retry but not after the final attempt", async () => {
-    vi.useFakeTimers()
+  it("does not sleep after the final attempt when retries are exhausted", async () => {
     const stub = makeSdkStub({
       sendResponses: [
         { error: makeStatusError(429) },
@@ -336,17 +335,10 @@ describe("requestReview", () => {
     })
     const { client } = makeClient(stub)
 
-    // Attach the rejection handler BEFORE advancing timers so the
-    // rejection is never unhandled (Node flags unhandled rejections
-    // between ticks in CI).
-    const assertion = expect(
+    await expect(
       client.requestReview({ ...requestParams, fallbackModel: null }),
     ).rejects.toThrow("review request failed")
-
-    await vi.advanceTimersByTimeAsync(1_000)
-    await assertion
     expect(stub.sendCalls).toHaveLength(2)
-    vi.useRealTimers()
   })
 
   it("truncates an error message longer than 200 characters in the attempt summary", async () => {

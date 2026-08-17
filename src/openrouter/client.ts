@@ -206,12 +206,14 @@ export const createOpenRouterClient = (
   {
     sdk,
     requestTimeoutMs,
+    retryDelayMs = RETRY_DELAY_MS,
   }: {
     sdk: OpenRouterLike
     /** Per-attempt cap — a timed-out request aborts as a status-less
      *  (retryable) api_error and flows into the retry/fallback ladder,
      *  instead of hanging the job until the runner's 6-hour kill. */
     requestTimeoutMs: number
+    retryDelayMs?: number
   },
   logger: Logger,
 ): OpenRouterClient => {
@@ -406,8 +408,8 @@ export const createOpenRouterClient = (
         }
         if (!attemptResult.retryable) break
         attemptNumber++
-        if (attemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
-          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+        if (attemptNumber <= MAX_ATTEMPTS_PER_MODEL && retryDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
         }
       }
     }
