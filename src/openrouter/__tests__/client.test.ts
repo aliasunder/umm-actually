@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createTestLogger } from "../../__tests__/test-logger.js"
 import { reviewResponseJsonSchema } from "../../review/finding.js"
 import {
@@ -324,6 +324,30 @@ describe("requestReview", () => {
         outcome: "api_error",
       }),
     })
+  })
+
+  it("delays before the retry but not after the final attempt", async () => {
+    vi.useFakeTimers()
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeStatusError(429) },
+        { error: makeStatusError(429) },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const resultPromise = client.requestReview({
+      ...requestParams,
+      fallbackModel: null,
+    })
+
+    // Attempt 1 fires immediately; the 429 triggers the retry path.
+    // Advance past the 1s delay so attempt 2 fires.
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    await expect(resultPromise).rejects.toThrow("review request failed")
+    expect(stub.sendCalls).toHaveLength(2)
+    vi.useRealTimers()
   })
 
   it("truncates an error message longer than 200 characters in the attempt summary", async () => {
