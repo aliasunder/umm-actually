@@ -531,17 +531,30 @@ export const createContextReader = (
     const excludePathSet = new Set(
       excludePaths.map((excludePath) => posix.normalize(excludePath)),
     )
+    // Config parsing splits and trims priority_docs but does not dedupe, so
+    // two spellings of one path ("README.md, ./README.md") would otherwise be
+    // read and rendered twice — the at-most-once invariant has to hold at the
+    // read boundary, not only in the status note.
+    const seenDocPaths = new Set<string>()
     // Sequential state by design: priority order determines budget priority,
     // and each file's inclusion depends on the budget left by files before it.
     let remainingTokens = budgetTokens
 
     for (const docPath of priorityDocs) {
-      if (excludePathSet.has(posix.normalize(docPath))) {
+      const normalizedDocPath = posix.normalize(docPath)
+      if (excludePathSet.has(normalizedDocPath)) {
         logger.info("priority doc already in context — skipping re-read", {
           path: docPath,
         })
         continue
       }
+      if (seenDocPaths.has(normalizedDocPath)) {
+        logger.info("priority doc listed more than once — skipping duplicate", {
+          path: docPath,
+        })
+        continue
+      }
+      seenDocPaths.add(normalizedDocPath)
       const content = await readPriorityDocOrNull(
         docPath,
         remainingTokens * CHARS_PER_TOKEN,

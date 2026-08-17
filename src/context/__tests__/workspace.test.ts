@@ -1291,6 +1291,53 @@ describe("readPriorityDocs", () => {
     }
   })
 
+  it("reads a doc once when priority_docs names it under two spellings", async () => {
+    const readmeContent = "# Listed twice"
+    const guideContent = "# Guide"
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": readmeContent,
+      "GUIDE.md": guideContent,
+    })
+    try {
+      const logger = createTestLogger()
+      const reader = createContextReader(defaultConfig(root), logger)
+
+      const result = await reader.readPriorityDocs({
+        priorityDocs: ["README.md", "./README.md", "GUIDE.md"],
+        budgetTokens: 100_000,
+        excludePaths: [],
+      })
+
+      expect(result).toEqual({
+        files: [
+          {
+            path: "README.md",
+            content: readmeContent,
+            includedAs: "full",
+            reason: "priority documentation",
+          },
+          {
+            path: "GUIDE.md",
+            content: guideContent,
+            includedAs: "full",
+            reason: "priority documentation",
+          },
+        ],
+        remainingTokens:
+          100_000 -
+          estimateTokens(readmeContent) -
+          estimateTokens(guideContent),
+      })
+      expect(logger.messages).toContainEqual({
+        level: "info",
+        message: "priority doc listed more than once — skipping duplicate",
+        data: { path: "./README.md" },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
   it("normalizes excludePaths before comparing against priority docs", async () => {
     const { root, cleanup } = await makeTempWorkspace({
       "README.md": "# Already a changed file",

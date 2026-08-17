@@ -1125,6 +1125,26 @@ describe("orchestrate", () => {
       expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual([])
     })
 
+    it("omits the conventions file from the priority-doc exclusions when its section is truncated", async () => {
+      // Over the 8k-token cap: the conventions section carries only a
+      // truncated head, so its full text was never sent. Excluding it from the
+      // priority-doc read would drop the tail silently — the priority-doc
+      // channel is the one that can still supply it.
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "AGENTS.md", priorityDocs: ["AGENTS.md"] },
+        contextReader: {
+          readConventions: async () => "c".repeat(32_001),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
+        "src/greeter.ts",
+      ])
+    })
+
     it("omits the conventions file from the priority-doc exclusions when it is not found", async () => {
       const stubs = makeOrchestrateDeps({
         config: { conventionsFile: "AGENTS.md", priorityDocs: ["README.md"] },
