@@ -304,6 +304,10 @@ describe("requestReview", () => {
     expect(
       stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
     ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
+    expect(stub.sendCalls[0]?.options).toEqual({
+      timeoutMs: 45_000,
+      retries: { strategy: "none" },
+    })
     expect(result.attempts[0]).toEqual({
       model: "openai/gpt-5-mini",
       outcome: "api_error",
