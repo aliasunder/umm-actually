@@ -405,8 +405,10 @@ export const createOpenRouterClient = (
           )
         }
         if (!attemptResult.retryable) break
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
         attemptNumber++
+        if (attemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+        }
       }
     }
 
