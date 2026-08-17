@@ -511,7 +511,8 @@ export const createContextReader = (
   /** Reads explicitly named documentation files, independent of mention
    *  matching or traceRelatedFiles. Budget-tracked like readChangedFiles.
    *  excludePaths carries every path a higher-priority channel already claimed
-   *  (changed files, related files, the conventions file) so a doc's full text
+   *  (changed files, related files, the conventions file when its section
+   *  carries the whole file) so a doc's full text
    *  is never rendered twice. Skipping on path presence rather than on
    *  successful inclusion is lossless: this budget is what survives all changed
    *  files, so a file demoted to diff-only there can never fit here, and an
