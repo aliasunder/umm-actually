@@ -331,7 +331,7 @@ describe("requestReview", () => {
     })
   })
 
-  it("passes an AbortSignal that aborts after the configured timeout", async () => {
+  it("passes a live (non-aborted) AbortSignal to the SDK call", async () => {
     const stub = makeSdkStub({
       sendResponses: [{ value: acceptedChatResult }],
       generationResponses: [{ value: { data: { totalCost: 0.01 } } }],
@@ -359,18 +359,33 @@ describe("requestReview", () => {
   })
 
   it("does not sleep after the final attempt when retries are exhausted", async () => {
+    const retryDelayMs = 50
     const stub = makeSdkStub({
       sendResponses: [
         { error: makeStatusError(429) },
         { error: makeStatusError(429) },
       ],
     })
-    const { client } = makeClient(stub)
+    const logger = createTestLogger()
+    const client = createOpenRouterClient(
+      { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs },
+      logger,
+    )
 
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
     await expect(
       client.requestReview({ ...requestParams, fallbackModel: null }),
     ).rejects.toThrow("review request failed")
+
+    // retryDelayMs sleeps happen between retryable failures; the guard
+    // `attemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
+    // after the final attempt. Only one sleep (between attempts 1 and 2).
+    const retrySleepCalls = setTimeoutSpy.mock.calls.filter(
+      (call) => call[1] === retryDelayMs,
+    )
+    expect(retrySleepCalls).toHaveLength(1)
     expect(stub.sendCalls).toHaveLength(2)
+    setTimeoutSpy.mockRestore()
   })
 
   it("truncates an error message longer than 200 characters in the attempt summary", async () => {
