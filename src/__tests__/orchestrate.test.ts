@@ -1235,7 +1235,9 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       const reviewContext = first(stubs.generateFindingsCalls)
-      expect(reviewContext.conventions).toBeNull()
+      expect(reviewContext.conventions).toBe(
+        "(conventions file included in full as priority documentation below — ground convention findings in that copy)",
+      )
     })
 
     it("keeps the conventions section when priority docs do not read the file", async () => {

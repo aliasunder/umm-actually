@@ -33,7 +33,7 @@ inputs:
     required: false
     default: low
   conventions_file:
-    description: Repo-relative path to the conventions file included in the prompt (truncated at ~8000 tokens). When it also changed in the PR and this section carries the whole file, the changed-files copy is included diff-only so its text is not sent twice; when this section truncates, the changed-files copy stays full so the tail is not lost. When priority_docs reads the full file, the truncated conventions section is suppressed to avoid duplication
+    description: Repo-relative path to the conventions file included in the prompt (truncated at ~8000 tokens)
     required: false
     default: AGENTS.md
   phases:
@@ -49,7 +49,7 @@ inputs:
     required: false
     default: "true"
   priority_docs:
-    description: Comma-separated repo-relative paths always included in review context. A doc whose full text is already in context — as a full-content changed file, a related file, or the conventions file (when that section carries the whole file) — is not read again; a diff-only changed file is still read here (empty = disabled)
+    description: Comma-separated repo-relative paths always included in review context. Docs already present in full from other context channels are not re-read (empty = disabled)
     required: false
     default: "README.md"
   max_scan_files:

@@ -71,7 +71,10 @@ has a boundary; the boundary is what separates a finding from noise.
 
 Naming: values named for what they ARE (searchText, not needle); functions
 named for what they DO, specifically; callback params explicit (entry, not
-e); booleans named for the affirmative state.
+e); booleans named for the affirmative state. Side-effect prefixes (ensure*, check*, init*, setup*) on functions whose
+return value callers consume misstates the point — name for the return
+(getPdfEngine, resolveConfig). Boundary: keep the prefix when every call
+site in the provided files ignores the return (a true ensure-invariant).
 
 Structure triggers:
 - Nested if/else where one branch is simpler → early return from the simpler
@@ -114,7 +117,26 @@ self-documenting name; a long explanatory comment is a signal to simplify
 the code instead. Regex constants get doc comments saying what they match.
 
 Simplicity: simple over clever; working is the floor, not the bar. Each line
-should read on its own without the reader simulating the code.`
+should read on its own without the reader simulating the code. Built-ins
+over manual string surgery: split/slice/index arithmetic on URLs, paths,
+query strings, headers, or dates — check for a stdlib parser (URL.parse,
+URLSearchParams, path.*) and flag the manual version.
+  Wrong: req.originalUrl.split("?")[0] ?? req.originalUrl
+  Right: URL.parse(req.originalUrl, "http://localhost")?.pathname ?? req.originalUrl
+Boundary: don't flag genuinely lexical operations or formats with no
+stdlib parser.
+
+Docs and comment concision — name the unnecessary content and the drift:
+- Doc-comment padding restates the signature — drifts when it changes.
+- Rationale duplication: narrative already in PR description, commit
+  message, or another doc — copies drift independently.
+- Repeated chain or caveat at every mention — N copies drift.
+- Wrong-level rationale: incidental mechanics instead of the conceptual
+  reason — future editor preserves the wrong constraint.
+- Config-template narration instead of behavior and value shape.
+- Filler lead-ins ("What this looks like in practice:") — delete.
+Boundary: never merge two distinct claims into one; when unsure whether
+a clause is load-bearing, keep it and flag uncertainty.`
 
 export const DIMENSION_TEST_QUALITY = `DIMENSION 3 — TEST QUALITY & COVERAGE.
 For test files, audit each it() individually:
@@ -133,9 +155,13 @@ For test files, audit each it() individually:
   item by path, id, or content).
 - Loose-matcher trigger: when a new or changed test uses toBeTruthy,
   toBeDefined, toBeNull, toBeGreaterThanOrEqual(0), toBeGreaterThan(0),
-  expect.anything(), or toHaveLength plus index-picked property checks,
-  derive what the exact expected value would be from the code under test —
-  if it is derivable, flag it: the test must assert the exact value.
+  expect.anything(), expect.stringMatching, expect.any(,
+  expect.objectContaining, or toHaveLength plus index-picked property
+  checks, derive what the exact expected value would be from the code under
+  test — if it is derivable, flag it: the test must assert the exact value.
+  objectContaining boundary: keep when omitted fields are nondeterministic
+  (timestamps, IDs), not test-owned (third-party params), or asserted
+  separately.
   Wrong (passes even when the resolved value is not the intended one):
     expect(phases).toHaveLength(1)
     expect(phases[0]?.id).toBeTruthy()
@@ -262,7 +288,11 @@ export const REPORTING_RULES = `REPORTING RULES — these override intuition:
   fix template.
 - No environment-specific dismissals: never dismiss a resource, performance,
   or scaling concern by assuming one deployment's specs — judge against the
-  worst reasonable use case for the project's audience.`
+  worst reasonable use case for the project's audience.
+- Same-pattern sweep: when a trigger fires on changed code, scan the rest
+  of that file and the provided related files for other instances of the
+  same pattern, including pre-existing ones. Boundary: sweep the specific
+  pattern that fired, not all dimensions.`
 
 const combinedPhase: ReviewPhase = {
   id: "combined",

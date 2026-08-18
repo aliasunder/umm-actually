@@ -319,10 +319,12 @@ describe("requestReview", () => {
     expect(logger.messages).toContainEqual({
       level: "warn",
       message: "review attempt failed",
-      data: expect.objectContaining({
-        errorSummary: "Request timed out",
+      data: {
+        model: "openai/gpt-5-mini",
+        attemptNumber: 1,
         outcome: "api_error",
-      }),
+        errorSummary: "Request timed out",
+      },
     })
   })
 

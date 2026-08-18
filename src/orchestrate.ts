@@ -488,7 +488,7 @@ const runReviewPipeline = async (
   }
 
   const conventionsForPrompt = conventionsReadInFullByPriorityDocs
-    ? null
+    ? "(conventions file included in full as priority documentation below — ground convention findings in that copy)"
     : conventions
 
   const mentionMatchedDocsResult = config.traceRelatedFiles
