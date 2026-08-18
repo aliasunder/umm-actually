@@ -365,27 +365,27 @@ describe("requestReview", () => {
 
       // Attach the rejection handler BEFORE advancing timers so the
       // second attempt's async abort rejection is caught immediately.
-      const reviewPromise = client
-        .requestReview({ ...requestParams, fallbackModel: null })
-        .catch((err: unknown) => err)
+      const reviewPromise = client.requestReview({
+        ...requestParams,
+        fallbackModel: null,
+      })
+      void reviewPromise.catch(() => undefined)
 
       // Two attempts × 45s each — advance past both timeouts
       await vi.advanceTimersByTimeAsync(90_000)
 
-      const err = await reviewPromise
-      expect(err).toBeInstanceOf(Error)
-      expect((err as Error).message).toMatch("review request failed")
+      await expect(reviewPromise).rejects.toThrow("review request failed")
       expect(stub.sendCalls[0]?.options?.signal?.aborted).toBe(true)
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it("clears the timeout timer after a successful response", async () => {
+  it("clears the chat attempt timeout timer after a successful response", async () => {
     const stub = makeSdkStub({
       sendResponses: [{ value: acceptedChatResult }],
-      generationResponses: [{ value: { data: { totalCost: 0.01 } } }],
     })
+    delete stub.sdk.generations
     const { client } = makeClient(stub)
 
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
