@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createTestLogger } from "../../__tests__/test-logger.js"
 import { reviewResponseJsonSchema } from "../../review/finding.js"
 import {
@@ -46,11 +46,11 @@ const makeSdkStub = ({
 }) => {
   const sendCalls: {
     chatRequest: ChatRequestSubset
-    options: { timeoutMs?: number } | undefined
+    options: { signal?: AbortSignal } | undefined
   }[] = []
   const generationCalls: {
     id: string
-    options: { timeoutMs?: number } | undefined
+    options: { signal?: AbortSignal } | undefined
   }[] = []
 
   const takeNext = (
@@ -133,7 +133,10 @@ describe("requestReview", () => {
           },
           stream: false,
         },
-        options: { timeoutMs: 45_000, retries: { strategy: "none" } },
+        options: {
+          retries: { strategy: "none" },
+          signal: expect.any(AbortSignal),
+        },
       },
     ])
   })
@@ -305,8 +308,8 @@ describe("requestReview", () => {
       stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
     ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
     expect(stub.sendCalls[0]?.options).toEqual({
-      timeoutMs: 45_000,
       retries: { strategy: "none" },
+      signal: expect.any(AbortSignal),
     })
     expect(result.attempts[0]).toEqual({
       model: "openai/gpt-5-mini",
@@ -328,19 +331,103 @@ describe("requestReview", () => {
     })
   })
 
+  it("passes a live (non-aborted) AbortSignal to the SDK call", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [{ value: acceptedChatResult }],
+      generationResponses: [{ value: { data: { totalCost: 0.01 } } }],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    const signal = stub.sendCalls[0]?.options?.signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(signal?.aborted).toBe(false)
+  })
+
+  it("aborts the signal when the request exceeds the configured timeout", async () => {
+    vi.useFakeTimers()
+    try {
+      const stub = makeSdkStub({ sendResponses: [] })
+      stub.sdk.chat.send = async (_request, options) => {
+        stub.sendCalls.push({ ..._request, options })
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          )
+        })
+      }
+      const logger = createTestLogger()
+      const client = createOpenRouterClient(
+        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        logger,
+      )
+
+      // Attach the rejection handler BEFORE advancing timers so the
+      // second attempt's async abort rejection is caught immediately.
+      const reviewPromise = client.requestReview({
+        ...requestParams,
+        fallbackModel: null,
+      })
+      void reviewPromise.catch(() => undefined)
+
+      // Two attempts × 45s each — advance past both timeouts
+      await vi.advanceTimersByTimeAsync(90_000)
+
+      await expect(reviewPromise).rejects.toThrow("review request failed")
+      expect(stub.sendCalls[0]?.options?.signal?.aborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("clears the chat attempt timeout timer after a successful response", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [{ value: acceptedChatResult }],
+    })
+    delete stub.sdk.generations
+    const { client } = makeClient(stub)
+
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
+    try {
+      await client.requestReview(requestParams)
+      expect(clearTimeoutSpy).toHaveBeenCalled()
+    } finally {
+      clearTimeoutSpy.mockRestore()
+    }
+  })
+
   it("does not sleep after the final attempt when retries are exhausted", async () => {
+    const retryDelayMs = 50
     const stub = makeSdkStub({
       sendResponses: [
         { error: makeStatusError(429) },
         { error: makeStatusError(429) },
       ],
     })
-    const { client } = makeClient(stub)
+    const logger = createTestLogger()
+    const client = createOpenRouterClient(
+      { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs },
+      logger,
+    )
 
-    await expect(
-      client.requestReview({ ...requestParams, fallbackModel: null }),
-    ).rejects.toThrow("review request failed")
-    expect(stub.sendCalls).toHaveLength(2)
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
+    try {
+      await expect(
+        client.requestReview({ ...requestParams, fallbackModel: null }),
+      ).rejects.toThrow("review request failed")
+
+      // retryDelayMs sleeps happen between retryable failures; the guard
+      // `attemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
+      // after the final attempt. Only one sleep (between attempts 1 and 2).
+      const retrySleepCalls = setTimeoutSpy.mock.calls.filter(
+        (call) => call[1] === retryDelayMs,
+      )
+      expect(retrySleepCalls).toHaveLength(1)
+      expect(stub.sendCalls).toHaveLength(2)
+    } finally {
+      setTimeoutSpy.mockRestore()
+    }
   })
 
   it("truncates an error message longer than 200 characters in the attempt summary", async () => {
@@ -465,7 +552,10 @@ describe("requestReview", () => {
     expect(stub.generationCalls).toEqual([
       {
         id: "gen-no-cost",
-        options: { timeoutMs: 45_000, retries: { strategy: "none" } },
+        options: {
+          retries: { strategy: "none" },
+          signal: expect.any(AbortSignal),
+        },
       },
     ])
     expect(result.attempts[0]?.costUsd).toBe(0.0399)

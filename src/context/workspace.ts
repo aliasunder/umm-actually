@@ -512,13 +512,10 @@ export const createContextReader = (
    *  matching or traceRelatedFiles. Budget-tracked like readChangedFiles.
    *  excludePaths carries every path a higher-priority channel already claimed
    *  (changed files, related files, the conventions file when its section
-   *  carries the whole file) so a doc's full text
-   *  is never rendered twice. Skipping on path presence rather than on
-   *  successful inclusion is lossless: this budget is what survives all changed
-   *  files, so a file demoted to diff-only there can never fit here, and an
-   *  unreadable or binary file fails the second read for the same reason it
-   *  failed the first. The one path that could still succeed is a lockfile,
-   *  force-demoted upstream precisely so its full text stays out. */
+   *  carries the whole file) so a doc's full text is never rendered twice.
+   *  Presence-based exclusion is lossless — every excluded path already has
+   *  its full text in the prompt via a higher-priority channel, so re-reading
+   *  it here would only duplicate content and waste budget. */
   const readPriorityDocs = async ({
     priorityDocs,
     budgetTokens,

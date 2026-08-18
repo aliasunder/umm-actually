@@ -58,8 +58,8 @@ export type OpenRouterLike = {
     send(
       request: { chatRequest: ChatRequestSubset },
       options?: {
-        timeoutMs?: number
         retries?: { strategy: "backoff" | "none" }
+        signal?: AbortSignal
       },
     ): Promise<unknown>
   }
@@ -67,8 +67,8 @@ export type OpenRouterLike = {
     getGeneration(
       request: { id: string },
       options?: {
-        timeoutMs?: number
         retries?: { strategy: "backoff" | "none" }
+        signal?: AbortSignal
       },
     ): Promise<unknown>
   }
@@ -224,12 +224,19 @@ export const createOpenRouterClient = (
     chatRequest: ChatRequestSubset
     model: string
   }): Promise<SingleAttempt> => {
-    const sendResult = await toResult(
-      sdk.chat.send(
-        { chatRequest },
-        { timeoutMs: requestTimeoutMs, retries: { strategy: "none" } },
-      ),
-    )
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs)
+    let sendResult: { ok: true; value: unknown } | { ok: false; error: unknown }
+    try {
+      sendResult = await toResult(
+        sdk.chat.send(
+          { chatRequest },
+          { retries: { strategy: "none" }, signal: controller.signal },
+        ),
+      )
+    } finally {
+      clearTimeout(timer)
+    }
     if (!sendResult.ok) {
       const statusCode = errorStatusCode(sendResult.error)
       const abort = statusCode !== undefined && ABORT_STATUSES.has(statusCode)
@@ -327,12 +334,19 @@ export const createOpenRouterClient = (
     generationId: string,
   ): Promise<number | null> => {
     if (sdk.generations === undefined) return null
-    const lookup = await toResult(
-      sdk.generations.getGeneration(
-        { id: generationId },
-        { timeoutMs: requestTimeoutMs, retries: { strategy: "none" } },
-      ),
-    )
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs)
+    let lookup: { ok: true; value: unknown } | { ok: false; error: unknown }
+    try {
+      lookup = await toResult(
+        sdk.generations.getGeneration(
+          { id: generationId },
+          { retries: { strategy: "none" }, signal: controller.signal },
+        ),
+      )
+    } finally {
+      clearTimeout(timer)
+    }
     if (!lookup.ok) {
       logger.warn("generation cost lookup failed", {
         error: summarizeError(lookup.error),
