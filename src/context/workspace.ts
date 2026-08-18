@@ -513,9 +513,9 @@ export const createContextReader = (
    *  excludePaths carries every path a higher-priority channel already claimed
    *  (changed files, related files, the conventions file when its section
    *  carries the whole file) so a doc's full text is never rendered twice.
-   *  Presence-based exclusion is lossless — every excluded path would fail
-   *  or be skipped here for the same structural reason (budget, readability,
-   *  intentional lockfile demotion). */
+   *  Presence-based exclusion is lossless — every excluded path already has
+   *  its full text in the prompt via a higher-priority channel, so re-reading
+   *  it here would only duplicate content and waste budget. */
   const readPriorityDocs = async ({
     priorityDocs,
     budgetTokens,
