@@ -446,8 +446,7 @@ const runReviewPipeline = async (
 
   // Every path whose full text a higher-priority channel already sent.
   // Diff-only changed files are excluded — only diff hunks reached the
-  // prompt, so the priority-doc channel should still attempt a full read
-  // (maxScanBytes and the doc budget are different caps). The conventions
+  // prompt, so the priority-doc channel should still attempt a full read. The conventions
   // file counts only when its section carries the whole file — when that
   // section truncates, its full text has NOT been sent.
   const priorityDocsInContext = [
