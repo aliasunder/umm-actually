@@ -363,15 +363,18 @@ describe("requestReview", () => {
         logger,
       )
 
-      const reviewPromise = client.requestReview({
-        ...requestParams,
-        fallbackModel: null,
-      })
+      // Attach the rejection handler BEFORE advancing timers so the
+      // second attempt's async abort rejection is caught immediately.
+      const reviewPromise = client
+        .requestReview({ ...requestParams, fallbackModel: null })
+        .catch((err: unknown) => err)
 
       // Two attempts × 45s each — advance past both timeouts
       await vi.advanceTimersByTimeAsync(90_000)
 
-      await expect(reviewPromise).rejects.toThrow("review request failed")
+      const err = await reviewPromise
+      expect(err).toBeInstanceOf(Error)
+      expect((err as Error).message).toMatch("review request failed")
       expect(stub.sendCalls[0]?.options?.signal?.aborted).toBe(true)
     } finally {
       vi.useRealTimers()
@@ -409,19 +412,22 @@ describe("requestReview", () => {
     )
 
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
-    await expect(
-      client.requestReview({ ...requestParams, fallbackModel: null }),
-    ).rejects.toThrow("review request failed")
+    try {
+      await expect(
+        client.requestReview({ ...requestParams, fallbackModel: null }),
+      ).rejects.toThrow("review request failed")
 
-    // retryDelayMs sleeps happen between retryable failures; the guard
-    // `attemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
-    // after the final attempt. Only one sleep (between attempts 1 and 2).
-    const retrySleepCalls = setTimeoutSpy.mock.calls.filter(
-      (call) => call[1] === retryDelayMs,
-    )
-    expect(retrySleepCalls).toHaveLength(1)
-    expect(stub.sendCalls).toHaveLength(2)
-    setTimeoutSpy.mockRestore()
+      // retryDelayMs sleeps happen between retryable failures; the guard
+      // `attemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
+      // after the final attempt. Only one sleep (between attempts 1 and 2).
+      const retrySleepCalls = setTimeoutSpy.mock.calls.filter(
+        (call) => call[1] === retryDelayMs,
+      )
+      expect(retrySleepCalls).toHaveLength(1)
+      expect(stub.sendCalls).toHaveLength(2)
+    } finally {
+      setTimeoutSpy.mockRestore()
+    }
   })
 
   it("truncates an error message longer than 200 characters in the attempt summary", async () => {
