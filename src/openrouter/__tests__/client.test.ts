@@ -345,6 +345,39 @@ describe("requestReview", () => {
     expect(signal?.aborted).toBe(false)
   })
 
+  it("aborts the signal when the request exceeds the configured timeout", async () => {
+    vi.useFakeTimers()
+    try {
+      const stub = makeSdkStub({ sendResponses: [] })
+      stub.sdk.chat.send = async (_request, options) => {
+        stub.sendCalls.push({ ..._request, options })
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          )
+        })
+      }
+      const logger = createTestLogger()
+      const client = createOpenRouterClient(
+        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        logger,
+      )
+
+      const reviewPromise = client.requestReview({
+        ...requestParams,
+        fallbackModel: null,
+      })
+
+      // Two attempts × 45s each — advance past both timeouts
+      await vi.advanceTimersByTimeAsync(90_000)
+
+      await expect(reviewPromise).rejects.toThrow("review request failed")
+      expect(stub.sendCalls[0]?.options?.signal?.aborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("clears the timeout timer after a successful response", async () => {
     const stub = makeSdkStub({
       sendResponses: [{ value: acceptedChatResult }],
@@ -353,9 +386,12 @@ describe("requestReview", () => {
     const { client } = makeClient(stub)
 
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
-    await client.requestReview(requestParams)
-    expect(clearTimeoutSpy).toHaveBeenCalled()
-    clearTimeoutSpy.mockRestore()
+    try {
+      await client.requestReview(requestParams)
+      expect(clearTimeoutSpy).toHaveBeenCalled()
+    } finally {
+      clearTimeoutSpy.mockRestore()
+    }
   })
 
   it("does not sleep after the final attempt when retries are exhausted", async () => {
