@@ -91,7 +91,7 @@ const makeSdkStub = ({
 const makeClient = (stub: { sdk: OpenRouterLike }) => {
   const logger = createTestLogger()
   const client = createOpenRouterClient(
-    { sdk: stub.sdk, requestTimeoutMs: 45_000 },
+    { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
     logger,
   )
   return { client, logger }
@@ -133,7 +133,7 @@ describe("requestReview", () => {
           },
           stream: false,
         },
-        options: { timeoutMs: 45_000 },
+        options: { timeoutMs: 45_000, retries: { strategy: "none" } },
       },
     ])
   })
@@ -291,6 +291,56 @@ describe("requestReview", () => {
     })
   })
 
+  it("retries a TimeoutError through the action's ladder, not the SDK's", async () => {
+    const timeoutError = new Error("Request timed out")
+    timeoutError.name = "TimeoutError"
+    const stub = makeSdkStub({
+      sendResponses: [{ error: timeoutError }, { value: acceptedChatResult }],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams)
+
+    expect(
+      stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
+    ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
+    expect(stub.sendCalls[0]?.options).toEqual({
+      timeoutMs: 45_000,
+      retries: { strategy: "none" },
+    })
+    expect(result.attempts[0]).toEqual({
+      model: "openai/gpt-5-mini",
+      outcome: "api_error",
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      errorSummary: "Request timed out",
+    })
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "review attempt failed",
+      data: expect.objectContaining({
+        errorSummary: "Request timed out",
+        outcome: "api_error",
+      }),
+    })
+  })
+
+  it("does not sleep after the final attempt when retries are exhausted", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeStatusError(429) },
+        { error: makeStatusError(429) },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await expect(
+      client.requestReview({ ...requestParams, fallbackModel: null }),
+    ).rejects.toThrow("review request failed")
+    expect(stub.sendCalls).toHaveLength(2)
+  })
+
   it("truncates an error message longer than 200 characters in the attempt summary", async () => {
     const stub = makeSdkStub({
       sendResponses: [
@@ -411,7 +461,10 @@ describe("requestReview", () => {
     const result = await client.requestReview(requestParams)
 
     expect(stub.generationCalls).toEqual([
-      { id: "gen-no-cost", options: { timeoutMs: 45_000 } },
+      {
+        id: "gen-no-cost",
+        options: { timeoutMs: 45_000, retries: { strategy: "none" } },
+      },
     ])
     expect(result.attempts[0]?.costUsd).toBe(0.0399)
   })

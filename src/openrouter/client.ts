@@ -57,13 +57,19 @@ export type OpenRouterLike = {
   chat: {
     send(
       request: { chatRequest: ChatRequestSubset },
-      options?: { timeoutMs?: number },
+      options?: {
+        timeoutMs?: number
+        retries?: { strategy: "backoff" | "none" }
+      },
     ): Promise<unknown>
   }
   generations?: {
     getGeneration(
       request: { id: string },
-      options?: { timeoutMs?: number },
+      options?: {
+        timeoutMs?: number
+        retries?: { strategy: "backoff" | "none" }
+      },
     ): Promise<unknown>
   }
 }
@@ -102,6 +108,11 @@ const ABORT_STATUSES = new Set([401, 402, 403])
 const RETRYABLE_STATUSES = new Set([408, 429])
 
 const MAX_ATTEMPTS_PER_MODEL = 2
+
+/** Fixed delay before retrying a transient failure (429, 5xx, timeout).
+ *  The SDK's own backoff was disabled to fix the timeout bug; this replaces
+ *  it at the action layer so a brief rate-limit burst has a recovery window. */
+const RETRY_DELAY_MS = 1_000
 
 /** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs
  *  and future SDK versions need no instanceof on SDK internals. */
@@ -195,12 +206,14 @@ export const createOpenRouterClient = (
   {
     sdk,
     requestTimeoutMs,
+    retryDelayMs = RETRY_DELAY_MS,
   }: {
     sdk: OpenRouterLike
     /** Per-attempt cap — a timed-out request aborts as a status-less
      *  (retryable) api_error and flows into the retry/fallback ladder,
      *  instead of hanging the job until the runner's 6-hour kill. */
     requestTimeoutMs: number
+    retryDelayMs?: number
   },
   logger: Logger,
 ): OpenRouterClient => {
@@ -212,7 +225,10 @@ export const createOpenRouterClient = (
     model: string
   }): Promise<SingleAttempt> => {
     const sendResult = await toResult(
-      sdk.chat.send({ chatRequest }, { timeoutMs: requestTimeoutMs }),
+      sdk.chat.send(
+        { chatRequest },
+        { timeoutMs: requestTimeoutMs, retries: { strategy: "none" } },
+      ),
     )
     if (!sendResult.ok) {
       const statusCode = errorStatusCode(sendResult.error)
@@ -314,7 +330,7 @@ export const createOpenRouterClient = (
     const lookup = await toResult(
       sdk.generations.getGeneration(
         { id: generationId },
-        { timeoutMs: requestTimeoutMs },
+        { timeoutMs: requestTimeoutMs, retries: { strategy: "none" } },
       ),
     )
     if (!lookup.ok) {
@@ -392,6 +408,9 @@ export const createOpenRouterClient = (
         }
         if (!attemptResult.retryable) break
         attemptNumber++
+        if (attemptNumber <= MAX_ATTEMPTS_PER_MODEL && retryDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+        }
       }
     }
 
