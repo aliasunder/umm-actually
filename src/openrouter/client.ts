@@ -110,8 +110,8 @@ const RETRYABLE_STATUSES = new Set([408, 429])
 const MAX_ATTEMPTS_PER_MODEL = 2
 
 /** Fixed delay before retrying a transient failure (429, 5xx, timeout).
- *  The SDK's own backoff was disabled to fix the timeout bug; this replaces
- *  it at the action layer so a brief rate-limit burst has a recovery window. */
+ *  The SDK's backoff is disabled (`retries: { strategy: "none" }`); this
+ *  replaces it so a brief rate-limit burst has a recovery window. */
 const RETRY_DELAY_MS = 1_000
 
 /** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs

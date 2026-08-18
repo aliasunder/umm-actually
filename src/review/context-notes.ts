@@ -17,7 +17,7 @@ export type ContextNotesInput = {
  *  inputs (operator-typed, possibly "./README.md"), the parsed diff, and the
  *  workspace scan. Comparing raw strings silently reports a doc as absent
  *  when only its spelling differs. */
-const normalize = (filePath: string): string => posix.normalize(filePath)
+const normalizePath = (filePath: string): string => posix.normalize(filePath)
 
 const renderPaths = (paths: string[]): string =>
   paths.map((filePath) => `\`${filePath}\``).join(", ")
@@ -35,14 +35,14 @@ const findAbsentPriorityDocs = ({
   "priorityDocs" | "priorityDocsInContext" | "priorityDocsRead"
 >): string[] => {
   const satisfiedPaths = new Set([
-    ...priorityDocsInContext.map(normalize),
-    ...priorityDocsRead.map((file) => normalize(file.path)),
+    ...priorityDocsInContext.map(normalizePath),
+    ...priorityDocsRead.map((file) => normalizePath(file.path)),
   ])
   const seenPaths = new Set<string>()
   const absentPaths: string[] = []
 
   for (const docPath of priorityDocs) {
-    const normalizedPath = normalize(docPath)
+    const normalizedPath = normalizePath(docPath)
     if (satisfiedPaths.has(normalizedPath)) continue
     if (seenPaths.has(normalizedPath)) continue
     seenPaths.add(normalizedPath)
