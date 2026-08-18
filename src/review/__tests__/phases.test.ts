@@ -94,15 +94,53 @@ describe("DIMENSION_CODE_QUALITY", () => {
       "it wins on conflict, and do not invent project conventions it doesn't state",
     )
   })
+
+  it("flags side-effect prefixes on value-returning functions with a call-site boundary", () => {
+    const normalized = DIMENSION_CODE_QUALITY.replace(/\s+/g, " ")
+    expect(normalized).toContain(
+      "Side-effect prefixes (ensure*, check*, init*, setup*)",
+    )
+    expect(normalized).toContain(
+      "keep the prefix when every call site in the provided files ignores the return",
+    )
+  })
+
+  it("flags manual string surgery when a stdlib parser exists, with Wrong/Right pair", () => {
+    const normalized = DIMENSION_CODE_QUALITY.replace(/\s+/g, " ")
+    expect(normalized).toContain("Built-ins over manual string surgery")
+    expect(normalized).toContain("split/slice/index arithmetic")
+    expect(normalized).toContain(
+      'Wrong: req.originalUrl.split("?")[0] ?? req.originalUrl',
+    )
+    expect(normalized).toContain("URL.parse(req.originalUrl")
+  })
+
+  it("carries docs and comment concision triggers with a trim-safety boundary", () => {
+    const normalized = DIMENSION_CODE_QUALITY.replace(/\s+/g, " ")
+    expect(normalized).toContain(
+      "Docs and comment concision — name the unnecessary content and the drift",
+    )
+    expect(normalized).toContain("Doc-comment padding restates the signature")
+    expect(normalized).toContain("Rationale duplication:")
+    expect(normalized).toContain("never merge two distinct claims into one")
+  })
 })
 
 describe("DIMENSION_TEST_QUALITY", () => {
   it("names the loose matchers as scan targets and demands the exact derivable value", () => {
     const normalized = DIMENSION_TEST_QUALITY.replace(/\s+/g, " ")
     expect(normalized).toContain(
-      "toBeTruthy, toBeDefined, toBeNull, toBeGreaterThanOrEqual(0), toBeGreaterThan(0), expect.anything()",
+      "toBeTruthy, toBeDefined, toBeNull, toBeGreaterThanOrEqual(0), toBeGreaterThan(0), expect.anything(), expect.stringMatching, expect.any(, expect.objectContaining,",
     )
     expect(normalized).toContain("the test must assert the exact value")
+  })
+
+  it("carries the objectContaining boundary for nondeterministic fields", () => {
+    const normalized = DIMENSION_TEST_QUALITY.replace(/\s+/g, " ")
+    expect(normalized).toContain(
+      "objectContaining boundary: keep when omitted fields are nondeterministic",
+    )
+    expect(normalized).toContain("not test-owned (third-party params)")
   })
 
   it("names all four two-bar traps including wrong-item", () => {
@@ -165,5 +203,15 @@ describe("REPORTING_RULES", () => {
     expect(normalized).toContain("No silent skipping")
     expect(normalized).toContain('prefix the description "Pre-existing:"')
     expect(normalized).toContain("No environment-specific dismissals")
+  })
+
+  it("requires same-pattern sweep when a trigger fires, with a scope boundary", () => {
+    const normalized = REPORTING_RULES.replace(/\s+/g, " ")
+    expect(normalized).toContain(
+      "Same-pattern sweep: when a trigger fires on changed code, scan the rest of that file and the provided related files",
+    )
+    expect(normalized).toContain(
+      "sweep the specific pattern that fired, not all dimensions",
+    )
   })
 })

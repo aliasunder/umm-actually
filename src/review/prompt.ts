@@ -74,8 +74,10 @@ const OUTPUT_DISCIPLINE = `OUTPUT DISCIPLINE — field constraints:
   tracing, no call-chain walk-through, no quoting of source lines. Put
   traces and evidence in "analysis", not here.
 - "suggestion": a concrete code change, or null when a fix is genuinely
-  optional. A suggestion of "no bug", "no action needed", or "N/A" means
-  there is no finding — do not emit it.
+  optional. Code in a suggestion must comply with the conventions file —
+  apply it to the code you write, not just the code you review. A suggestion
+  of "no bug", "no action needed", or "N/A" means there is no finding — do
+  not emit it.
 - "failure_scenario": a concrete input or state that triggers the problem
   and what goes wrong. A failure_scenario starting with "N/A", "None",
   "Not a finding", "Not applicable", or "Placeholder" means there is no

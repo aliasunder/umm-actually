@@ -118,8 +118,10 @@ describe("buildSystemPrompt", () => {
         "  tracing, no call-chain walk-through, no quoting of source lines. Put",
         '  traces and evidence in "analysis", not here.',
         '- "suggestion": a concrete code change, or null when a fix is genuinely',
-        '  optional. A suggestion of "no bug", "no action needed", or "N/A" means',
-        "  there is no finding — do not emit it.",
+        "  optional. Code in a suggestion must comply with the conventions file —",
+        "  apply it to the code you write, not just the code you review. A suggestion",
+        '  of "no bug", "no action needed", or "N/A" means there is no finding — do',
+        "  not emit it.",
         '- "failure_scenario": a concrete input or state that triggers the problem',
         '  and what goes wrong. A failure_scenario starting with "N/A", "None",',
         '  "Not a finding", "Not applicable", or "Placeholder" means there is no',
@@ -132,6 +134,16 @@ describe("buildSystemPrompt", () => {
         'been resolved by this revision — record that conclusion in "analysis" and',
         "move on — do not emit a finding for it.",
       ].join("\n"),
+    )
+  })
+
+  it("requires suggestion-field code to comply with the conventions file", () => {
+    const systemPrompt = buildSystemPrompt({ phase: combinedPhase })
+    expect(systemPrompt.replace(/\s+/g, " ")).toContain(
+      "Code in a suggestion must comply with the conventions file",
+    )
+    expect(systemPrompt.replace(/\s+/g, " ")).toContain(
+      "apply it to the code you write, not just the code you review",
     )
   })
 
