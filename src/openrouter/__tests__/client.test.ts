@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createTestLogger } from "../../__tests__/test-logger.js"
 import { reviewResponseJsonSchema } from "../../review/finding.js"
 import {
@@ -46,11 +46,11 @@ const makeSdkStub = ({
 }) => {
   const sendCalls: {
     chatRequest: ChatRequestSubset
-    options: { timeoutMs?: number } | undefined
+    options: { signal?: AbortSignal } | undefined
   }[] = []
   const generationCalls: {
     id: string
-    options: { timeoutMs?: number } | undefined
+    options: { signal?: AbortSignal } | undefined
   }[] = []
 
   const takeNext = (
@@ -133,7 +133,10 @@ describe("requestReview", () => {
           },
           stream: false,
         },
-        options: { timeoutMs: 45_000, retries: { strategy: "none" } },
+        options: {
+          retries: { strategy: "none" },
+          signal: expect.any(AbortSignal),
+        },
       },
     ])
   })
@@ -305,8 +308,8 @@ describe("requestReview", () => {
       stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
     ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
     expect(stub.sendCalls[0]?.options).toEqual({
-      timeoutMs: 45_000,
       retries: { strategy: "none" },
+      signal: expect.any(AbortSignal),
     })
     expect(result.attempts[0]).toEqual({
       model: "openai/gpt-5-mini",
@@ -326,6 +329,33 @@ describe("requestReview", () => {
         errorSummary: "Request timed out",
       },
     })
+  })
+
+  it("passes an AbortSignal that aborts after the configured timeout", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [{ value: acceptedChatResult }],
+      generationResponses: [{ value: { data: { totalCost: 0.01 } } }],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    const signal = stub.sendCalls[0]?.options?.signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(signal?.aborted).toBe(false)
+  })
+
+  it("clears the timeout timer after a successful response", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [{ value: acceptedChatResult }],
+      generationResponses: [{ value: { data: { totalCost: 0.01 } } }],
+    })
+    const { client } = makeClient(stub)
+
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
+    await client.requestReview(requestParams)
+    expect(clearTimeoutSpy).toHaveBeenCalled()
+    clearTimeoutSpy.mockRestore()
   })
 
   it("does not sleep after the final attempt when retries are exhausted", async () => {
@@ -465,7 +495,10 @@ describe("requestReview", () => {
     expect(stub.generationCalls).toEqual([
       {
         id: "gen-no-cost",
-        options: { timeoutMs: 45_000, retries: { strategy: "none" } },
+        options: {
+          retries: { strategy: "none" },
+          signal: expect.any(AbortSignal),
+        },
       },
     ])
     expect(result.attempts[0]?.costUsd).toBe(0.0399)
