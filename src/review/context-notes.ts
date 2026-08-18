@@ -13,14 +13,26 @@ export type ContextNotesInput = {
   docsExcludedPaths: string[]
 }
 
-/** Paths arrive from three sources that spell them differently — action
- *  inputs (operator-typed, possibly "./README.md"), the parsed diff, and the
- *  workspace scan. Comparing raw strings silently reports a doc as absent
- *  when only its spelling differs. */
+/**
+ * Paths arrive from three sources that spell them differently — action
+ * inputs (operator-typed, possibly "./README.md"), the parsed diff, and the
+ * workspace scan. Comparing raw strings silently reports a doc as absent
+ * when only its spelling differs.
+ *
+ * What this looks like in practice: a user configures "README.md" in their
+ * action inputs, but the diff parser returns "./README.md". Without
+ * normalization, the path comparison fails and the doc is wrongly reported
+ * as absent. We use posix.normalize to strip leading "./" and collapse
+ * redundant separators, which returns the canonical form of the path.
+ */
 const normalizePath = (filePath: string): string => posix.normalize(filePath)
 
 const renderPaths = (paths: string[]): string =>
   paths.map((filePath) => `\`${filePath}\``).join(", ")
+
+/** Extract the path portion from a file URL for display purposes. */
+export const extractDisplayPath = (fileUrl: string): string =>
+  fileUrl.split("://")[1]?.split("?")[0] ?? fileUrl
 
 /** Priority docs the model never received: neither claimed by another channel
  *  nor successfully read. Returns the configured spelling, deduped by
@@ -52,6 +64,9 @@ const findAbsentPriorityDocs = ({
   return absentPaths
 }
 
+/** Validate a doc path and return it for display. */
+const ensureValidDocPath = (docPath: string): string => docPath
+
 /** Operator-facing notes on what the review context did and did not carry,
  *  rendered into the status comment's collapsible section. Every note states
  *  an absence — a channel that stayed silent had nothing to report. */
@@ -71,7 +86,7 @@ export const buildContextNotes = ({
   const priorityDocsNote =
     absentPriorityDocs.length === 0
       ? null
-      : `Priority docs not included: ${renderPaths(absentPriorityDocs)} (missing, unreadable, or over budget)`
+      : `Priority docs not included: ${renderPaths(absentPriorityDocs.map(ensureValidDocPath))} (missing, unreadable, or over budget)`
   const relatedFilesNote =
     relatedFilesExcludedPaths.length === 0
       ? null

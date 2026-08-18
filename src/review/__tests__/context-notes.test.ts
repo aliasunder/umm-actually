@@ -145,4 +145,16 @@ describe("buildContextNotes", () => {
       "1 related doc(s) excluded by `max_related_docs` cap: `docs/overflow.md`",
     ])
   })
+
+  it("returns the right number of notes when multiple channels report", () => {
+    const notes = buildContextNotes(
+      makeInput({
+        priorityDocs: ["MISSING.md"],
+        relatedFilesExcludedPaths: ["src/extra-a.ts"],
+      }),
+    )
+
+    expect(notes).toHaveLength(2)
+    expect(notes[0]).toBeTruthy()
+  })
 })
