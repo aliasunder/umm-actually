@@ -713,7 +713,9 @@ describe("findRelatedFiles", () => {
         budgetTokens: 100_000,
       })
 
-      expect(relatedFiles.files.map((f) => f.path)).toEqual(["src/legit.ts"])
+      expect(relatedFiles.files.map((file) => file.path)).toEqual([
+        "src/legit.ts",
+      ])
     } finally {
       await cleanup()
     }
@@ -737,23 +739,25 @@ describe("findRelatedFiles", () => {
         budgetTokens: 100_000,
       })
 
-      const paths = relatedFiles.files.map((f) => f.path)
-      expect(paths).toContain("evaluation/report.ts")
-      expect(paths).toContain("evals/benchmark.ts")
+      expect(relatedFiles.files.map((file) => file.path)).toEqual([
+        "evals/benchmark.ts",
+        "evaluation/report.ts",
+      ])
     } finally {
       await cleanup()
     }
   })
 
-  it("handles excludePaths with trailing slashes", async () => {
+  it("excludes importers under multiple excluded paths", async () => {
     const importTarget = `import { target } from "../target.js"\nexport const found = target\n`
     const { root, cleanup } = await makeTempWorkspace({
       "target.ts": `export const target = "target"\n`,
       "src/legit.ts": importTarget,
       "fixtures/stub.ts": importTarget,
+      "evals/benchmark.ts": importTarget,
     })
     const contextReader = createContextReader(
-      { ...defaultConfig(root), excludePaths: ["fixtures"] },
+      { ...defaultConfig(root), excludePaths: ["fixtures", "evals"] },
       createTestLogger(),
     )
 
@@ -763,7 +767,9 @@ describe("findRelatedFiles", () => {
         budgetTokens: 100_000,
       })
 
-      expect(relatedFiles.files.map((f) => f.path)).toEqual(["src/legit.ts"])
+      expect(relatedFiles.files.map((file) => file.path)).toEqual([
+        "src/legit.ts",
+      ])
     } finally {
       await cleanup()
     }
@@ -1131,7 +1137,9 @@ describe("findRelatedDocs", () => {
         excludePaths: [],
       })
 
-      expect(relatedDocs.files.map((f) => f.path)).toEqual(["docs/guide.md"])
+      expect(relatedDocs.files.map((file) => file.path)).toEqual([
+        "docs/guide.md",
+      ])
     } finally {
       await cleanup()
     }

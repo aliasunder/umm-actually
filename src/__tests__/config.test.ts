@@ -185,6 +185,14 @@ describe("parseConfig", () => {
     expect(config.excludePaths).toEqual([])
   })
 
+  it("trims whitespace and filters empty segments from exclude_paths", () => {
+    const config = parseConfig(
+      makeRawInputs({ excludePaths: "evals, , __snapshots__," }),
+    )
+
+    expect(config.excludePaths).toEqual(["evals", "__snapshots__"])
+  })
+
   it("strips trailing slashes from exclude_paths entries", () => {
     const config = parseConfig(
       makeRawInputs({ excludePaths: "evals/, fixtures//" }),
