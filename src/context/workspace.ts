@@ -405,7 +405,9 @@ export const createContextReader = (
             PRUNED_DIRECTORIES.has(entry.name) ||
             entry.name.startsWith(".") ||
             config.excludePaths.some(
-              (ep) => entryPath === ep || entryPath.startsWith(ep + "/"),
+              (excludePath) =>
+                entryPath === excludePath ||
+                entryPath.startsWith(excludePath + "/"),
             )
           if (!isPruned) directoryQueue.push(entryPath)
           continue
