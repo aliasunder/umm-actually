@@ -66,8 +66,10 @@ const configSchema = z.object({
   priorityDocs: z.string().transform((value) =>
     value
       .split(",")
-      .map((segment) => segment.trim())
-      .filter(Boolean),
+      .map((segment) =>
+        posix.normalize(segment.trim()).replace(/^\//, "").replace(/\/+$/, ""),
+      )
+      .filter((segment) => segment !== "" && segment !== "."),
   ),
   excludePaths: z.string().transform((value) =>
     value

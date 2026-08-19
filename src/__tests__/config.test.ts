@@ -171,6 +171,14 @@ describe("parseConfig", () => {
     expect(config.priorityDocs).toEqual(["README.md", "CHANGELOG.md"])
   })
 
+  it("normalizes leading slashes and ./ prefixes in priority_docs entries", () => {
+    const config = parseConfig(
+      makeRawInputs({ priorityDocs: "/README.md, ./docs/guide.md" }),
+    )
+
+    expect(config.priorityDocs).toEqual(["README.md", "docs/guide.md"])
+  })
+
   it("parses comma-separated exclude_paths into an array", () => {
     const config = parseConfig(
       makeRawInputs({ excludePaths: "evals, fixtures, __snapshots__" }),
