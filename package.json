@@ -1,6 +1,6 @@
 {
   "name": "umm-actually",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "LLM PR review GitHub Action via OpenRouter — one consolidated review, inline findings",
   "private": true,
   "type": "module",
