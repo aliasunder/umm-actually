@@ -68,6 +68,16 @@ inputs:
     description: Maximum mention-matched documentation files to include in review context (excludes priority docs)
     required: false
     default: "4"
+  exclude_paths:
+    description: >-
+      Comma-separated folder prefixes excluded from the workspace scan.
+      Files under these paths are invisible to import-tracing and
+      doc-mention matching (they cannot become related files or
+      mention-matched docs). Changed files in the PR diff and
+      priority_docs are never excluded. Example: evals, fixtures,
+      __snapshots__
+    required: false
+    default: ""
   cost_summary:
     description: Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow step summary
     required: false

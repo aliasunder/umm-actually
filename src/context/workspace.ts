@@ -105,6 +105,7 @@ export type ContextReaderConfig = {
   maxScanBytes: number
   relatedFilesMax: number
   relatedDocsMax: number
+  excludePaths: string[]
 }
 
 type ImporterCandidate = {
@@ -401,7 +402,11 @@ export const createContextReader = (
         const entryPath = posix.join(currentDirectory, entry.name)
         if (entry.isDirectory()) {
           const isPruned =
-            PRUNED_DIRECTORIES.has(entry.name) || entry.name.startsWith(".")
+            PRUNED_DIRECTORIES.has(entry.name) ||
+            entry.name.startsWith(".") ||
+            config.excludePaths.some(
+              (ep) => entryPath === ep || entryPath.startsWith(ep + "/"),
+            )
           if (!isPruned) directoryQueue.push(entryPath)
           continue
         }

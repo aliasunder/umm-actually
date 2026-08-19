@@ -18,6 +18,7 @@ const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   maxRelatedFiles: "8",
   maxRelatedDocs: "4",
   priorityDocs: "README.md",
+  excludePaths: "",
   costSummary: true,
   prNumberOverride: "",
   ...overrides,
@@ -44,6 +45,7 @@ describe("parseConfig", () => {
       maxRelatedFiles: 8,
       maxRelatedDocs: 4,
       priorityDocs: ["README.md"],
+      excludePaths: [],
       costSummary: true,
       prNumberOverride: undefined,
     })
@@ -167,6 +169,28 @@ describe("parseConfig", () => {
     )
 
     expect(config.priorityDocs).toEqual(["README.md", "CHANGELOG.md"])
+  })
+
+  it("parses comma-separated exclude_paths into an array", () => {
+    const config = parseConfig(
+      makeRawInputs({ excludePaths: "evals, fixtures, __snapshots__" }),
+    )
+
+    expect(config.excludePaths).toEqual(["evals", "fixtures", "__snapshots__"])
+  })
+
+  it("parses empty exclude_paths as empty array", () => {
+    const config = parseConfig(makeRawInputs({ excludePaths: "" }))
+
+    expect(config.excludePaths).toEqual([])
+  })
+
+  it("strips trailing slashes from exclude_paths entries", () => {
+    const config = parseConfig(
+      makeRawInputs({ excludePaths: "evals/, fixtures//" }),
+    )
+
+    expect(config.excludePaths).toEqual(["evals", "fixtures"])
   })
 
   it("rejects a zero max_related_files", () => {

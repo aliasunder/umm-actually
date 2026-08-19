@@ -206,6 +206,7 @@ const baseConfig: ActionConfig = {
   maxRelatedFiles: 8,
   maxRelatedDocs: 4,
   priorityDocs: [],
+  excludePaths: [],
   costSummary: true,
   prNumberOverride: undefined,
 }

@@ -68,6 +68,12 @@ const configSchema = z.object({
       .map((segment) => segment.trim())
       .filter(Boolean),
   ),
+  excludePaths: z.string().transform((value) =>
+    value
+      .split(",")
+      .map((segment) => segment.trim().replace(/\/+$/, ""))
+      .filter(Boolean),
+  ),
   costSummary: z.boolean(),
   prNumberOverride: optionalPositiveInteger,
 })
