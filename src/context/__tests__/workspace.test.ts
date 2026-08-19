@@ -21,6 +21,7 @@ const defaultConfig = (workspaceRoot: string): ContextReaderConfig => ({
   maxScanBytes: DEFAULT_MAX_SCAN_BYTES,
   relatedFilesMax: DEFAULT_RELATED_FILES_MAX,
   relatedDocsMax: DEFAULT_RELATED_DOCS_MAX,
+  excludePaths: [],
 })
 
 const workspaceRoot = fileURLToPath(
@@ -692,6 +693,87 @@ describe("findRelatedFiles", () => {
       await cleanup()
     }
   })
+
+  it("excludes importers under paths listed in excludePaths", async () => {
+    const importTarget = `import { target } from "../target.js"\nexport const found = target\n`
+    const { root, cleanup } = await makeTempWorkspace({
+      "target.ts": `export const target = "target"\n`,
+      "src/legit.ts": importTarget,
+      "evals/benchmark.ts": importTarget,
+      "evals/nested/deep.ts": importTarget,
+    })
+    const contextReader = createContextReader(
+      { ...defaultConfig(root), excludePaths: ["evals"] },
+      createTestLogger(),
+    )
+
+    try {
+      const relatedFiles = await contextReader.findRelatedFiles({
+        changedPaths: ["target.ts"],
+        budgetTokens: 100_000,
+      })
+
+      expect(relatedFiles.files.map((file) => file.path)).toEqual([
+        "src/legit.ts",
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("does not exclude a directory whose name only shares a prefix with an excluded path", async () => {
+    const importTarget = `import { target } from "../target.js"\nexport const found = target\n`
+    const { root, cleanup } = await makeTempWorkspace({
+      "target.ts": `export const target = "target"\n`,
+      "evaluation/report.ts": importTarget,
+      "evals/benchmark.ts": importTarget,
+    })
+    const contextReader = createContextReader(
+      { ...defaultConfig(root), excludePaths: ["eval"] },
+      createTestLogger(),
+    )
+
+    try {
+      const relatedFiles = await contextReader.findRelatedFiles({
+        changedPaths: ["target.ts"],
+        budgetTokens: 100_000,
+      })
+
+      expect(relatedFiles.files.map((file) => file.path)).toEqual([
+        "evals/benchmark.ts",
+        "evaluation/report.ts",
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("excludes importers under multiple excluded paths", async () => {
+    const importTarget = `import { target } from "../target.js"\nexport const found = target\n`
+    const { root, cleanup } = await makeTempWorkspace({
+      "target.ts": `export const target = "target"\n`,
+      "src/legit.ts": importTarget,
+      "fixtures/stub.ts": importTarget,
+      "evals/benchmark.ts": importTarget,
+    })
+    const contextReader = createContextReader(
+      { ...defaultConfig(root), excludePaths: ["fixtures", "evals"] },
+      createTestLogger(),
+    )
+
+    try {
+      const relatedFiles = await contextReader.findRelatedFiles({
+        changedPaths: ["target.ts"],
+        budgetTokens: 100_000,
+      })
+
+      expect(relatedFiles.files.map((file) => file.path)).toEqual([
+        "src/legit.ts",
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
 })
 
 describe("findRelatedDocs", () => {
@@ -1029,6 +1111,35 @@ describe("findRelatedDocs", () => {
       })
 
       expect(relatedDocs.files).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("excludes docs under paths listed in excludePaths", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "src/target.ts": `export const target = "target"\n`,
+      "docs/guide.md": "See `src/target.ts` for the implementation.\n",
+      "evals/report.md": "Evaluated `src/target.ts` on 100 samples.\n",
+      "evals/iteration-1/summary.md":
+        "The `src/target.ts` module scored 95%.\n",
+    })
+    const contextReader = createContextReader(
+      { ...defaultConfig(root), excludePaths: ["evals"] },
+      createTestLogger(),
+    )
+
+    try {
+      const relatedDocs = await contextReader.findRelatedDocs({
+        changedPaths: ["src/target.ts"],
+        budgetTokens: 100_000,
+        conventionsFile: "AGENTS.md",
+        excludePaths: [],
+      })
+
+      expect(relatedDocs.files.map((file) => file.path)).toEqual([
+        "docs/guide.md",
+      ])
     } finally {
       await cleanup()
     }

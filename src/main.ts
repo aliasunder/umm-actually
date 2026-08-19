@@ -43,6 +43,7 @@ const collectRawInputs = (): RawInputs => ({
   maxRelatedFiles: core.getInput("max_related_files"),
   maxRelatedDocs: core.getInput("max_related_docs"),
   priorityDocs: core.getInput("priority_docs"),
+  excludePaths: core.getInput("exclude_paths"),
   costSummary: core.getBooleanInput("cost_summary"),
   prNumberOverride: core.getInput("pr_number"),
 })
@@ -73,6 +74,7 @@ try {
           maxScanBytes: config.maxScanBytes,
           relatedFilesMax: config.maxRelatedFiles,
           relatedDocsMax: config.maxRelatedDocs,
+          excludePaths: config.excludePaths,
         },
         logger,
       ),

@@ -755,6 +755,7 @@ export const orchestrate = async (
     maxScanFiles: config.maxScanFiles,
     maxScanBytes: config.maxScanBytes,
     priorityDocs: config.priorityDocs,
+    excludePaths: config.excludePaths.length > 0 ? config.excludePaths : "none",
     contextBudgetTokens: config.contextBudgetTokens,
     conventionsFile: config.conventionsFile,
     costSummary: config.costSummary,
