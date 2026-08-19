@@ -99,4 +99,4 @@ outputs:
 
 runs:
   using: docker
-  image: Dockerfile
+  image: docker://ghcr.io/aliasunder/umm-actually@sha256:75f4f0be1dca7417b702606e6f7c2f44561c2b3a0b8344e2f2a03675ede4cf3a
