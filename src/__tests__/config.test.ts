@@ -201,6 +201,14 @@ describe("parseConfig", () => {
     expect(config.excludePaths).toEqual(["evals", "fixtures"])
   })
 
+  it("normalizes leading slashes and ./ prefixes in exclude_paths entries", () => {
+    const config = parseConfig(
+      makeRawInputs({ excludePaths: "/evals, ./fixtures, ./nested/deep/" }),
+    )
+
+    expect(config.excludePaths).toEqual(["evals", "fixtures", "nested/deep"])
+  })
+
   it("rejects a zero max_related_files", () => {
     expect(() => parseConfig(makeRawInputs({ maxRelatedFiles: "0" }))).toThrow(
       'maxRelatedFiles: "0" is not a positive integer',

@@ -1,3 +1,4 @@
+import { posix } from "node:path"
 import { z } from "zod"
 
 const parsePositiveInteger = (value: string, ctx: z.RefinementCtx): number => {
@@ -71,8 +72,10 @@ const configSchema = z.object({
   excludePaths: z.string().transform((value) =>
     value
       .split(",")
-      .map((segment) => segment.trim().replace(/\/+$/, ""))
-      .filter(Boolean),
+      .map((segment) =>
+        posix.normalize(segment.trim()).replace(/^\//, "").replace(/\/+$/, ""),
+      )
+      .filter((segment) => segment !== "" && segment !== "."),
   ),
   costSummary: z.boolean(),
   prNumberOverride: optionalPositiveInteger,
