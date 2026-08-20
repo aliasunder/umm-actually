@@ -629,6 +629,7 @@ const runReviewPipeline = async (
   const { comments, bodyFindings } = mapFindingsToReview({
     findings: selected,
     commentableByPath,
+    model: modelUsed,
   })
   const inlineFindings = selected.filter(
     (finding) => !bodyFindings.includes(finding),
@@ -653,7 +654,7 @@ const runReviewPipeline = async (
     try {
       await githubClient.postIssueComment({
         prNumber: prContext.prNumber,
-        body: renderStandaloneFinding(finding),
+        body: renderStandaloneFinding(finding, modelUsed),
       })
       postedStandalone += 1
     } catch (postError) {

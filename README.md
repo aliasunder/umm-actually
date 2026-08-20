@@ -142,6 +142,7 @@ umm-actually is in early development — the core review pipeline works but ther
 - Prompt injection defense (randomized delimiter nonces)
 - Skip-path handling with posted reasons (oversized diff, empty diff, API limits)
 - Cost transparency (per-run model/token/USD report in workflow summary)
+- Every posted comment — inline findings, beyond-diff findings, and the status comment — ends with an `umm-actually · <model>` byline naming the model that produced it, so runs under different models or fallbacks stay distinguishable on the PR
 - `@umm review` comment trigger for on-demand re-reviews
 - Cross-run finding dedup — re-runs detect previously posted inline findings via hidden HTML anchors and post only new ones; prior bot comment bodies also feed into the prompt for conceptual dedup (the model self-suppresses even when positional anchors differ). An updatable summary comment tracks totals
 - Non-finding filter — deterministic drop of findings that amount to "no bug here" (`N/A` prefixes, "no action needed" suggestions, "…is correct" titles) before threshold and cap
