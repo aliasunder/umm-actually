@@ -102,6 +102,7 @@ const expectedSelection = selectFindings({
 const expectedMapped = mapFindingsToReview({
   findings: expectedSelection.selected,
   commentableByPath: fixtureCommentableByPath,
+  model: "test/model",
 })
 const expectedCostSummary = renderCostSummary({
   attempts: [fixtureAttempt],
@@ -138,6 +139,7 @@ const expectedCappedSelection = selectFindings({
 const expectedCappedMapped = mapFindingsToReview({
   findings: expectedCappedSelection.selected,
   commentableByPath: fixtureCommentableByPath,
+  model: "test/model",
 })
 
 /** Full expected postFindingsReview params for a run posting `findings` as
@@ -147,6 +149,7 @@ const expectedFindingsReview = (findings: Finding[]) => {
   const mapped = mapFindingsToReview({
     findings,
     commentableByPath: fixtureCommentableByPath,
+    model: "test/model",
   })
   return {
     prNumber: 7,
@@ -624,7 +627,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedMapped.bodyFindings.map((finding) => ({
           prNumber: fixturePrContext.prNumber,
-          body: renderStandaloneFinding(finding),
+          body: renderStandaloneFinding(finding, "test/model"),
         })),
       )
       expect(stubs.upsertSummaryCommentCalls).toEqual([
@@ -1399,7 +1402,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedSelection.selected.map((finding) => ({
           prNumber: 7,
-          body: renderStandaloneFinding(finding),
+          body: renderStandaloneFinding(finding, "test/model"),
         })),
       )
     })
@@ -1424,7 +1427,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedMapped.bodyFindings.map((finding) => ({
           prNumber: 7,
-          body: renderStandaloneFinding(finding),
+          body: renderStandaloneFinding(finding, "test/model"),
         })),
       )
       expect(stubs.upsertSummaryCommentCalls).toEqual([
@@ -1520,6 +1523,7 @@ describe("orchestrate", () => {
       const mixedMapped = mapFindingsToReview({
         findings: mixedSelection.selected,
         commentableByPath: fixtureCommentableByPath,
+        model: "test/model",
       })
 
       const stubs = makeOrchestrateDeps({

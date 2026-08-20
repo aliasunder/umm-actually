@@ -121,6 +121,12 @@ export const coalesceAnchors = (anchors: AnchorEntry[]): AnchorEntry[] => {
   }, [])
 }
 
+/** Trailing byline on every bot comment — names the model so a reader can
+ *  tell which model produced which comment when a PR accumulates runs
+ *  across model or fallback changes. */
+const attributionLine = (model: string): string =>
+  `---\n*umm-actually · ${model}*`
+
 /** Title-first header: bold title, then one plain-language metadata line.
  *  Every axis names itself ("Medium severity", "high confidence") because
  *  consumer repos have no decoder — the schema and rubric live in this
@@ -147,6 +153,7 @@ const suggestionBlock = (finding: Finding): string => {
 
 const renderCommentBody = (
   finding: Finding,
+  model: string,
   snappedFromLine?: number,
 ): string => {
   const snapNote = snappedFromLine
@@ -157,7 +164,9 @@ const renderCommentBody = (
 
 ${finding.description}
 
-**Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}${snapNote}${anchor}`
+**Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}${snapNote}
+
+${attributionLine(model)}${anchor}`
 }
 
 const nearestCommentableLine = (
@@ -216,6 +225,7 @@ const multiLineEnd = (
 const classifyFinding = (
   finding: Finding,
   commentableByPath: Map<string, CommentableFile>,
+  model: string,
 ): { comment?: ReviewComment; bodyFinding?: Finding } => {
   const commentable = commentableByPath.get(finding.file)
   if (!commentable) return { bodyFinding: finding }
@@ -228,7 +238,7 @@ const classifyFinding = (
           path: finding.file,
           line: finding.line,
           side: "RIGHT",
-          body: renderCommentBody(finding),
+          body: renderCommentBody(finding, model),
         }
       : {
           path: finding.file,
@@ -236,7 +246,7 @@ const classifyFinding = (
           side: "RIGHT",
           start_line: finding.line,
           start_side: "RIGHT",
-          body: renderCommentBody(finding),
+          body: renderCommentBody(finding, model),
         }
     return { comment }
   }
@@ -248,7 +258,7 @@ const classifyFinding = (
         path: finding.file,
         line: snappedLine,
         side: "RIGHT",
-        body: renderCommentBody(finding, finding.line),
+        body: renderCommentBody(finding, model, finding.line),
       },
     }
   }
@@ -266,12 +276,14 @@ const classifyFinding = (
 export const mapFindingsToReview = ({
   findings,
   commentableByPath,
+  model,
 }: {
   findings: Finding[]
   commentableByPath: Map<string, CommentableFile>
+  model: string
 }): MappedReview => {
   const mapped = findings.map((finding) =>
-    classifyFinding(finding, commentableByPath),
+    classifyFinding(finding, commentableByPath, model),
   )
 
   const comments = mapped.flatMap((entry) =>
@@ -295,7 +307,10 @@ export const STATUS_ANCHOR = "<!-- umm-actually-status -->"
 /** A beyond-diff finding posted as its own issue comment — a new comment is
  *  a visible event to PR watchers, unlike an in-place status update. Carries
  *  its dedup anchor like any inline comment. */
-export const renderStandaloneFinding = (finding: Finding): string => {
+export const renderStandaloneFinding = (
+  finding: Finding,
+  model: string,
+): string => {
   return `${findingHeader(finding)}
 
 \`${finding.file}:${finding.line}\` — beyond the diff's line ranges, in code the changes touch or depend on.
@@ -303,6 +318,8 @@ export const renderStandaloneFinding = (finding: Finding): string => {
 ${finding.description}
 
 **Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}
+
+${attributionLine(model)}
 
 <!-- umm-actually:${computeAnchorKey(finding)} -->`
 }
@@ -354,7 +371,7 @@ export const buildStatusComment = ({
     contextNotes.length === 0
       ? ""
       : `<details>\n<summary>Context notes</summary>\n\n${contextNotes.map((note) => `- ${note}`).join("\n")}\n\n</details>`
-  const attribution = `---\n*umm-actually · ${model}*`
+  const attribution = attributionLine(model)
   return [
     STATUS_ANCHOR,
     `**umm-actually** ${verb} at \`${shaShort}\``,
