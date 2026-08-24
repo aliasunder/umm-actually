@@ -1,6 +1,6 @@
 # AGENTS.md
 
-<!-- distilled from vault Reference/code-standards-* on 2026-07-22; refresh: run the sync-code-standards skill -->
+<!-- distilled from vault Reference/code-standards-* on 2026-08-24; refresh: run the sync-code-standards skill -->
 
 Project conventions for AI-assisted development on umm-actually.
 
@@ -87,8 +87,15 @@ files. Prefer SDK-provided types over redefining shapes.
   goes through the `env-var` package
   (`envVar.from(env).get("NAME").required().asString()`), with the env
   record injectable for tests.
-- Comments explain non-obvious domain context; never restate what a
-  self-documenting name already says. Regex constants get doc comments.
+- Comment decision at write time (use `/** */`; only when earned):
+  (1) Can a reader understand this from name + params + return type? → no
+  comment — this is most functions. (2) Something non-obvious? → one-line
+  JSDoc stating the constraint the signature doesn't convey. (3) Does the
+  JSDoc restate the function name? → delete it. (4) More than 2 lines? →
+  pick the format the reader absorbs quickest (bullets, numbered steps),
+  never multi-paragraph prose. Inline comments go directly above the
+  relevant line — don't stuff implementation details into the docstring.
+  Regex constants get doc comments.
 - Scope constants to where they're used — module level overstates
   visibility when only one function needs the value.
 - A boolean mode param means the function does two things — split into
@@ -96,11 +103,15 @@ files. Prefer SDK-provided types over redefining shapes.
 - Type-only imports over structural duplication — don't clone interfaces
   for "module purity"; type imports are erased at compile time.
 - Extract multi-step `.map()`/`.reduce()` callbacks into named functions
-  when they nest chains or build intermediates. Prefer `.filter(Boolean)`
-  over conditional spreads. Name non-trivial `.filter()` predicates.
+  when they nest chains or build intermediates. Conditional spreads and
+  `.filter(Boolean)` are both fine — pick whichever reads clearer; don't
+  convert mechanically. Name non-trivial `.filter()` predicates.
 - Per-operation try/catch — each catch encloses one operation with one
   failure meaning. Broad catch-alls are banned. Every catch logs or
   re-throws; a swallowed error is worse than an uncaught one.
+- Required inputs enforced at every entry point — fail fast at boot/load.
+  Making an already-expected value mandatory is a bug fix, not a breaking
+  change.
 - Parse structured strings with a declarative regex (named groups), not
   index arithmetic.
 - `Boolean(x)` over `!!x`. TS ≥5.5 infers `.filter()` predicates from
@@ -166,6 +177,14 @@ files. Prefer SDK-provided types over redefining shapes.
   changes the feature surface.
 - Adding a concept (env var, input, file, feature) means sweeping every
   doc that lists its peers.
+- Write-time format decision: information gets structured format (table
+  for lookups, bullets for parallel items, numbered steps for sequences);
+  narrative goes in the PR description, not committed files. More than 3
+  sentences of prose → wrong format. Match sibling sections in length.
+- No internal references in any public artifact — issue/PR numbers,
+  task-board IDs, incident dates, deployment names, and investigation
+  chronology never enter committed files, PR descriptions, or comments.
+  Internal references belong in session logs only.
 
 ## Review instruction authoring
 
