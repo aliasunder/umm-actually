@@ -14,6 +14,11 @@ inline findings. TypeScript inside, Node 24, strict mode throughout.
 - Node.js 24 (an `.nvmrc` is provided — `nvm use`)
 - Docker (for the image build check)
 
+**Windows:** this repo uses symlinks (`CLAUDE.md → AGENTS.md`). Run
+`git config core.symlinks true` before cloning, or re-clone after setting
+it — otherwise Git checks out symlinks as plain text files containing the
+target path.
+
 ## Build & test
 
 ```bash
