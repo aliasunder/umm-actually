@@ -184,7 +184,6 @@ files. Prefer SDK-provided types over redefining shapes.
 - No internal references in any public artifact — issue/PR numbers,
   task-board IDs, incident dates, deployment names, and investigation
   chronology never enter committed files, PR descriptions, or comments.
-  Internal references belong in session logs only.
 
 ## Review instruction authoring
 
