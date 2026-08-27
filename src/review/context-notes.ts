@@ -26,7 +26,7 @@ const renderPaths = (paths: string[]): string =>
  *  related files, conventions) — their full text already reached the prompt
  *  so the priority-doc reader skipped them. Returns the configured spelling,
  *  deduped by normalized path. */
-const findInContextPriorityDocs = ({
+export const findInContextPriorityDocs = ({
   priorityDocs,
   priorityDocsInContext,
 }: Pick<
@@ -52,7 +52,7 @@ const findInContextPriorityDocs = ({
  *  nor successfully read. Returns the configured spelling, deduped by
  *  normalized path — config parsing splits and trims but does not dedupe, so
  *  "README.md,./README.md" would otherwise name one file twice. */
-const findAbsentPriorityDocs = ({
+export const findAbsentPriorityDocs = ({
   priorityDocs,
   priorityDocsInContext,
   priorityDocsRead,

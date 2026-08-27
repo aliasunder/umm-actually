@@ -31,7 +31,11 @@ import {
   type AnchorEntry,
   type ReviewComment,
 } from "./review/comment-mapping.js"
-import { buildContextNotes } from "./review/context-notes.js"
+import {
+  buildContextNotes,
+  findAbsentPriorityDocs,
+  findInContextPriorityDocs,
+} from "./review/context-notes.js"
 import {
   resolveSeverityThreshold,
   type Finding,
@@ -563,6 +567,16 @@ const runReviewPipeline = async (
     tokenBudgetRemainingForDocs: docRemainingTokens,
   })
 
+  const priorityDocsInContextPaths = findInContextPriorityDocs({
+    priorityDocs: config.priorityDocs,
+    priorityDocsInContext,
+  })
+  const priorityDocsAbsentPaths = findAbsentPriorityDocs({
+    priorityDocs: config.priorityDocs,
+    priorityDocsInContext,
+    priorityDocsRead: priorityDocFiles,
+  })
+
   const contextNotes = buildContextNotes({
     priorityDocs: config.priorityDocs,
     priorityDocsInContext,
@@ -740,10 +754,16 @@ const runReviewPipeline = async (
     relatedFilePaths: relatedFiles.map((file) => file.path),
     relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
     priorityDocPaths: priorityDocFiles.map((file) => file.path),
+    priorityDocsInContextPaths,
+    priorityDocsAbsentPaths,
     mentionMatchedDocPaths: mentionMatchedDocsResult.files.map(
       (file) => file.path,
     ),
     docsExcludedPaths: mentionMatchedDocsResult.excludedByCapPaths,
+    tokenBudgetTotal: config.contextBudgetTokens,
+    tokenBudgetUsedByDiff: diffTokens,
+    tokenBudgetPriorityDocFloor: priorityDocFloor,
+    tokenBudgetRemainingForDocs: docRemainingTokens,
     totalFromModel: structuredResult.review.findings.length,
     droppedAsNonFinding,
     duplicatesRemoved: realFindings.length - newFindings.length,

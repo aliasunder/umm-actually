@@ -119,8 +119,14 @@ const expectedReviewSummary = (
     relatedFilePaths: [],
     relatedFilesExcludedPaths: [],
     priorityDocPaths: [],
+    priorityDocsInContextPaths: [],
+    priorityDocsAbsentPaths: [],
     mentionMatchedDocPaths: [],
     docsExcludedPaths: [],
+    tokenBudgetTotal: 80000,
+    tokenBudgetUsedByDiff: 341,
+    tokenBudgetPriorityDocFloor: 0,
+    tokenBudgetRemainingForDocs: 40000,
     totalFromModel: fixtureReviewResponse.findings.length,
     droppedAsNonFinding: 0,
     duplicatesRemoved: 0,
@@ -1054,7 +1060,7 @@ describe("orchestrate", () => {
       })
       const logger = createTestLogger()
 
-      await orchestrate(stubs.deps, logger)
+      const result = await orchestrate(stubs.deps, logger)
 
       expect(stubs.upsertSummaryCommentCalls).toEqual([
         expectedStatus({
@@ -1067,6 +1073,16 @@ describe("orchestrate", () => {
           ],
         }),
       ])
+      // The job summary carries the same split so an operator reading the
+      // check run sees why "Priority docs" is 0 without opening the PR.
+      expect(result.reviewSummaryMarkdown).toBe(
+        expectedReviewSummary({
+          changedFilePaths: ["README.md"],
+          priorityDocsInContextPaths: ["README.md"],
+          priorityDocsAbsentPaths: ["MISSING.md"],
+          tokenBudgetRemainingForDocs: 0,
+        }),
+      )
     })
 
     it("does not exclude a diff-only changed file from the priority-doc read", async () => {

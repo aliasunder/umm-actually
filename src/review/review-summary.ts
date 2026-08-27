@@ -7,8 +7,16 @@ export type ReviewSummaryStats = {
   relatedFilePaths: string[]
   relatedFilesExcludedPaths: string[]
   priorityDocPaths: string[]
+  /** Priority docs whose full text another channel already carried. */
+  priorityDocsInContextPaths: string[]
+  /** Priority docs the model never received — missing, unreadable, or over budget. */
+  priorityDocsAbsentPaths: string[]
   mentionMatchedDocPaths: string[]
   docsExcludedPaths: string[]
+  tokenBudgetTotal: number
+  tokenBudgetUsedByDiff: number
+  tokenBudgetPriorityDocFloor: number
+  tokenBudgetRemainingForDocs: number
   totalFromModel: number
   droppedAsNonFinding: number
   duplicatesRemoved: number
@@ -26,8 +34,9 @@ const renderPaths = (paths: string[]): string =>
     : paths.map((path) => path.replaceAll("|", "\\|")).join(", ")
 
 /** Markdown summary for the workflow job summary — renders a context
- *  table showing what the model saw and a pipeline table showing what
- *  happened to each finding. */
+ *  table showing what the model saw (and which priority docs it did not),
+ *  the token budget split, and a pipeline table showing what happened to
+ *  each finding. */
 export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
   const sha = stats.prContext.headSha.slice(0, 7)
 
@@ -45,9 +54,13 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     `| Changed files | ${stats.changedFilePaths.length} | ${renderPaths(stats.changedFilePaths)} |`,
     `| Related files | ${stats.relatedFilePaths.length} | ${renderPaths(stats.relatedFilePaths)} |`,
     `| Priority docs | ${stats.priorityDocPaths.length} | ${renderPaths(stats.priorityDocPaths)} |`,
+    `| Priority docs (already in context) | ${stats.priorityDocsInContextPaths.length} | ${renderPaths(stats.priorityDocsInContextPaths)} |`,
+    `| Priority docs (not included) | ${stats.priorityDocsAbsentPaths.length} | ${renderPaths(stats.priorityDocsAbsentPaths)} |`,
     `| Mention-matched docs | ${stats.mentionMatchedDocPaths.length} | ${renderPaths(stats.mentionMatchedDocPaths)} |`,
     `| Excluded (related files cap) | ${stats.relatedFilesExcludedPaths.length} | ${renderPaths(stats.relatedFilesExcludedPaths)} |`,
     `| Excluded (docs cap) | ${stats.docsExcludedPaths.length} | ${renderPaths(stats.docsExcludedPaths)} |`,
+    "",
+    `**Token budget:** ${stats.tokenBudgetTotal} total · ${stats.tokenBudgetUsedByDiff} diff · ${stats.tokenBudgetPriorityDocFloor} priority-doc floor · ${stats.tokenBudgetRemainingForDocs} left for docs`,
     "",
     "#### Findings pipeline",
     "",
