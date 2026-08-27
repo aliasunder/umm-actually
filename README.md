@@ -13,6 +13,7 @@ LLM-powered pull request review as a GitHub Action. One consolidated review per 
 - Findings that can't be anchored to the diff (e.g. callers outside the changed files) are posted as standalone comments on the PR
 - PRs with oversized diffs are skipped gracefully with a body-only review stating the reason
 - Reports as its **own branded check run** in the PR checks list — the App's avatar, the outcome as the check title (findings count, clean pass, or skip reason), and a details page carrying the summary and per-run cost
+- Surfaces the review context in the workflow job summary — files seen, priority-doc coverage, and token budget breakdown
 
 ## Setup
 

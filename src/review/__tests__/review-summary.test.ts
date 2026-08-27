@@ -18,8 +18,14 @@ const baseStats: ReviewSummaryStats = {
   relatedFilePaths: [],
   relatedFilesExcludedPaths: [],
   priorityDocPaths: [],
+  priorityDocsInContextPaths: [],
+  priorityDocsAbsentPaths: [],
   mentionMatchedDocPaths: [],
   docsExcludedPaths: [],
+  tokenBudgetTotal: 300000,
+  tokenBudgetUsedByDiff: 12000,
+  tokenBudgetPriorityDocFloor: 30000,
+  tokenBudgetRemainingForDocs: 250000,
   totalFromModel: 3,
   droppedAsNonFinding: 0,
   duplicatesRemoved: 0,
@@ -48,9 +54,13 @@ describe("renderReviewSummary", () => {
         "| Changed files | 1 | src/greeter.ts |",
         "| Related files | 0 | — |",
         "| Priority docs | 0 | — |",
+        "| Priority docs (already in context) | 0 | — |",
+        "| Priority docs (not included) | 0 | — |",
         "| Mention-matched docs | 0 | — |",
         "| Excluded (related files cap) | 0 | — |",
         "| Excluded (docs cap) | 0 | — |",
+        "",
+        "**Token budget:** 300000 total · 12000 diff · 30000 priority-doc floor · 250000 left for docs",
         "",
         "#### Findings pipeline",
         "",
@@ -73,6 +83,8 @@ describe("renderReviewSummary", () => {
       changedFilePaths: ["src/a.ts", "src/b.ts"],
       relatedFilePaths: ["src/caller.ts"],
       priorityDocPaths: ["AGENTS.md"],
+      priorityDocsInContextPaths: ["README.md"],
+      priorityDocsAbsentPaths: ["SECURITY.md", "deploy/README.md"],
       mentionMatchedDocPaths: ["docs/api.md"],
       relatedFilesExcludedPaths: ["src/excluded.ts"],
       docsExcludedPaths: ["docs/old.md"],
@@ -93,9 +105,13 @@ describe("renderReviewSummary", () => {
         "| Changed files | 2 | src/a.ts, src/b.ts |",
         "| Related files | 1 | src/caller.ts |",
         "| Priority docs | 1 | AGENTS.md |",
+        "| Priority docs (already in context) | 1 | README.md |",
+        "| Priority docs (not included) | 2 | SECURITY.md, deploy/README.md |",
         "| Mention-matched docs | 1 | docs/api.md |",
         "| Excluded (related files cap) | 1 | src/excluded.ts |",
         "| Excluded (docs cap) | 1 | docs/old.md |",
+        "",
+        "**Token budget:** 300000 total · 12000 diff · 30000 priority-doc floor · 250000 left for docs",
         "",
         "#### Findings pipeline",
         "",
@@ -139,9 +155,13 @@ describe("renderReviewSummary", () => {
         "| Changed files | 1 | src/greeter.ts |",
         "| Related files | 0 | — |",
         "| Priority docs | 0 | — |",
+        "| Priority docs (already in context) | 0 | — |",
+        "| Priority docs (not included) | 0 | — |",
         "| Mention-matched docs | 0 | — |",
         "| Excluded (related files cap) | 0 | — |",
         "| Excluded (docs cap) | 0 | — |",
+        "",
+        "**Token budget:** 300000 total · 12000 diff · 30000 priority-doc floor · 250000 left for docs",
         "",
         "#### Findings pipeline",
         "",
@@ -155,6 +175,19 @@ describe("renderReviewSummary", () => {
         "| Dropped by cap | 1 |",
         "| **Posted** | **3** |",
       ].join("\n"),
+    )
+  })
+
+  it("renders the budget split when changed files consumed everything", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      tokenBudgetUsedByDiff: 92180,
+      tokenBudgetPriorityDocFloor: 154,
+      tokenBudgetRemainingForDocs: 154,
+    })
+
+    expect(summary).toContain(
+      "**Token budget:** 300000 total · 92180 diff · 154 priority-doc floor · 154 left for docs",
     )
   })
 
