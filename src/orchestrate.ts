@@ -436,12 +436,27 @@ const runReviewPipeline = async (
 
   // Reserve a budget floor for priority docs so related files can't starve
   // them on large PRs. The floor only constrains related files — changed files
-  // (the review subject) are never restricted.
+  // (the review subject) are never restricted. Skip when every priority doc is
+  // already satisfied by channels known before the floor decision.
+  const preFloorInContext = new Set([
+    ...changedFiles
+      .filter((file) => file.includedAs === "full")
+      .map((file) => posix.normalize(file.path)),
+    ...(conventionsAlreadyRenderedInFull
+      ? [posix.normalize(config.conventionsFile)]
+      : []),
+  ])
+  const needsPriorityDocFloor =
+    config.priorityDocs.length > 0 &&
+    config.priorityDocs.some(
+      (docPath) => !preFloorInContext.has(posix.normalize(docPath)),
+    )
   const rawFloor = Math.floor(
     config.contextBudgetTokens * PRIORITY_DOCS_BUDGET_FLOOR_RATIO,
   )
-  const priorityDocFloor =
-    config.priorityDocs.length > 0 ? Math.min(rawFloor, remainingTokens) : 0
+  const priorityDocFloor = needsPriorityDocFloor
+    ? Math.min(rawFloor, remainingTokens)
+    : 0
   const relatedFilesBudgetTokens = Math.max(
     0,
     remainingTokens - priorityDocFloor,

@@ -1388,6 +1388,35 @@ describe("orchestrate", () => {
       expect(first(stubs.findRelatedFilesCalls).budgetTokens).toBe(0)
     })
 
+    it("skips the budget floor when all priority docs are already in context as changed files", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          priorityDocs: ["README.md"],
+          contextBudgetTokens: 80_000,
+          traceRelatedFiles: true,
+        },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [
+              fixtureChangedFile,
+              {
+                path: "README.md",
+                content: "# Readme",
+                includedAs: "full" as const,
+              },
+            ],
+            remainingTokens: 20_000,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      // README.md is already in context — floor is 0, related files get full budget
+      expect(first(stubs.findRelatedFilesCalls).budgetTokens).toBe(20_000)
+    })
+
     it("posts no review and a clean status comment when all findings are below threshold", async () => {
       const stubs = makeOrchestrateDeps({
         config: { severityThreshold: "critical" },
