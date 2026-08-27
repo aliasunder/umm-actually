@@ -51,6 +51,10 @@ import { filterNonFindings } from "./review/filter-non-findings.js"
 import { renderReviewSummary } from "./review/review-summary.js"
 import { selectFindings } from "./review/select-findings.js"
 
+/** Fraction of contextBudgetTokens reserved for priority docs — related files
+ *  cannot consume this slice, preventing budget starvation on large PRs. */
+const PRIORITY_DOCS_BUDGET_FLOOR_RATIO = 0.1
+
 export type ReviewContext = {
   prContext: PrContext
   phase: ReviewPhase
@@ -430,10 +434,38 @@ const runReviewPipeline = async (
         : [],
     })
 
+  // Reserve a budget floor for priority docs so related files can't starve
+  // them on large PRs. The floor only constrains related files — changed files
+  // (the review subject) are never restricted. Skip when every priority doc is
+  // already satisfied by channels known before the floor decision.
+  const preFloorInContext = new Set([
+    ...changedFiles
+      .filter((file) => file.includedAs === "full")
+      .map((file) => posix.normalize(file.path)),
+    ...(conventionsAlreadyRenderedInFull
+      ? [posix.normalize(config.conventionsFile)]
+      : []),
+  ])
+  const needsPriorityDocFloor =
+    config.priorityDocs.length > 0 &&
+    config.priorityDocs.some(
+      (docPath) => !preFloorInContext.has(posix.normalize(docPath)),
+    )
+  const rawFloor = Math.floor(
+    config.contextBudgetTokens * PRIORITY_DOCS_BUDGET_FLOOR_RATIO,
+  )
+  const priorityDocFloor = needsPriorityDocFloor
+    ? Math.min(rawFloor, remainingTokens)
+    : 0
+  const relatedFilesBudgetTokens = Math.max(
+    0,
+    remainingTokens - priorityDocFloor,
+  )
+
   const relatedFilesResult = config.traceRelatedFiles
     ? await contextReader.findRelatedFiles({
         changedPaths,
-        budgetTokens: remainingTokens,
+        budgetTokens: relatedFilesBudgetTokens,
       })
     : { files: [], excludedByCapPaths: [] }
 
@@ -527,6 +559,7 @@ const runReviewPipeline = async (
       mentionMatchedDocsResult.excludedByCapPaths.join(", ") || "none",
     tokenBudgetTotal: config.contextBudgetTokens,
     tokenBudgetUsedByDiff: diffTokens,
+    tokenBudgetPriorityDocFloor: priorityDocFloor,
     tokenBudgetRemainingForDocs: docRemainingTokens,
   })
 

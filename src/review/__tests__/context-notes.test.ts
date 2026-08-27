@@ -22,19 +22,33 @@ const makePriorityDoc = (path: string): PromptFile => ({
 
 // Test-owned expected strings: importing the production templates would let
 // both sides drift together and pass trivially on any wording change.
+const inContextNote = (paths: string): string =>
+  `Priority docs already in context: ${paths}`
+
 const notIncludedNote = (paths: string): string =>
   `Priority docs not included: ${paths} (missing, unreadable, or over budget)`
 
 describe("buildContextNotes", () => {
-  it("returns no notes when nothing was skipped or capped", () => {
+  it("returns no notes when nothing was skipped or capped and no docs are in context", () => {
     const notes = buildContextNotes(
       makeInput({
         priorityDocs: ["README.md"],
-        priorityDocsInContext: ["README.md"],
+        priorityDocsRead: [makePriorityDoc("README.md")],
       }),
     )
 
     expect(notes).toEqual([])
+  })
+
+  it("reports priority docs already in context from another channel", () => {
+    const notes = buildContextNotes(
+      makeInput({
+        priorityDocs: ["README.md", "ARCHITECTURE.md"],
+        priorityDocsInContext: ["README.md", "ARCHITECTURE.md"],
+      }),
+    )
+
+    expect(notes).toEqual([inContextNote("`README.md`, `ARCHITECTURE.md`")])
   })
 
   it("reports a priority doc that is neither in context nor read", () => {
@@ -48,18 +62,21 @@ describe("buildContextNotes", () => {
     expect(notes).toEqual([notIncludedNote("`MISSING.md`")])
   })
 
-  it("omits a priority doc already claimed by another context channel", () => {
+  it("reports both in-context and absent priority docs together", () => {
     const notes = buildContextNotes(
       makeInput({
         priorityDocs: ["README.md", "MISSING.md"],
-        priorityDocsInContext: ["README.md", "src/greeter.ts"],
+        priorityDocsInContext: ["README.md"],
       }),
     )
 
-    expect(notes).toEqual([notIncludedNote("`MISSING.md`")])
+    expect(notes).toEqual([
+      inContextNote("`README.md`"),
+      notIncludedNote("`MISSING.md`"),
+    ])
   })
 
-  it("omits a priority doc that readPriorityDocs returned", () => {
+  it("omits a priority doc that readPriorityDocs returned from both notes", () => {
     const notes = buildContextNotes(
       makeInput({
         priorityDocs: ["ARCHITECTURE.md", "MISSING.md"],
@@ -78,7 +95,10 @@ describe("buildContextNotes", () => {
       }),
     )
 
-    expect(notes).toEqual([notIncludedNote("`MISSING.md`")])
+    expect(notes).toEqual([
+      inContextNote("`./README.md`"),
+      notIncludedNote("`MISSING.md`"),
+    ])
   })
 
   it("normalizes a dot-prefixed in-context path before comparing", () => {
@@ -89,7 +109,10 @@ describe("buildContextNotes", () => {
       }),
     )
 
-    expect(notes).toEqual([notIncludedNote("`MISSING.md`")])
+    expect(notes).toEqual([
+      inContextNote("`docs/api.md`"),
+      notIncludedNote("`MISSING.md`"),
+    ])
   })
 
   it("renders the configured spelling rather than the normalized path", () => {
@@ -106,6 +129,17 @@ describe("buildContextNotes", () => {
     )
 
     expect(notes).toEqual([notIncludedNote("`./MISSING.md`")])
+  })
+
+  it("dedupes in-context docs by normalized path", () => {
+    const notes = buildContextNotes(
+      makeInput({
+        priorityDocs: ["./README.md", "README.md"],
+        priorityDocsInContext: ["README.md"],
+      }),
+    )
+
+    expect(notes).toEqual([inContextNote("`./README.md`")])
   })
 
   it("reports related files excluded by the cap", () => {
@@ -130,16 +164,18 @@ describe("buildContextNotes", () => {
     ])
   })
 
-  it("orders priority docs before related files before related docs", () => {
+  it("orders in-context before not-included before related files before related docs", () => {
     const notes = buildContextNotes(
       makeInput({
-        priorityDocs: ["MISSING.md"],
+        priorityDocs: ["README.md", "MISSING.md"],
+        priorityDocsInContext: ["README.md"],
         relatedFilesExcludedPaths: ["src/extra-a.ts"],
         docsExcludedPaths: ["docs/overflow.md"],
       }),
     )
 
     expect(notes).toEqual([
+      inContextNote("`README.md`"),
       notIncludedNote("`MISSING.md`"),
       "1 related file(s) excluded by `max_related_files` cap: `src/extra-a.ts`",
       "1 related doc(s) excluded by `max_related_docs` cap: `docs/overflow.md`",
