@@ -1062,6 +1062,7 @@ describe("orchestrate", () => {
           postedCount: expectedSelection.selected.length,
           totalCount: expectedSelection.selected.length,
           contextNotes: [
+            "Priority docs already in context: `README.md`",
             "Priority docs not included: `MISSING.md` (missing, unreadable, or over budget)",
           ],
         }),
@@ -1318,6 +1319,73 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.findRelatedFilesCalls).toHaveLength(1)
+    })
+
+    it("reserves a budget floor for priority docs by capping related-files budget", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          priorityDocs: ["README.md"],
+          contextBudgetTokens: 80_000,
+          traceRelatedFiles: true,
+        },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [fixtureChangedFile],
+            remainingTokens: 20_000,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      // 10% of 80_000 = 8_000 floor; related files get 20_000 - 8_000 = 12_000
+      expect(first(stubs.findRelatedFilesCalls).budgetTokens).toBe(12_000)
+    })
+
+    it("does not reserve a budget floor when no priority docs are configured", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          priorityDocs: [],
+          contextBudgetTokens: 80_000,
+          traceRelatedFiles: true,
+        },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [fixtureChangedFile],
+            remainingTokens: 20_000,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      // No floor — related files get the full remaining budget
+      expect(first(stubs.findRelatedFilesCalls).budgetTokens).toBe(20_000)
+    })
+
+    it("clamps the budget floor to remaining tokens when the diff is large", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          priorityDocs: ["README.md"],
+          contextBudgetTokens: 80_000,
+          traceRelatedFiles: true,
+        },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [fixtureChangedFile],
+            remainingTokens: 3_000,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      // 10% of 80_000 = 8_000 floor, but only 3_000 remaining → floor
+      // clamps to 3_000, related files get 0
+      expect(first(stubs.findRelatedFilesCalls).budgetTokens).toBe(0)
     })
 
     it("posts no review and a clean status comment when all findings are below threshold", async () => {

@@ -22,6 +22,32 @@ const normalizePath = (filePath: string): string => posix.normalize(filePath)
 const renderPaths = (paths: string[]): string =>
   paths.map((filePath) => `\`${filePath}\``).join(", ")
 
+/** Priority docs satisfied by a higher-priority channel (changed files,
+ *  related files, conventions) — their full text already reached the prompt
+ *  so the priority-doc reader skipped them. Returns the configured spelling,
+ *  deduped by normalized path. */
+const findInContextPriorityDocs = ({
+  priorityDocs,
+  priorityDocsInContext,
+}: Pick<
+  ContextNotesInput,
+  "priorityDocs" | "priorityDocsInContext"
+>): string[] => {
+  const inContextPaths = new Set(priorityDocsInContext.map(normalizePath))
+  const seenPaths = new Set<string>()
+  const matchedDocs: string[] = []
+
+  for (const docPath of priorityDocs) {
+    const normalizedPath = normalizePath(docPath)
+    if (!inContextPaths.has(normalizedPath)) continue
+    if (seenPaths.has(normalizedPath)) continue
+    seenPaths.add(normalizedPath)
+    matchedDocs.push(docPath)
+  }
+
+  return matchedDocs
+}
+
 /** Priority docs the model never received: neither claimed by another channel
  *  nor successfully read. Returns the configured spelling, deduped by
  *  normalized path — config parsing splits and trims but does not dedupe, so
@@ -53,8 +79,7 @@ const findAbsentPriorityDocs = ({
 }
 
 /** Operator-facing notes on what the review context did and did not carry,
- *  rendered into the status comment's collapsible section. Every note states
- *  an absence — a channel that stayed silent had nothing to report. */
+ *  rendered into the status comment's collapsible section. */
 export const buildContextNotes = ({
   priorityDocs,
   priorityDocsInContext,
@@ -62,12 +87,20 @@ export const buildContextNotes = ({
   relatedFilesExcludedPaths,
   docsExcludedPaths,
 }: ContextNotesInput): string[] => {
+  const inContextDocs = findInContextPriorityDocs({
+    priorityDocs,
+    priorityDocsInContext,
+  })
   const absentPriorityDocs = findAbsentPriorityDocs({
     priorityDocs,
     priorityDocsInContext,
     priorityDocsRead,
   })
 
+  const inContextNote =
+    inContextDocs.length === 0
+      ? null
+      : `Priority docs already in context: ${renderPaths(inContextDocs)}`
   const priorityDocsNote =
     absentPriorityDocs.length === 0
       ? null
@@ -81,7 +114,10 @@ export const buildContextNotes = ({
       ? null
       : `${docsExcludedPaths.length} related doc(s) excluded by \`max_related_docs\` cap: ${renderPaths(docsExcludedPaths)}`
 
-  return [priorityDocsNote, relatedFilesNote, relatedDocsNote].filter(
-    (note) => note !== null,
-  )
+  return [
+    inContextNote,
+    priorityDocsNote,
+    relatedFilesNote,
+    relatedDocsNote,
+  ].filter((note) => note !== null)
 }
