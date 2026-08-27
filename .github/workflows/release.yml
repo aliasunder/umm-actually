@@ -82,8 +82,11 @@ jobs:
   release:
     needs: build-and-push
     runs-on: ubuntu-latest
+    # generate-notes.sh reads merged PRs (labels/body) for breaking-change
+    # detection with GITHUB_TOKEN, so the job needs pull-requests: read.
     permissions:
       contents: write
+      pull-requests: read
     steps:
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
@@ -124,16 +127,34 @@ jobs:
           git tag -f "$MAJOR"
           git push origin "$MAJOR" --force
 
+      # The pin commit lives off main, so the previous release tag is never an
+      # ancestor of this one and git cannot discover it — resolve it from the
+      # release list instead. A first-ever release yields an empty list (exit 0)
+      # and the script notes the whole history; an API failure exits non-zero
+      # and fails the step rather than silently producing wrong notes.
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          PREVIOUS_TAG="$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')"
+          bash .github/scripts/generate-notes.sh "$TAG" ${PREVIOUS_TAG:+"$PREVIOUS_TAG"} > "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: ${{ github.ref_name }}
-        # The pin commit lives off main, so the previous release tag is never an
-        # ancestor of this one and GitHub's auto-detected start tag falls back to
-        # the repo's first commit. Name the previous release explicitly. A
-        # first-ever release yields an empty list (exit 0) and skips the flag;
-        # an API failure exits non-zero and fails the step rather than
-        # silently regenerating full-history notes.
+        run: gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+
+      # The checkout is detached at the pin commit; CHANGELOG.md lives on main.
+      - name: Update CHANGELOG.md on main
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          PREVIOUS_TAG="$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')"
-          gh release create "$TAG" --generate-notes ${PREVIOUS_TAG:+--notes-start-tag "$PREVIOUS_TAG"}
+          git fetch origin main
+          git checkout main
+          bash .github/scripts/update-changelog.sh "${TAG#v}" "$RUNNER_TEMP/release-notes.md"
+          git add CHANGELOG.md
+          git commit -m "docs: update CHANGELOG.md for $TAG"
+          git push origin main
