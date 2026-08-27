@@ -128,4 +128,10 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --generate-notes
+        # The pin commit lives off main, so the previous release tag is never an
+        # ancestor of this one and GitHub's auto-detected start tag falls back to
+        # the repo's first commit. Name the previous release explicitly; the
+        # guard keeps a first-ever release working.
+        run: |
+          PREVIOUS_TAG="$(gh release view --json tagName --jq .tagName || true)"
+          gh release create "$TAG" --generate-notes ${PREVIOUS_TAG:+--notes-start-tag "$PREVIOUS_TAG"}
