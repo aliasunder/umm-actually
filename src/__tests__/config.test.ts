@@ -77,12 +77,12 @@ describe("parseConfig", () => {
     )
   })
 
-  it("falls back to 600 for an empty request_timeout_seconds", () => {
+  it("falls back to 900 for an empty request_timeout_seconds", () => {
     // Workflows wiring a bare unset repo variable pass "" — that must mean
     // "use the default", not a validation failure
     const config = parseConfig(makeRawInputs({ requestTimeoutSeconds: "" }))
 
-    expect(config.requestTimeoutSeconds).toBe(600)
+    expect(config.requestTimeoutSeconds).toBe(900)
   })
 
   it("rejects a zero request_timeout_seconds", () => {

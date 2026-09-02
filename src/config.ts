@@ -28,7 +28,7 @@ const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
 const maxTimeoutSeconds = 2_147_483
 
 /** Mirrors the action.yml default — keep the two in sync. */
-const defaultRequestTimeoutSeconds = 600
+const defaultRequestTimeoutSeconds = 900
 
 const timerSafeSeconds = z.string().transform((value, ctx) => {
   // Empty string means "not provided": workflows wiring a bare unset repo
