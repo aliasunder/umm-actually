@@ -95,7 +95,13 @@ the annotated diff. For inline placement, reference only numbers that appear
 there, and keep end_line in the same hunk as line. Findings in code outside
 the diff (traced regressions, pre-existing bugs) are still valuable — report
 them with their real file and line; they are rendered in the review body
-instead of inline.`
+instead of inline.
+
+File anchoring: when you fill "file", copy the exact path="…" attribute of one
+file block or the path in one "=== path ===" diff header — nothing appended,
+nothing paraphrased. Boundary: a finding on a path that has no file block and
+no diff header is dropped before posting, so when the defect lives in a file
+you were not given, report it against the provided file that calls into it.`
 
 export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string =>
   [

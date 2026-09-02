@@ -1,4 +1,4 @@
-import { posix } from "node:path"
+import { normalizeWorkspacePath } from "./review/workspace-path.js"
 import { z } from "zod"
 
 const parsePositiveInteger = (value: string, ctx: z.RefinementCtx): number => {
@@ -66,17 +66,13 @@ const configSchema = z.object({
   priorityDocs: z.string().transform((value) =>
     value
       .split(",")
-      .map((segment) =>
-        posix.normalize(segment.trim()).replace(/^\//, "").replace(/\/+$/, ""),
-      )
+      .map(normalizeWorkspacePath)
       .filter((segment) => segment !== "" && segment !== "."),
   ),
   excludePaths: z.string().transform((value) =>
     value
       .split(",")
-      .map((segment) =>
-        posix.normalize(segment.trim()).replace(/^\//, "").replace(/\/+$/, ""),
-      )
+      .map(normalizeWorkspacePath)
       .filter((segment) => segment !== "" && segment !== "."),
   ),
   costSummary: z.boolean(),

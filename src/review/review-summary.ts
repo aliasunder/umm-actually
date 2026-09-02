@@ -19,6 +19,8 @@ export type ReviewSummaryStats = {
   tokenBudgetRemainingForDocs: number
   totalFromModel: number
   droppedAsNonFinding: number
+  /** Findings naming a file the model was never given. */
+  droppedAsUnknownFile: number
   duplicatesRemoved: number
   droppedBelowThreshold: number
   droppedAsOverlapping: number
@@ -68,6 +70,7 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     "| --- | --- |",
     `| Raw from model | ${stats.totalFromModel} |`,
     `| Dropped as non-findings | ${stats.droppedAsNonFinding} |`,
+    `| Dropped as unknown file | ${stats.droppedAsUnknownFile} |`,
     `| Duplicates (cross-run) | ${stats.duplicatesRemoved} |`,
     `| Dropped below threshold | ${stats.droppedBelowThreshold} |`,
     `| Dropped as overlapping | ${stats.droppedAsOverlapping} |`,

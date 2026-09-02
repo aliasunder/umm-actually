@@ -129,6 +129,7 @@ const expectedReviewSummary = (
     tokenBudgetRemainingForDocs: 40000,
     totalFromModel: fixtureReviewResponse.findings.length,
     droppedAsNonFinding: 0,
+    droppedAsUnknownFile: 0,
     duplicatesRemoved: 0,
     droppedBelowThreshold: 0,
     droppedAsOverlapping: 0,
@@ -1570,6 +1571,19 @@ describe("orchestrate", () => {
         fixtureResult: {
           review: { analysis: "checked", findings: [beyondDiffFinding] },
         },
+        contextReader: {
+          findRelatedFiles: async () => ({
+            files: [
+              {
+                path: "src/untouched.ts",
+                content: "import { greet } from './greeter.js'",
+                includedAs: "full",
+                reason: "imports src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
         githubClient: {
           postIssueComment: async () => {
             throw new Error("boom")
@@ -1671,7 +1685,196 @@ describe("orchestrate", () => {
       expect(logger.messages).toContainEqual({
         level: "info",
         message: "non-finding filter applied to model output",
-        data: { totalFromModel: 2, kept: 1, droppedAsNonFinding: 1 },
+        data: {
+          totalFromModel: 2,
+          kept: 1,
+          droppedAsNonFinding: 1,
+          droppedAsUnknownFile: 0,
+        },
+      })
+    })
+
+    it("posts a beyond-diff finding on a related file as a standalone comment", async () => {
+      const relatedFileFinding = makeFinding({
+        file: "src/caller.ts",
+        line: 400,
+      })
+      const relatedFile: PromptFile = {
+        path: "src/caller.ts",
+        content: "import { greet } from './greeter.js'",
+        includedAs: "full",
+        reason: "imports src/greeter.ts",
+      }
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [relatedFileFinding] },
+        },
+        contextReader: {
+          findRelatedFiles: async () => ({
+            files: [relatedFile],
+            excludedByCapPaths: [],
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      // Only a standalone comment posts here, so there is no review URL
+      expect(result).toEqual({
+        findingsCount: 1,
+        reviewUrl: "",
+        modelUsed: "test/model",
+        skippedReason: "",
+        reviewSummaryMarkdown: expectedReviewSummary({
+          relatedFilePaths: ["src/caller.ts"],
+          tokenBudgetRemainingForDocs:
+            40_000 - estimateTokens(relatedFile.content),
+          totalFromModel: 1,
+          posted: 1,
+        }),
+        costSummaryMarkdown: expectedCostSummary,
+      })
+      expect(stubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderStandaloneFinding(relatedFileFinding, "test/model"),
+        },
+      ])
+    })
+
+    it("drops a finding whose file the model was not given before posting", async () => {
+      const unknownFileFinding = makeFinding({
+        file: "deploy/railway/README.md and the same issues...",
+        line: 493,
+        category: "subtle_bugs",
+        suggestion: "not emitted",
+      })
+      const realFinding = makeFinding({ line: 145 })
+      const realMapped = mapFindingsToReview({
+        findings: [realFinding],
+        commentableByPath: fixtureCommentableByPath,
+        model: "test/model",
+      })
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: {
+            analysis: "checked",
+            findings: [unknownFileFinding, realFinding],
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result).toEqual({
+        findingsCount: 1,
+        reviewUrl: "https://github.com/test/review/1",
+        modelUsed: "test/model",
+        skippedReason: "",
+        reviewSummaryMarkdown: expectedReviewSummary({
+          totalFromModel: 2,
+          droppedAsUnknownFile: 1,
+          posted: 1,
+        }),
+        costSummaryMarkdown: expectedCostSummary,
+      })
+      expect(stubs.postIssueCommentCalls).toEqual([])
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        {
+          prNumber: 7,
+          commitId: fixturePrContext.headSha,
+          body: REVIEW_MARKER,
+          comments: realMapped.comments,
+        },
+      ])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "dropping finding: file not in prompt context",
+        data: {
+          file: "deploy/railway/README.md and the same issues...",
+          line: 493,
+          category: "subtle_bugs",
+        },
+      })
+      expect(logger.messages).toContainEqual({
+        level: "info",
+        message: "non-finding filter applied to model output",
+        data: {
+          totalFromModel: 2,
+          kept: 1,
+          droppedAsNonFinding: 0,
+          droppedAsUnknownFile: 1,
+        },
+      })
+    })
+
+    it("treats rename-from and deleted diff paths as known files", async () => {
+      const renamedFromFinding = makeFinding({
+        file: "src/old-name.ts",
+        line: 1,
+      })
+      const deletedFileFinding = makeFinding({
+        file: "src/removed-file.ts",
+        line: 1,
+      })
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: {
+            analysis: "checked",
+            findings: [renamedFromFinding, deletedFileFinding],
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(2)
+      expect(stubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderStandaloneFinding(renamedFromFinding, "test/model"),
+        },
+        {
+          prNumber: 7,
+          body: renderStandaloneFinding(deletedFileFinding, "test/model"),
+        },
+      ])
+    })
+
+    it("treats the conventions file as known only when it was found", async () => {
+      const conventionsFinding = makeFinding({ file: "AGENTS.md", line: 1 })
+      const foundStubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [conventionsFinding] },
+        },
+      })
+      const missingStubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [conventionsFinding] },
+        },
+        contextReader: { readConventions: async () => null },
+      })
+
+      const foundResult = await orchestrate(foundStubs.deps, createTestLogger())
+      const missingLogger = createTestLogger()
+      const missingResult = await orchestrate(missingStubs.deps, missingLogger)
+
+      expect(foundResult.findingsCount).toBe(1)
+      expect(foundStubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderStandaloneFinding(conventionsFinding, "test/model"),
+        },
+      ])
+      expect(missingResult.findingsCount).toBe(0)
+      expect(missingStubs.postIssueCommentCalls).toEqual([])
+      expect(missingLogger.messages).toContainEqual({
+        level: "warn",
+        message: "dropping finding: file not in prompt context",
+        data: { file: "AGENTS.md", line: 1, category: "correctness" },
       })
     })
   })
