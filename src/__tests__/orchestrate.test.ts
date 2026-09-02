@@ -2794,6 +2794,67 @@ describe("staged phases", () => {
       },
     ])
   })
+
+  it("reports zero findings with the incomplete suffix when surviving phases find nothing", async () => {
+    const stubs = makeOrchestrateDeps({
+      config: { phases: "parallel" },
+      generateFindings: async (reviewContext) => {
+        stubs.generateFindingsCalls.push(reviewContext)
+        if (reviewContext.phase.id === "subtle-bugs") {
+          throw new Error("model exploded")
+        }
+        return {
+          review: { analysis: "", findings: [] },
+          modelUsed: "test/model",
+          attempts: [fixtureAttempt],
+        }
+      },
+    })
+    const logger = createTestLogger()
+
+    const result = await orchestrate(stubs.deps, logger)
+
+    const expectedCost = renderCostSummary({
+      attempts: [
+        { ...fixtureAttempt, phase: "correctness-security" },
+        { ...fixtureAttempt, phase: "conventions-tests" },
+      ],
+      modelUsed: "test/model",
+    })
+    expect(result).toEqual({
+      findingsCount: 0,
+      reviewUrl: "",
+      modelUsed: "test/model",
+      skippedReason: "",
+      phases: [
+        { phase: "correctness-security", status: "completed" },
+        { phase: "conventions-tests", status: "completed" },
+        {
+          phase: "subtle-bugs",
+          status: "failed",
+          reason: "[Error]: model exploded",
+        },
+      ],
+      reviewSummaryMarkdown: expectedReviewSummary({
+        phasesCompleted: ["correctness-security", "conventions-tests"],
+        phasesIncomplete: ["subtle-bugs"],
+        totalFromModel: 0,
+        duplicatesAcrossPhases: 0,
+        posted: 0,
+      }),
+      costSummaryMarkdown: expectedCost,
+    })
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "success",
+        output: {
+          title: "No findings above threshold (1 of 3 phases incomplete)",
+          summary: `Reviewed with \`test/model\` — no findings above threshold.\n\nIncomplete phases: \`subtle-bugs\` ([Error]: model exploded)\n\n${expectedCost}`,
+        },
+      },
+    ])
+  })
 })
 
 describe("createPromptedGenerateFindings", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { createLogger } from "../logger.js"
+import { createLogger, describeError } from "../logger.js"
 
 type WrittenLine = Record<string, unknown>
 
@@ -248,5 +248,19 @@ describe("createLogger", () => {
     const lines = stdout.lines()
     expect(lines[0]?.sessionId).toBeUndefined()
     expect(lines[1]?.sessionId).toBe("generated-later")
+  })
+})
+
+describe("describeError", () => {
+  it("formats an Error as [Name]: message", () => {
+    const error = new TypeError("value is not a function")
+
+    expect(describeError(error)).toBe("[TypeError]: value is not a function")
+  })
+
+  it("stringifies a non-Error value", () => {
+    expect(describeError("plain string")).toBe("plain string")
+    expect(describeError(42)).toBe("42")
+    expect(describeError(null)).toBe("null")
   })
 })
