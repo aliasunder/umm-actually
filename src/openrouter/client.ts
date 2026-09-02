@@ -155,11 +155,16 @@ const toBounded = <T>(result: SettledResult<T>): BoundedResult<T> => {
     : { status: "rejected", error: result.error }
 }
 
+/** Real cause chains are two deep at most; the bound only stops a cyclic
+ *  `cause` from recursing forever. */
+const MAX_CAUSE_DEPTH = 5
+
 /** An honoured AbortSignal rejects with an error named "AbortError"; the
  *  SDK wraps it in its own error with the AbortError as `cause`. Duck-typed
  *  down the cause chain, like errorStatusCode, so stubs need no SDK internals. */
 const isAbortError = (error: unknown, depth = 0): boolean => {
-  if (depth > 5 || typeof error !== "object" || error === null) return false
+  if (depth > MAX_CAUSE_DEPTH) return false
+  if (typeof error !== "object" || error === null) return false
   if ("name" in error && error.name === "AbortError") return true
   return "cause" in error && isAbortError(error.cause, depth + 1)
 }
