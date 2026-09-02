@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing semver tag to release or resume (vX.Y.Z)
+        description: Existing release tag to release or resume (plain vX.Y.Z — prerelease and build suffixes are not released)
         required: true
         type: string
 
@@ -29,8 +29,11 @@ concurrency:
 
 jobs:
   # Idempotency gate. Three facts decide what the later jobs do:
-  # - semver-tag: the floating major tag (v0) is force-moved by every release
-  #   and retriggers this workflow; it is never released itself.
+  # - semver-tag: only plain vX.Y.Z tags are released (Manual Release cuts
+  #   nothing else). The floating major tag (v0) is force-moved by every
+  #   release and retriggers this workflow, so its push skips quietly; any
+  #   other tag shape fails loudly rather than completing green having done
+  #   nothing.
   # - already-pinned: the digest-flip commit is the marker that the image was
   #   published for this tag. First run on a tag sees `image: Dockerfile` and
   #   builds; the runs retriggered by this workflow's own tag force-pushes see
@@ -57,11 +60,12 @@ jobs:
             exit 0
           fi
           echo "semver-tag=false" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "::error::'$RELEASE_TAG' is not a vX.Y.Z release tag"
-            exit 1
+          if [[ "$RELEASE_TAG" =~ ^v[0-9]+$ ]] && [ "$EVENT_NAME" = "push" ]; then
+            echo "'$RELEASE_TAG' is the floating major tag — skipping."
+            exit 0
           fi
-          echo "'$RELEASE_TAG' is not a vX.Y.Z release tag — skipping."
+          echo "::error::'$RELEASE_TAG' is not a plain vX.Y.Z release tag — prerelease and build suffixes are not released"
+          exit 1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.tag.outputs.semver-tag == 'true'
@@ -203,15 +207,17 @@ jobs:
 
       # The pin commit lives off main, so the previous release tag is never an
       # ancestor of this one and git cannot discover it — resolve it from the
-      # release list instead, skipping this tag's own release when a resumed
-      # run already created it. A first-ever release yields an empty list
-      # (exit 0) and the script notes the whole history; an API failure exits
-      # non-zero and fails the step rather than silently producing wrong notes.
+      # release list instead: the newest released tag that sorts before this
+      # one, so a resumed run for an older tag still ranges correctly. A
+      # first-ever release has no such tag and the script notes the whole
+      # history; an API failure exits non-zero and fails the step rather than
+      # silently producing wrong notes.
       - name: Generate release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PREVIOUS_TAG="$(gh release list --exclude-drafts --limit 2 --json tagName --jq "[.[] | select(.tagName != \"$RELEASE_TAG\")][0].tagName // empty")"
+          RELEASED_TAGS="$(gh release list --exclude-drafts --limit 100 --json tagName --jq '.[].tagName')"
+          PREVIOUS_TAG="$(printf '%s\n' "$RELEASED_TAGS" "$RELEASE_TAG" | sort -uV | grep -x -B1 -- "$RELEASE_TAG" | grep -vx -- "$RELEASE_TAG" || true)"
           bash .github/scripts/generate-notes.sh "$RELEASE_TAG" ${PREVIOUS_TAG:+"$PREVIOUS_TAG"} > "$RUNNER_TEMP/release-notes.md"
           cat "$RUNNER_TEMP/release-notes.md"
 
