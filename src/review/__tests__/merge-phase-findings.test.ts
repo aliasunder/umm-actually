@@ -61,6 +61,61 @@ describe("mergePhaseFindings", () => {
     })
   })
 
+  it("evicts every overlapping finding a range candidate outranks, not only the first", () => {
+    const lineTenFinding = makeFinding({ line: 10, title: "Line 10" })
+    const lineTwelveFinding = makeFinding({
+      line: 12,
+      category: "conventions",
+      title: "Line 12",
+    })
+    const rangeFinding = makeFinding({
+      line: 10,
+      end_line: 12,
+      category: "subtle_bugs",
+      severity: "high",
+      title: "Range 10 to 12",
+    })
+
+    const merged = mergePhaseFindings([
+      [lineTenFinding],
+      [lineTwelveFinding],
+      [rangeFinding],
+    ])
+
+    expect(merged).toEqual({
+      findings: [rangeFinding],
+      duplicatesAcrossPhases: 2,
+    })
+  })
+
+  it("drops a range candidate that fails to outrank one of the findings it overlaps", () => {
+    const lineTenFinding = makeFinding({ line: 10, title: "Line 10" })
+    const lineTwelveFinding = makeFinding({
+      line: 12,
+      category: "conventions",
+      severity: "high",
+      title: "Line 12",
+    })
+    const rangeFinding = makeFinding({
+      line: 10,
+      end_line: 12,
+      category: "subtle_bugs",
+      severity: "high",
+      title: "Range 10 to 12",
+    })
+
+    const merged = mergePhaseFindings([
+      [lineTenFinding],
+      [lineTwelveFinding],
+      [rangeFinding],
+    ])
+
+    expect(merged).toEqual({
+      findings: [lineTenFinding, lineTwelveFinding],
+      duplicatesAcrossPhases: 1,
+    })
+  })
+
   it("never compares findings from the same phase, so a one-phase run passes through unchanged", () => {
     const correctnessFinding = makeFinding({ line: 10 })
     const subtleBugsFinding = makeFinding({

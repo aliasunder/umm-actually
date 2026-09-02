@@ -1,5 +1,6 @@
 import { describeError, type Logger } from "../logger.js"
 import type { StructuredReviewResult } from "../openrouter/client.js"
+import { filterNonFindings } from "./filter-non-findings.js"
 import type { Finding } from "./finding.js"
 import type { ReviewPhase, ReviewStage } from "./phases.js"
 
@@ -67,15 +68,20 @@ const notAttempted = (phase: ReviewPhase): PhaseOutcome => {
   }
 }
 
+/** Non-findings are dropped before threading: a "no bug here" entry in the
+ *  prior-findings list could otherwise stop a later phase from reporting the
+ *  real defect at that location. */
 const completedFindings = (outcomes: PhaseOutcome[]): Finding[] => {
-  return outcomes.flatMap((outcome) => {
+  const rawFindings = outcomes.flatMap((outcome) => {
     return outcome.status === "completed" ? outcome.result.review.findings : []
   })
+  return filterNonFindings(rawFindings).findings
 }
 
 /**
  * Runs each stage's phases concurrently and the stages in order, passing
- * every earlier stage's raw findings to the next stage as prior findings.
+ * every earlier stage's findings (non-findings removed) to the next stage as
+ * prior findings.
  * Outcomes come back in stage-then-phase order regardless of completion
  * order. Throws only when no phase completed: one failure is rethrown as-is,
  * several are aggregated into one message.

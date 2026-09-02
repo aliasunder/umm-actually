@@ -103,6 +103,31 @@ describe("runStages", () => {
     ])
   })
 
+  it("drops non-findings before threading them to the next stage", async () => {
+    const realFinding = makeFinding({ title: "Real defect" })
+    const nonFinding = makeFinding({
+      line: 20,
+      title: "N/A — the guard is correct",
+    })
+    const { runPhase, calls } = makeRunPhase({
+      a: () =>
+        makeResult({
+          review: { analysis: "", findings: [realFinding, nonFinding] },
+        }),
+      b: () => makeResult(),
+    })
+
+    await runStages(
+      { stages: [[phaseA], [phaseB]], runPhase },
+      createTestLogger(),
+    )
+
+    expect(calls).toEqual([
+      { phase: "a", priorFindings: [] },
+      { phase: "b", priorFindings: [realFinding] },
+    ])
+  })
+
   it("keeps a sibling's result when one phase in the stage fails", async () => {
     const resultA = makeResult()
     const failure = new Error("model exploded")

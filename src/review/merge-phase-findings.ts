@@ -32,7 +32,9 @@ const outranks = (candidate: Finding, kept: Finding): boolean =>
  * the same file, keeping the higher severity; on a tie the earlier phase
  * wins. Input is in phase order (stage order, then phase order within a
  * stage); output preserves it, with a replacement taking the position of the
- * finding it outranked.
+ * first finding it outranked. A candidate may overlap several kept findings
+ * (a range spanning two earlier single-line findings): it must outrank all
+ * of them to be kept, and then every one of them goes.
  */
 export const mergePhaseFindings = (
   findingsByPhase: Finding[][],
@@ -42,12 +44,18 @@ export const mergePhaseFindings = (
   })
 
   const kept = phased.reduce<PhasedFinding[]>((keptSoFar, candidate) => {
-    const duplicate = keptSoFar.find((entry) =>
+    const overlapping = keptSoFar.filter((entry) =>
       isCrossPhaseDuplicate(candidate, entry),
     )
-    if (!duplicate) return [...keptSoFar, candidate]
-    if (!outranks(candidate.finding, duplicate.finding)) return keptSoFar
-    return keptSoFar.map((entry) => (entry === duplicate ? candidate : entry))
+    if (overlapping.length === 0) return [...keptSoFar, candidate]
+    const outranksAll = overlapping.every((entry) =>
+      outranks(candidate.finding, entry.finding),
+    )
+    if (!outranksAll) return keptSoFar
+    return keptSoFar.flatMap((entry) => {
+      if (entry === overlapping[0]) return [candidate]
+      return overlapping.includes(entry) ? [] : [entry]
+    })
   }, [])
 
   return {
