@@ -111,7 +111,7 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 1. Resolves the PR from the triggering event (supports `pull_request`, `pull_request_target`, and `issue_comment` events); once the PR context is known, opens a check run under the token's identity (best-effort — skipped when the token lacks `checks: write`)
 2. Fetches the unified diff via the GitHub API — PRs that exceed the API's diff size limit are skipped
 3. Reads the conventions file and changed source files (token-budgeted), traces imports to find related code files, and scans doc files (`.md`, `.json`) for mentions of changed paths
-4. Builds a structured prompt with randomized delimiter nonces (prompt injection defense); on re-runs, prior bot comment bodies are included so the model can self-suppress conceptual duplicates. Sends one request per review phase to OpenRouter — `combined` is a single request, `parallel` runs three focused requests at once, `sequential` runs them in order with each phase seeing the earlier findings (see the `phases` input)
+4. Builds a structured prompt with randomized delimiter nonces (prompt injection defense); on re-runs, prior bot comment bodies are included so the model can self-suppress conceptual duplicates. Sends one request per review phase to OpenRouter (see the `phases` input for dispatch modes)
 5. Validates each response against a strict Zod schema, retrying with a fallback model if the primary fails. A phase that fails after its retry ladder is named on the status comment and the check run while the other phases' findings still post; the run fails only when no phase completes
 6. Drops non-findings (see [Non-finding filter](#non-finding-filter)) and findings on files the model was never given (see [Unknown-file filter](#unknown-file-filter)), collapses findings that two phases reported on the same lines, then on re-runs deduplicates against previously posted inline comments (by hidden HTML anchor)
 7. Filters remaining findings by severity threshold, deduplicates overlapping findings within the run, and caps if configured
@@ -140,7 +140,7 @@ umm-actually is in early development — the core review pipeline works but ther
 **Shipped (V1)**
 
 - Inline findings anchored to diff lines
-- Phased review — the `phases` input runs every dimension in one model call (`combined`, the default) or splits them into three focused calls, at once (`parallel`) or in order (`sequential`); findings two phases report on the same lines collapse to one
+- Phased review — `combined`, `parallel`, and `sequential` dispatch modes (see the `phases` input); cross-phase findings on overlapping lines collapse to one
 - Structured output with retry ladder and fallback model, per phase
 - Import-tracing: changed code is traced into callers via reverse-import scan
 - Doc-mention scan: unchanged docs (`.md`, `.json`) that reference changed code reach the prompt for staleness detection

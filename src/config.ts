@@ -51,9 +51,7 @@ const defaultPhases = "combined"
 /** Shape-only: the value is validated by its domain owner
  *  (review/phases.ts resolveStages) at startup. Empty string means "not
  *  provided" for the same reason as timerSafeSeconds. */
-const phasesOrDefault = z
-  .string()
-  .transform((value) => (value ? value : defaultPhases))
+const phasesOrDefault = z.string().transform((value) => value || defaultPhases)
 
 const configSchema = z.object({
   githubToken: z.string().min(1, "github_token is required"),
