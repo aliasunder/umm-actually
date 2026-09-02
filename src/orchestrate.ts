@@ -41,7 +41,11 @@ import {
   type Finding,
   type FindingSeverity,
 } from "./review/finding.js"
-import { resolvePhases, type ReviewPhase } from "./review/phases.js"
+import {
+  resolveStages,
+  type ReviewPhase,
+  type ReviewStage,
+} from "./review/phases.js"
 import {
   buildSystemPrompt,
   buildUserPrompt,
@@ -354,12 +358,12 @@ const runReviewPipeline = async (
     deps,
     prContext,
     severityThreshold,
-    phases,
+    stages,
   }: {
     deps: OrchestrateDeps
     prContext: PrContext
     severityThreshold: FindingSeverity
-    phases: ReviewPhase[]
+    stages: ReviewStage[]
   },
   logger: Logger,
 ): Promise<OrchestrateResult> => {
@@ -620,9 +624,9 @@ const runReviewPipeline = async (
     .slice(-PRIOR_COMMENT_CAP)
 
   // Step 10–11: generate findings (V1: single combined phase)
-  const phase = phases[0]
+  const phase = stages[0]?.[0]
   if (!phase) {
-    throw new Error("resolvePhases returned no phases")
+    throw new Error("resolveStages returned no phases")
   }
   const structuredResult = await generateFindings({
     prContext,
@@ -828,7 +832,7 @@ export const orchestrate = async (
 
   // Step 1: fail-fast validation — throws before any network call
   const severityThreshold = resolveSeverityThreshold(config.severityThreshold)
-  const phases = resolvePhases(config.phases)
+  const stages = resolveStages(config.phases)
 
   logger.info("review settings from action inputs", {
     model: config.model,
@@ -882,7 +886,7 @@ export const orchestrate = async (
 
   try {
     const result = await runReviewPipeline(
-      { deps, prContext, severityThreshold, phases },
+      { deps, prContext, severityThreshold, stages },
       logger,
     )
     const completion = resolveCheckRunCompletion({

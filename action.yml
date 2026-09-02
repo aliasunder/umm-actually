@@ -37,7 +37,7 @@ inputs:
     required: false
     default: AGENTS.md
   phases:
-    description: "Review phases to run. V1 supports: combined"
+    description: "How the review dimensions are dispatched: combined (one model call carrying every dimension) | parallel (three focused calls at once — faster, roughly 3x the prompt tokens) | sequential (the same three calls in order, each seeing the earlier findings). Empty = combined, so workflows can wire an unset repo variable directly"
     required: false
     default: combined
   context_budget_tokens:

@@ -28,6 +28,7 @@ import {
   type ReviewComment,
 } from "../review/comment-mapping.js"
 import { filterNonFindings } from "../review/filter-non-findings.js"
+import { COMBINED_PHASE } from "../review/phases.js"
 import { selectFindings } from "../review/select-findings.js"
 import { renderCostSummary } from "../openrouter/cost-summary.js"
 import {
@@ -2548,10 +2549,7 @@ describe("createPromptedGenerateFindings", () => {
 
     const files = parseDiff(sampleDiff)
     const { annotateDiff } = await import("../diff/annotate-diff.js")
-    const { resolvePhases } = await import("../review/phases.js")
-    const phases = resolvePhases("combined")
-    const phase = phases[0]
-    if (phase === undefined) throw new Error("expected a phase")
+    const phase = COMBINED_PHASE
 
     await generate({
       prContext: fixturePrContext,
@@ -2594,10 +2592,7 @@ describe("createPromptedGenerateFindings", () => {
 
     const files = parseDiff(sampleDiff)
     const { annotateDiff } = await import("../diff/annotate-diff.js")
-    const { resolvePhases } = await import("../review/phases.js")
-    const phases = resolvePhases("combined")
-    const phase = phases[0]
-    if (phase === undefined) throw new Error("expected a phase")
+    const phase = COMBINED_PHASE
     const annotated = annotateDiff(files)
 
     await generate({
@@ -2636,10 +2631,7 @@ describe("createPromptedGenerateFindings", () => {
 
     const files = parseDiff(sampleDiff)
     const { annotateDiff } = await import("../diff/annotate-diff.js")
-    const { resolvePhases } = await import("../review/phases.js")
-    const phases = resolvePhases("combined")
-    const phase = phases[0]
-    if (phase === undefined) throw new Error("expected a phase")
+    const phase = COMBINED_PHASE
     const annotated = annotateDiff(files)
 
     const context: ReviewContext = {

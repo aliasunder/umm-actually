@@ -1,8 +1,10 @@
 /**
- * Review phase definitions. V1 runs a single "combined" phase carrying all
- * four dimensions; V2 splits them into sequential phases that receive prior
- * findings. Each dimension is its own constant so V2 reuses the blocks
- * unchanged.
+ * Review phase definitions and the stage resolver. A phase is one model call
+ * carrying a set of instruction sections. A stage is the phases that run
+ * concurrently; stages run in order, and each later stage sees the earlier
+ * stages' findings. `combined` is one stage of one phase carrying every
+ * dimension; `parallel` and `sequential` split the dimensions into the same
+ * three phases and differ only in how those phases are laid out in stages.
  *
  * Dimension content is written for a single-call reviewer: every check must
  * be resolvable by reasoning over the provided files — no assumption of
@@ -12,6 +14,8 @@ export type ReviewPhase = {
   id: string
   instructionSections: string[]
 }
+
+export type ReviewStage = ReviewPhase[]
 
 export const DIMENSION_CORRECTNESS_SECURITY = `DIMENSION 1 — CORRECTNESS & SECURITY.
 Logic errors, incorrect conditions, off-by-one errors, null/undefined access,
@@ -294,7 +298,16 @@ export const REPORTING_RULES = `REPORTING RULES — these override intuition:
   same pattern, including pre-existing ones. Boundary: sweep the specific
   pattern that fired, not all dimensions.`
 
-const combinedPhase: ReviewPhase = {
+/** Opens every split phase's instructions. The boundary keeps a phase from
+ *  dropping a real bug because another phase "owns" that dimension. */
+export const buildPassScope = (dimensionTitles: string[]): string => {
+  return `PASS SCOPE: this pass covers ${dimensionTitles.join(", ")}. Other passes
+cover the remaining dimensions; spend your analysis on these. Boundary: a
+concrete bug you notice while tracing is still reported with its real
+category, never dropped because it belongs to another pass.`
+}
+
+export const COMBINED_PHASE: ReviewPhase = {
   id: "combined",
   instructionSections: [
     DIMENSION_CORRECTNESS_SECURITY,
@@ -306,9 +319,55 @@ const combinedPhase: ReviewPhase = {
   ],
 }
 
-export const resolvePhases = (phasesInput: string): ReviewPhase[] => {
-  if (phasesInput === "combined") return [combinedPhase]
+export const CORRECTNESS_SECURITY_PHASE: ReviewPhase = {
+  id: "correctness-security",
+  instructionSections: [
+    buildPassScope(["correctness & security", "CI workflow checks"]),
+    DIMENSION_CORRECTNESS_SECURITY,
+    CI_WORKFLOW_CHECKS,
+    REPORTING_RULES,
+  ],
+}
+
+export const CONVENTIONS_TESTS_PHASE: ReviewPhase = {
+  id: "conventions-tests",
+  instructionSections: [
+    buildPassScope(["code quality & conventions", "test quality & coverage"]),
+    DIMENSION_CODE_QUALITY,
+    DIMENSION_TEST_QUALITY,
+    REPORTING_RULES,
+  ],
+}
+
+export const SUBTLE_BUGS_PHASE: ReviewPhase = {
+  id: "subtle-bugs",
+  instructionSections: [
+    buildPassScope(["subtle bug patterns"]),
+    DIMENSION_SUBTLE_BUGS,
+    REPORTING_RULES,
+  ],
+}
+
+/**
+ * Validates the phases action input against the modes this module owns —
+ * config validates shape only (same split as resolveSeverityThreshold).
+ * Called at startup so a bad value crashes before any OpenRouter call.
+ */
+export const resolveStages = (phasesInput: string): ReviewStage[] => {
+  if (phasesInput === "combined") return [[COMBINED_PHASE]]
+  if (phasesInput === "parallel") {
+    return [
+      [CORRECTNESS_SECURITY_PHASE, CONVENTIONS_TESTS_PHASE, SUBTLE_BUGS_PHASE],
+    ]
+  }
+  if (phasesInput === "sequential") {
+    return [
+      [CORRECTNESS_SECURITY_PHASE],
+      [CONVENTIONS_TESTS_PHASE],
+      [SUBTLE_BUGS_PHASE],
+    ]
+  }
   throw new Error(
-    `unknown phases value "${phasesInput}" — V1 supports only "combined"`,
+    `unknown phases value "${phasesInput}" — valid: combined | parallel | sequential`,
   )
 }
