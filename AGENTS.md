@@ -18,11 +18,11 @@ action.yml                 # action metadata — inputs/outputs, runs.using: doc
 Dockerfile                 # multi-stage: build (tsc) → slim runtime
 fixtures/                  # test fixtures (event payloads, sample diff, LLM responses)
 src/
-  main.ts                  # entrypoint — collects/validates inputs, wires clients into orchestrate, sets outputs
+  main.ts                  # entrypoint — collects/validates inputs, wires clients into orchestrate, sets outputs, exits explicitly
   config.ts                # action inputs → validated ActionConfig
   logger.ts                # structured JSON logger — levels, child contexts, lazy props
   github/                  # GitHub I/O: event payload → PrContext, octokit wrappers (diff fetch, review posting)
-  openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, structured-output retry ladder, cost summary
+  openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, per-attempt deadline, structured-output retry ladder, cost summary
   diff/                    # pure transforms over parse-diff output
   context/                 # workspace I/O: conventions file, changed files, import-trace scan, doc-mention scan, priority docs
   review/                  # pure review logic: finding schema, phases, prompt, non-finding filter, unknown-file filter, path normalization, selection, comment mapping, context notes, summary

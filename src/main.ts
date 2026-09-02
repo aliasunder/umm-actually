@@ -113,3 +113,8 @@ try {
 } catch (error) {
   core.setFailed(error instanceof Error ? error.message : String(error))
 }
+
+// A request abandoned at its deadline may still hold a socket open, which
+// keeps the event loop alive and the job running after the review has
+// posted. No argument: Node uses process.exitCode, which setFailed sets.
+process.exit()

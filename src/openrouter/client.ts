@@ -1,3 +1,4 @@
+import { DateTime } from "luxon"
 import { z } from "zod"
 import type { Logger } from "../logger.js"
 import {
@@ -9,6 +10,7 @@ import {
 export type AttemptOutcome =
   | "accepted"
   | "api_error"
+  | "timeout"
   | "empty_content"
   | "invalid_json"
   | "schema_mismatch"
@@ -129,17 +131,100 @@ const summarizeError = (error: unknown): string => {
   return message.length > 200 ? `${message.slice(0, 200)}…` : message
 }
 
+/** How the SDK call itself ended. */
+type SettledResult<T> =
+  { status: "resolved"; value: T } | { status: "rejected"; error: unknown }
+
+/** A settled call, or the deadline winning before it settled. */
+type BoundedResult<T> = SettledResult<T> | { status: "timed_out" }
+
 /** Converts a throwing promise into a discriminated result — avoids
  *  try/catch nesting at every SDK call site. */
-const toResult = async <T>(
-  promise: Promise<T>,
-): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> => {
+const toResult = async <T>(promise: Promise<T>): Promise<SettledResult<T>> => {
   try {
     const value = await promise
-    return { ok: true, value }
+    return { status: "resolved", value }
   } catch (error) {
-    return { ok: false, error }
+    return { status: "rejected", error }
   }
+}
+
+/** Real cause chains are two deep at most; the bound only stops a cyclic
+ *  `cause` from recursing forever. */
+const MAX_CAUSE_DEPTH = 5
+
+/** An honoured AbortSignal rejects with an error named "AbortError"; the
+ *  SDK wraps it in its own error with the AbortError as `cause`. Duck-typed
+ *  down the cause chain, like errorStatusCode, so stubs need no SDK internals. */
+const isAbortError = (error: unknown, depth = 0): boolean => {
+  if (depth > MAX_CAUSE_DEPTH) return false
+  if (typeof error !== "object" || error === null) return false
+  if ("name" in error && error.name === "AbortError") return true
+  return "cause" in error && isAbortError(error.cause, depth + 1)
+}
+
+type LateSettlement = "response" | "abort_error" | "error"
+
+const describeLateSettlement = <T>(late: SettledResult<T>): LateSettlement => {
+  if (late.status === "resolved") return "response"
+  if (isAbortError(late.error)) return "abort_error"
+  return "error"
+}
+
+/** Bounds an SDK call with a deadline that is authoritative in this scope:
+ *  it wins the race whether or not the SDK honours the abort, so a request
+ *  the provider keeps serving cannot hold the attempt open. The abandoned
+ *  call is observed, never awaited, and its settlement is logged: an
+ *  "abort_error" settlement means the abort propagated; no settlement line
+ *  at all means the request never ended. */
+const withDeadline = async <T>(
+  {
+    start,
+    timeoutMs,
+    logContext,
+  }: {
+    start: (signal: AbortSignal) => Promise<T>
+    timeoutMs: number
+    logContext: Record<string, unknown>
+  },
+  logger: Logger,
+): Promise<BoundedResult<T>> => {
+  const controller = new AbortController()
+  const startedAt = DateTime.now()
+  // Wrapped before the race so a late rejection can never surface as an
+  // unhandled rejection
+  const settled = toResult(start(controller.signal))
+  const deadline = Promise.withResolvers<BoundedResult<T>>()
+  const timer = setTimeout(() => {
+    // Resolve before aborting so the race winner never depends on
+    // microtask ordering between the deadline and an honoured abort
+    deadline.resolve({ status: "timed_out" })
+    controller.abort()
+  }, timeoutMs)
+
+  const bounded = await Promise.race([settled, deadline.promise]).finally(
+    () => {
+      clearTimeout(timer)
+    },
+  )
+  if (bounded.status !== "timed_out") return bounded
+
+  logger.warn("request deadline elapsed", { ...logContext, timeoutMs })
+  const logLateSettlement = (late: SettledResult<T>): void => {
+    logger.warn("deadline-elapsed request settled", {
+      ...logContext,
+      elapsedMs: DateTime.now().diff(startedAt).toMillis(),
+      timeoutMs,
+      settledWith: describeLateSettlement(late),
+      ...(late.status === "rejected"
+        ? { error: summarizeError(late.error) }
+        : {}),
+    })
+  }
+  // Observed, not awaited: the deadline has already been reported and the
+  // caller must move on; only the eventual settlement is of interest
+  void settled.then(logLateSettlement)
+  return bounded
 }
 
 const parseJsonOrNull = (text: string): { parsed: unknown } | null => {
@@ -209,14 +294,16 @@ export const createOpenRouterClient = (
     retryDelayMs = RETRY_DELAY_MS,
   }: {
     sdk: OpenRouterLike
-    /** Per-attempt cap — a timed-out request aborts as a status-less
-     *  (retryable) api_error and flows into the retry/fallback ladder,
-     *  instead of hanging the job until the runner's 6-hour kill. */
+    /** Per-attempt deadline — when it elapses the attempt records outcome
+     *  `timeout` and the retry/fallback ladder advances whether or not the
+     *  provider connection closes; the HTTP call is aborted best-effort. */
     requestTimeoutMs: number
     retryDelayMs?: number
   },
   logger: Logger,
 ): OpenRouterClient => {
+  const deadlineSummary = `no response within ${Math.round(requestTimeoutMs / 1000)}s`
+
   const attemptOnce = async ({
     chatRequest,
     model,
@@ -224,20 +311,35 @@ export const createOpenRouterClient = (
     chatRequest: ChatRequestSubset
     model: string
   }): Promise<SingleAttempt> => {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), requestTimeoutMs)
-    let sendResult: { ok: true; value: unknown } | { ok: false; error: unknown }
-    try {
-      sendResult = await toResult(
-        sdk.chat.send(
-          { chatRequest },
-          { retries: { strategy: "none" }, signal: controller.signal },
-        ),
-      )
-    } finally {
-      clearTimeout(timer)
+    const sendResult = await withDeadline(
+      {
+        start: (signal) => {
+          return sdk.chat.send(
+            { chatRequest },
+            { retries: { strategy: "none" }, signal },
+          )
+        },
+        timeoutMs: requestTimeoutMs,
+        logContext: { operation: "chat request", model },
+      },
+      logger,
+    )
+    if (sendResult.status === "timed_out") {
+      return {
+        kind: "failed",
+        attempt: {
+          model,
+          outcome: "timeout",
+          promptTokens: null,
+          completionTokens: null,
+          costUsd: null,
+          errorSummary: deadlineSummary,
+        },
+        retryable: true,
+        abort: false,
+      }
     }
-    if (!sendResult.ok) {
+    if (sendResult.status === "rejected") {
       const statusCode = errorStatusCode(sendResult.error)
       const abort = statusCode !== undefined && ABORT_STATUSES.has(statusCode)
       const retryable =
@@ -333,21 +435,26 @@ export const createOpenRouterClient = (
   const lookupGenerationCost = async (
     generationId: string,
   ): Promise<number | null> => {
-    if (sdk.generations === undefined) return null
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), requestTimeoutMs)
-    let lookup: { ok: true; value: unknown } | { ok: false; error: unknown }
-    try {
-      lookup = await toResult(
-        sdk.generations.getGeneration(
-          { id: generationId },
-          { retries: { strategy: "none" }, signal: controller.signal },
-        ),
-      )
-    } finally {
-      clearTimeout(timer)
+    const generations = sdk.generations
+    if (!generations) return null
+    const lookup = await withDeadline(
+      {
+        start: (signal) => {
+          return generations.getGeneration(
+            { id: generationId },
+            { retries: { strategy: "none" }, signal },
+          )
+        },
+        timeoutMs: requestTimeoutMs,
+        logContext: { operation: "generation cost lookup", generationId },
+      },
+      logger,
+    )
+    if (lookup.status === "timed_out") {
+      logger.warn("generation cost lookup failed", { error: deadlineSummary })
+      return null
     }
-    if (!lookup.ok) {
+    if (lookup.status === "rejected") {
       logger.warn("generation cost lookup failed", {
         error: summarizeError(lookup.error),
       })

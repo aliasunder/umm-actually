@@ -32,6 +32,36 @@ describe("renderCostSummary", () => {
     )
   })
 
+  it("renders a timeout attempt row verbatim with n/a cells", () => {
+    const timeoutAttempt: ModelAttempt = {
+      model: "openai/gpt-5-mini",
+      outcome: "timeout",
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      errorSummary: "no response within 600s",
+    }
+    const summary = renderCostSummary({
+      attempts: [timeoutAttempt, acceptedAttempt],
+      modelUsed: "openai/gpt-5-mini",
+    })
+
+    expect(summary).toBe(
+      [
+        "### umm-actually cost summary",
+        "",
+        "Model used: openai/gpt-5-mini",
+        "",
+        "| attempt | model | outcome | prompt tokens | completion tokens | cost |",
+        "| --- | --- | --- | --- | --- | --- |",
+        "| 1 | openai/gpt-5-mini | timeout | n/a | n/a | n/a |",
+        "| 2 | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
+        "",
+        "Total cost: $0.042100 (some attempts unpriced)",
+      ].join("\n"),
+    )
+  })
+
   it("renders a single accepted attempt with its total", () => {
     const summary = renderCostSummary({
       attempts: [acceptedAttempt],
