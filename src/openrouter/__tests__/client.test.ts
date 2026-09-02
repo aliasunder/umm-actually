@@ -35,7 +35,14 @@ const makeNoCostChatResult = (): unknown => ({
   usage: { promptTokens: 12000, completionTokens: 800, cost: null },
 })
 
-type StubResponse = { value: unknown } | { error: unknown }
+type StubOptions = { signal?: AbortSignal } | undefined
+
+/** `pending` hands the call's options to a custom promise — for a request
+ *  that never settles, settles late, or honours the abort signal. */
+type StubResponse =
+  | { value: unknown }
+  | { error: unknown }
+  | { pending: (options: StubOptions) => Promise<unknown> }
 
 const makeSdkStub = ({
   sendResponses,
@@ -46,23 +53,30 @@ const makeSdkStub = ({
 }) => {
   const sendCalls: {
     chatRequest: ChatRequestSubset
-    options: { signal?: AbortSignal } | undefined
+    options: StubOptions
   }[] = []
   const generationCalls: {
     id: string
-    options: { signal?: AbortSignal } | undefined
+    options: StubOptions
   }[] = []
 
-  const takeNext = (
-    queue: StubResponse[],
-    callCount: number,
-    operation: string,
-  ): unknown => {
+  const takeNext = ({
+    queue,
+    callCount,
+    operation,
+    options,
+  }: {
+    queue: StubResponse[]
+    callCount: number
+    operation: string
+    options: StubOptions
+  }): unknown => {
     const next = queue[callCount - 1]
     if (next === undefined) {
       throw new Error(`stub: unexpected ${operation} call #${callCount}`)
     }
     if ("error" in next) throw next.error
+    if ("pending" in next) return next.pending(options)
     return next.value
   }
 
@@ -70,17 +84,23 @@ const makeSdkStub = ({
     chat: {
       send: async (request, options) => {
         sendCalls.push({ ...request, options })
-        return takeNext(sendResponses, sendCalls.length, "chat.send")
+        return takeNext({
+          queue: sendResponses,
+          callCount: sendCalls.length,
+          operation: "chat.send",
+          options,
+        })
       },
     },
     generations: {
       getGeneration: async (request, options) => {
         generationCalls.push({ ...request, options })
-        return takeNext(
-          generationResponses,
-          generationCalls.length,
-          "generations.getGeneration",
-        )
+        return takeNext({
+          queue: generationResponses,
+          callCount: generationCalls.length,
+          operation: "generations.getGeneration",
+          options,
+        })
       },
     },
   }
@@ -294,7 +314,7 @@ describe("requestReview", () => {
     })
   })
 
-  it("retries a TimeoutError through the action's ladder, not the SDK's", async () => {
+  it("retries an SDK-thrown TimeoutError as an api_error through the action's ladder, not the SDK's", async () => {
     const timeoutError = new Error("Request timed out")
     timeoutError.name = "TimeoutError"
     const stub = makeSdkStub({
@@ -345,18 +365,19 @@ describe("requestReview", () => {
     expect(signal?.aborted).toBe(false)
   })
 
-  it("aborts the signal when the request exceeds the configured timeout", async () => {
+  it("aborts the signal at the deadline and records the orphan settling with an AbortError when the SDK honours it", async () => {
     vi.useFakeTimers()
     try {
-      const stub = makeSdkStub({ sendResponses: [] })
-      stub.sdk.chat.send = async (_request, options) => {
-        stub.sendCalls.push({ ..._request, options })
+      const rejectOnAbort = (options: StubOptions): Promise<unknown> => {
         return new Promise((_resolve, reject) => {
           options?.signal?.addEventListener("abort", () =>
             reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
           )
         })
       }
+      const stub = makeSdkStub({
+        sendResponses: [{ pending: rejectOnAbort }, { pending: rejectOnAbort }],
+      })
       const logger = createTestLogger()
       const client = createOpenRouterClient(
         { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
@@ -371,11 +392,211 @@ describe("requestReview", () => {
       })
       void reviewPromise.catch(() => undefined)
 
-      // Two attempts × 45s each — advance past both timeouts
+      // Two attempts × 45s each — advance past both deadlines
       await vi.advanceTimersByTimeAsync(90_000)
 
-      await expect(reviewPromise).rejects.toThrow("review request failed")
+      await expect(reviewPromise).rejects.toThrow(
+        "review request failed after 2 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); openai/gpt-5-mini: timeout (no response within 45s)",
+      )
       expect(stub.sendCalls[0]?.options?.signal?.aborted).toBe(true)
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "deadline-elapsed request settled",
+        data: {
+          operation: "chat request",
+          model: "openai/gpt-5-mini",
+          elapsedMs: 45_000,
+          timeoutMs: 45_000,
+          settledWith: "abort_error",
+          error: "aborted",
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("fails the attempt at the deadline as a retryable timeout even when the SDK ignores the abort signal", async () => {
+    vi.useFakeTimers()
+    try {
+      const stub = makeSdkStub({
+        sendResponses: [
+          { pending: () => new Promise(() => undefined) },
+          { value: acceptedChatResult },
+        ],
+      })
+      const logger = createTestLogger()
+      const client = createOpenRouterClient(
+        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        logger,
+      )
+
+      const reviewPromise = client.requestReview(requestParams)
+      await vi.advanceTimersByTimeAsync(45_000)
+      const result = await reviewPromise
+
+      expect(
+        stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
+      ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
+      expect(result.attempts).toEqual([
+        {
+          model: "openai/gpt-5-mini",
+          outcome: "timeout",
+          promptTokens: null,
+          completionTokens: null,
+          costUsd: null,
+          errorSummary: "no response within 45s",
+        },
+        {
+          model: "openai/gpt-5-mini",
+          outcome: "accepted",
+          promptTokens: 12000,
+          completionTokens: 800,
+          costUsd: 0.0421,
+          errorSummary: null,
+        },
+      ])
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "request deadline elapsed",
+        data: {
+          operation: "chat request",
+          model: "openai/gpt-5-mini",
+          timeoutMs: 45_000,
+        },
+      })
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          model: "openai/gpt-5-mini",
+          attemptNumber: 1,
+          outcome: "timeout",
+          errorSummary: "no response within 45s",
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("logs a late response when the orphaned request completes after the deadline", async () => {
+    vi.useFakeTimers()
+    try {
+      const resolveLate = (): Promise<unknown> => {
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(acceptedChatResult), 120_000)
+        })
+      }
+      const stub = makeSdkStub({
+        sendResponses: [
+          { pending: resolveLate },
+          { value: acceptedChatResult },
+        ],
+      })
+      const logger = createTestLogger()
+      const client = createOpenRouterClient(
+        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        logger,
+      )
+
+      const reviewPromise = client.requestReview(requestParams)
+      await vi.advanceTimersByTimeAsync(45_000)
+      const result = await reviewPromise
+      expect(result.attempts.map((attempt) => attempt.outcome)).toEqual([
+        "timeout",
+        "accepted",
+      ])
+
+      await vi.advanceTimersByTimeAsync(75_000)
+
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "deadline-elapsed request settled",
+        data: {
+          operation: "chat request",
+          model: "openai/gpt-5-mini",
+          elapsedMs: 120_000,
+          timeoutMs: 45_000,
+          settledWith: "response",
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("logs a late non-abort rejection without raising an unhandled rejection", async () => {
+    vi.useFakeTimers()
+    try {
+      const rejectLate = (): Promise<unknown> => {
+        return new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error("socket hang up")), 120_000)
+        })
+      }
+      const stub = makeSdkStub({
+        sendResponses: [{ pending: rejectLate }, { value: acceptedChatResult }],
+      })
+      const logger = createTestLogger()
+      const client = createOpenRouterClient(
+        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        logger,
+      )
+
+      const reviewPromise = client.requestReview(requestParams)
+      await vi.advanceTimersByTimeAsync(45_000)
+      await reviewPromise
+      await vi.advanceTimersByTimeAsync(75_000)
+
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "deadline-elapsed request settled",
+        data: {
+          operation: "chat request",
+          model: "openai/gpt-5-mini",
+          elapsedMs: 120_000,
+          timeoutMs: 45_000,
+          settledWith: "error",
+          error: "socket hang up",
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("degrades to a null cost with both warnings when the generation lookup exceeds the deadline", async () => {
+    vi.useFakeTimers()
+    try {
+      const stub = makeSdkStub({
+        sendResponses: [{ value: makeNoCostChatResult() }],
+        generationResponses: [{ pending: () => new Promise(() => undefined) }],
+      })
+      const logger = createTestLogger()
+      const client = createOpenRouterClient(
+        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        logger,
+      )
+
+      const reviewPromise = client.requestReview(requestParams)
+      await vi.advanceTimersByTimeAsync(45_000)
+      const result = await reviewPromise
+
+      expect(result.attempts[0]?.costUsd).toBeNull()
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "request deadline elapsed",
+        data: {
+          operation: "generation cost lookup",
+          generationId: "gen-no-cost",
+          timeoutMs: 45_000,
+        },
+      })
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "generation cost lookup failed",
+        data: { error: "no response within 45s" },
+      })
     } finally {
       vi.useRealTimers()
     }

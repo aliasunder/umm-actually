@@ -21,7 +21,7 @@ inputs:
     required: false
     default: ""
   request_timeout_seconds:
-    description: Per-attempt timeout for a single model request, in seconds. A timed-out attempt aborts the HTTP call and advances the retry/fallback ladder instead of hanging the job. Empty = the 600 default, so workflows can wire an unset repo variable directly
+    description: Per-attempt deadline for a single model request, in seconds. When it elapses the attempt is recorded as `timeout` and the retry/fallback ladder advances whether or not the provider connection closes; the HTTP call is aborted best-effort. Empty = the 600 default, so workflows can wire an unset repo variable directly
     required: false
     default: "600"
   max_findings:
