@@ -100,6 +100,9 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           ref: ${{ github.ref }}
           persist-credentials: true
+          # Full history and every tag: generate-notes.sh ranges from the
+          # previous release tag, which a shallow checkout does not have.
+          fetch-depth: 0
 
       - name: Flip action.yml image to digest-pinned GHCR reference
         env:
