@@ -542,7 +542,7 @@ const runReviewPipeline = async (
   // header but have no new path, so they are added here), file blocks, and
   // the conventions section when the file was found.
   const deletedPaths = files.flatMap((file) => {
-    return file.deleted === true && file.from ? [file.from] : []
+    return file.deleted && file.from ? [file.from] : []
   })
   const promptFilePaths = [
     ...changedPaths,
