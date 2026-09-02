@@ -2,6 +2,8 @@
 # Update CHANGELOG.md with release notes for a given version.
 # Usage: update-changelog.sh <version> <notes-file>
 # Replaces [Unreleased] section if present, otherwise inserts after header.
+# A version already listed is left untouched so a resumed release run never
+# writes a duplicate entry.
 
 set -euo pipefail
 
@@ -21,6 +23,9 @@ changelog_path = "CHANGELOG.md"
 if os.path.exists(changelog_path):
     with open(changelog_path) as f:
         text = f.read()
+    if re.search(rf'^## \[{re.escape(version)}\]', text, re.MULTILINE):
+        print(f"CHANGELOG.md already lists {version}; leaving it unchanged", file=sys.stderr)
+        sys.exit(0)
     # Replace [Unreleased] section if present
     if re.search(r'^## \[Unreleased\]', text, re.MULTILINE):
         text = re.sub(

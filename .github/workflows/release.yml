@@ -3,9 +3,21 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Re-drive a release for an existing semver tag. Every step is idempotent,
+  # so a run that stopped part-way (image pushed and tag pinned, but no GitHub
+  # Release or CHANGELOG entry) picks up exactly where it left off.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing semver tag to release or resume (vX.Y.Z)
+        required: true
+        type: string
 
 permissions:
   contents: read
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 # Queue, never cancel: the release job's own tag force-moves retrigger this
 # workflow (App-token pushes are not suppressed the way GITHUB_TOKEN pushes
@@ -16,34 +28,80 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Idempotency gate: the digest-flip commit is the marker that a release
-  # already completed for this tag. First run on a tag sees `image:
-  # Dockerfile` and proceeds; the runs retriggered by this workflow's own
-  # semver and major-tag force-pushes see the digest pin and skip — without
-  # this, each retrigger would rebuild and overwrite the just-published
-  # GHCR artifacts with different bits.
+  # Idempotency gate. Three facts decide what the later jobs do:
+  # - semver-tag: the floating major tag (v0) is force-moved by every release
+  #   and retriggers this workflow; it is never released itself.
+  # - already-pinned: the digest-flip commit is the marker that the image was
+  #   published for this tag. First run on a tag sees `image: Dockerfile` and
+  #   builds; the runs retriggered by this workflow's own tag force-pushes see
+  #   the digest pin and skip the build — without this, each retrigger would
+  #   rebuild and overwrite the just-published GHCR artifacts with different
+  #   bits.
+  # - release-exists: the GitHub Release is the marker that the release
+  #   completed. A retrigger that finds the tag pinned but no release resumes
+  #   the release job instead of skipping it.
   gate:
     runs-on: ubuntu-latest
     outputs:
-      already-pinned: ${{ steps.check.outputs.already-pinned }}
+      semver-tag: ${{ steps.tag.outputs.semver-tag }}
+      already-pinned: ${{ steps.pinned.outputs.already-pinned }}
+      release-exists: ${{ steps.release.outputs.release-exists }}
     steps:
+      - name: Check that the tag is a semver release tag
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "semver-tag=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "semver-tag=false" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "::error::'$RELEASE_TAG' is not a vX.Y.Z release tag"
+            exit 1
+          fi
+          echo "'$RELEASE_TAG' is not a vX.Y.Z release tag — skipping."
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.tag.outputs.semver-tag == 'true'
         with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           persist-credentials: false
 
       - name: Check whether the tag already points at a digest-pinned commit
-        id: check
+        id: pinned
+        if: steps.tag.outputs.semver-tag == 'true'
         run: |
           if grep -qF "image: docker://" action.yml; then
             echo "already-pinned=true" >> "$GITHUB_OUTPUT"
-            echo "Release already completed for this tag — skipping."
+            echo "Image already published and pinned for $RELEASE_TAG."
           else
             echo "already-pinned=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # A lookup failure fails the gate rather than reporting "no release":
+      # that answer would make the release job try to create a duplicate.
+      - name: Check whether a GitHub Release already exists for the tag
+        id: release
+        if: steps.tag.outputs.semver-tag == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$RELEASE_TAG" --json tagName > /dev/null 2> "$RUNNER_TEMP/release-view.err"; then
+            echo "release-exists=true" >> "$GITHUB_OUTPUT"
+            echo "GitHub Release $RELEASE_TAG already exists."
+          elif grep -q "release not found" "$RUNNER_TEMP/release-view.err"; then
+            echo "release-exists=false" >> "$GITHUB_OUTPUT"
+          else
+            cat "$RUNNER_TEMP/release-view.err"
+            echo "::error::could not determine whether a GitHub Release exists for $RELEASE_TAG"
+            exit 1
+          fi
+
   build-and-push:
     needs: gate
-    if: needs.gate.outputs.already-pinned == 'false'
+    if: needs.gate.outputs.semver-tag == 'true' && needs.gate.outputs.already-pinned == 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,6 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           persist-credentials: false
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -63,12 +122,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # `value` pins the semver source to the release tag: a dispatched run's
+      # ref is a branch, which the semver type could not version from.
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
+            type=semver,pattern={{version}},value=${{ env.RELEASE_TAG }}
             type=raw,value=latest
 
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -79,8 +140,19 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  # Runs whenever the release is incomplete (no GitHub Release yet), or on
+  # every manual dispatch so a missing CHANGELOG entry can be filled in after
+  # the release itself exists. build-and-push is skipped, not failed, when the
+  # image is already pinned — hence the explicit result check.
   release:
-    needs: build-and-push
+    needs: [gate, build-and-push]
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.gate.outputs.semver-tag == 'true' &&
+        (needs.gate.outputs.release-exists == 'false' || github.event_name == 'workflow_dispatch') &&
+        (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
+      }}
     runs-on: ubuntu-latest
     # generate-notes.sh reads merged PRs (labels/body) for breaking-change
     # detection with GITHUB_TOKEN, so the job needs pull-requests: read.
@@ -98,13 +170,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ steps.app-token.outputs.token }}
-          ref: ${{ github.ref }}
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           persist-credentials: true
           # Full history and every tag: generate-notes.sh ranges from the
           # previous release tag, which a shallow checkout does not have.
           fetch-depth: 0
 
       - name: Flip action.yml image to digest-pinned GHCR reference
+        if: needs.gate.outputs.already-pinned == 'false'
         env:
           DIGEST: ${{ needs.build-and-push.outputs.digest }}
           IMAGE: ghcr.io/${{ github.repository }}
@@ -116,48 +189,52 @@ jobs:
           git commit -m "chore(release): pin image to ${DIGEST}"
 
       - name: Force-move semver tag to the digest-flipped commit
-        env:
-          TAG: ${{ github.ref_name }}
+        if: needs.gate.outputs.already-pinned == 'false'
         run: |
-          git tag -f "$TAG"
-          git push origin "$TAG" --force
+          git tag -f "$RELEASE_TAG"
+          git push origin "$RELEASE_TAG" --force
 
       - name: Force-move floating major tag
-        env:
-          TAG: ${{ github.ref_name }}
+        if: needs.gate.outputs.already-pinned == 'false'
         run: |
-          MAJOR="${TAG%%.*}"
+          MAJOR="${RELEASE_TAG%%.*}"
           git tag -f "$MAJOR"
           git push origin "$MAJOR" --force
 
       # The pin commit lives off main, so the previous release tag is never an
       # ancestor of this one and git cannot discover it — resolve it from the
-      # release list instead. A first-ever release yields an empty list (exit 0)
-      # and the script notes the whole history; an API failure exits non-zero
-      # and fails the step rather than silently producing wrong notes.
+      # release list instead, skipping this tag's own release when a resumed
+      # run already created it. A first-ever release yields an empty list
+      # (exit 0) and the script notes the whole history; an API failure exits
+      # non-zero and fails the step rather than silently producing wrong notes.
       - name: Generate release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
         run: |
-          PREVIOUS_TAG="$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')"
-          bash .github/scripts/generate-notes.sh "$TAG" ${PREVIOUS_TAG:+"$PREVIOUS_TAG"} > "$RUNNER_TEMP/release-notes.md"
+          PREVIOUS_TAG="$(gh release list --exclude-drafts --limit 2 --json tagName --jq "[.[] | select(.tagName != \"$RELEASE_TAG\")][0].tagName // empty")"
+          bash .github/scripts/generate-notes.sh "$RELEASE_TAG" ${PREVIOUS_TAG:+"$PREVIOUS_TAG"} > "$RUNNER_TEMP/release-notes.md"
           cat "$RUNNER_TEMP/release-notes.md"
 
       - name: Create GitHub Release
+        if: needs.gate.outputs.release-exists == 'false'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+        run: gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
 
       # The checkout is detached at the pin commit; CHANGELOG.md lives on main.
+      # The script leaves the file untouched when the version is already
+      # listed, so a resumed run has nothing to commit.
       - name: Update CHANGELOG.md on main
-        env:
-          TAG: ${{ github.ref_name }}
         run: |
           git fetch origin main
           git checkout main
-          bash .github/scripts/update-changelog.sh "${TAG#v}" "$RUNNER_TEMP/release-notes.md"
+          bash .github/scripts/update-changelog.sh "${RELEASE_TAG#v}" "$RUNNER_TEMP/release-notes.md"
           git add CHANGELOG.md
-          git commit -m "docs: update CHANGELOG.md for $TAG"
+          if git diff --cached --quiet; then
+            echo "CHANGELOG.md already lists ${RELEASE_TAG#v} — nothing to commit."
+            exit 0
+          fi
+          git config user.name "umm-actually[bot]"
+          git config user.email "umm-actually[bot]@users.noreply.github.com"
+          git commit -m "docs: update CHANGELOG.md for $RELEASE_TAG"
           git push origin main
