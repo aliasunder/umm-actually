@@ -202,7 +202,12 @@ Report each gap with the specific untested scenario. In changed test files,
 flag coverage regressions: removed it() blocks, weakened assertions (toBe →
 toBeDefined, exact match → toContain), and skipped or commented-out tests.
 Filter and exclusion tests must seed data both inside AND outside the filter
-— exclusion is half the behavior.`
+— exclusion is half the behavior.
+
+Proof of work: for each new or changed it() block in a test file, add one
+line to the "analysis" field naming the test, what the exact expected value
+would be, and whether the test asserts that exact value — a test you did not
+enumerate is a test you did not check.`
 
 export const DIMENSION_SUBTLE_BUGS = `DIMENSION 4 — SUBTLE BUG PATTERNS.
 Apply these checks systematically to every changed file:

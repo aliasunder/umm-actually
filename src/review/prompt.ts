@@ -40,12 +40,9 @@ a traced regression or a concrete bug.`
 
 const PROOF_OF_WORK = `Before reporting findings, fill the "analysis" field: for each changed file,
 one line stating what you checked per dimension and which callers or related
-files you traced. For each new or changed it() block in a test file, add one
-line naming the test, what the exact expected value would be, and whether the
-test asserts that exact value — a test you did not enumerate is a test you
-did not check. When verifying documentation or description claims, quote the
-sentence you checked. Findings emitted without corresponding analysis are not
-trustworthy.`
+files you traced. When verifying documentation or description claims, quote
+the sentence you checked. Findings emitted without corresponding analysis are
+not trustworthy.`
 
 const SEVERITY_RUBRIC = `Severity rubric:
 - critical: exploitable security issue, data loss, or corruption

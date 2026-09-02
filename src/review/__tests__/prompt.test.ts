@@ -66,7 +66,15 @@ describe("buildSystemPrompt", () => {
     expect(systemPrompt).toContain(
       "REPORTING RULES — these override intuition:",
     )
-    expect(systemPrompt).toContain('fill the "analysis" field')
+    expect(systemPrompt).toContain(
+      [
+        'Before reporting findings, fill the "analysis" field: for each changed file,',
+        "one line stating what you checked per dimension and which callers or related",
+        "files you traced. When verifying documentation or description claims, quote",
+        "the sentence you checked. Findings emitted without corresponding analysis are",
+        "not trustworthy.",
+      ].join("\n"),
+    )
     expect(systemPrompt).toContain("Severity rubric:")
     expect(systemPrompt).toContain(
       [

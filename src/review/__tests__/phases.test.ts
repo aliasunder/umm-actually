@@ -212,6 +212,15 @@ describe("DIMENSION_TEST_QUALITY", () => {
     expect(normalized).toContain("wrong-item")
   })
 
+  it("requires every changed it() to be enumerated in the analysis field", () => {
+    // Lives in the test dimension, not the shared proof-of-work section, so
+    // phases without the test dimension do not enumerate tests they are not
+    // reviewing
+    expect(DIMENSION_TEST_QUALITY.replace(/\s+/g, " ")).toContain(
+      'Proof of work: for each new or changed it() block in a test file, add one line to the "analysis" field naming the test, what the exact expected value would be, and whether the test asserts that exact value — a test you did not enumerate is a test you did not check.',
+    )
+  })
+
   it("guards against false positives on optional chaining and loop-bounds continue", () => {
     expect(DIMENSION_TEST_QUALITY.replace(/\s+/g, " ")).toContain(
       'Do NOT flag these as violations: "?." array access and "?? fallback"',
