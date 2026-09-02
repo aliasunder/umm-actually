@@ -67,11 +67,15 @@ points:
 
 ## Releases
 
-Releases are cut by the maintainer. Each release will publish the action's
-Docker image and update [`CHANGELOG.md`](./CHANGELOG.md) from Conventional
-Commit messages via a release workflow (not yet built) — which is why PR
-titles matter already: on a squash merge the title becomes the changelog
-entry.
+Releases are cut by the maintainer with the Manual Release workflow, which
+bumps the version and pushes a `vX.Y.Z` tag. The Release workflow then
+publishes the action's Docker image, pins the tag to it, creates the GitHub
+Release, and updates [`CHANGELOG.md`](./CHANGELOG.md) from Conventional
+Commit messages — which is why PR titles matter: on a squash merge the title
+becomes the changelog entry.
+
+Every Release step is idempotent. If a run stops part-way, dispatch the
+Release workflow with the tag as input and it finishes what is missing.
 
 ## License
 

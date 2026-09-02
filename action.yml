@@ -21,9 +21,9 @@ inputs:
     required: false
     default: ""
   request_timeout_seconds:
-    description: Per-attempt deadline for a single model request, in seconds. When it elapses the attempt is recorded as `timeout` and the retry/fallback ladder advances whether or not the provider connection closes; the HTTP call is aborted best-effort. Empty = the 600 default, so workflows can wire an unset repo variable directly
+    description: Per-attempt deadline for a single model request, in seconds. When it elapses the attempt is recorded as `timeout` and the retry/fallback ladder advances whether or not the provider connection closes; the HTTP call is aborted best-effort. Empty = the 900 default, so workflows can wire an unset repo variable directly
     required: false
-    default: "600"
+    default: "900"
   max_findings:
     description: Cap on posted findings, highest severity first. Empty = uncapped (all validated findings post)
     required: false
