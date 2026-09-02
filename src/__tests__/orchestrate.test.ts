@@ -2761,6 +2761,54 @@ describe("staged phases", () => {
     ])
   })
 
+  it("stops a sequential run after an auth/credit abort and reports the skipped phases", async () => {
+    const billedAttempt: ModelAttempt = {
+      model: "test/model",
+      outcome: "api_error",
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      errorSummary: "HTTP 402: HTTP 402",
+    }
+    const stubs = makeOrchestrateDeps({
+      config: { phases: "sequential" },
+      generateFindings: async (reviewContext) => {
+        stubs.generateFindingsCalls.push(reviewContext)
+        throw new ReviewRequestError({
+          message: "OpenRouter auth/credit error — aborting without fallback",
+          attempts: [billedAttempt],
+          aborted: true,
+        })
+      },
+    })
+    const logger = createTestLogger()
+
+    const notAttempted =
+      "[Error]: not attempted: an earlier phase aborted on an auth/credit error"
+    const expectedMessage = `every review phase failed: correctness-security: [ReviewRequestError]: OpenRouter auth/credit error — aborting without fallback; conventions-tests: ${notAttempted}; subtle-bugs: ${notAttempted}`
+    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+      expectedMessage,
+    )
+    expect(stubs.generateFindingsCalls.map((call) => call.phase.id)).toEqual([
+      "correctness-security",
+    ])
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "failure",
+        output: {
+          title: "Error — review did not complete",
+          summary: `[AllPhasesFailedError]: ${expectedMessage}\n\n${renderCostSummary(
+            {
+              attempts: [{ ...billedAttempt, phase: "correctness-security" }],
+              modelUsed: "none",
+            },
+          )}`,
+        },
+      },
+    ])
+  })
+
   it("carries the billed attempts into the failure summary when every phase fails", async () => {
     const timeoutAttempt: ModelAttempt = {
       model: "test/model",
