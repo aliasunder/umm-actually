@@ -85,7 +85,7 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 | `max_findings`            | `""` _(uncapped)_             | Cap on posted findings, highest severity first. Empty = all validated findings post.                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `severity_threshold`      | `low`                         | Minimum severity to post: `low` \| `medium` \| `high` \| `critical`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `conventions_file`        | `AGENTS.md`                   | Repo-relative path to the conventions file included in the prompt (truncated at ~8000 tokens). When the file also changed in the PR, deduplication ensures its full text appears exactly once across context channels                                                                                                                                                                                                                                                                                             |
-| `phases`                  | `combined`                    | Review phases to run. V1 supports: `combined`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `phases`                  | `combined`                    | How the review dimensions are dispatched: `combined` (one model call carrying every dimension), `parallel` (three focused calls at once — faster, roughly 3x the prompt tokens), or `sequential` (the same three calls in order, each seeing the earlier findings). Findings two phases report on the same lines collapse to one, keeping the higher severity. Empty = `combined`, so workflows can wire an unset repo variable directly                                                                          |
 | `context_budget_tokens`   | `80000`                       | Approximate token budget for prompt context (file contents + diff — conventions have a separate cap)                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `trace_related_files`     | `true`                        | Enable heuristic context scanning — import-tracing for caller regressions and mention-matching for doc staleness detection. Does not affect `priority_docs`                                                                                                                                                                                                                                                                                                                                                       |
 | `priority_docs`           | `README.md`                   | Comma-separated repo-relative paths included in review context with a reserved 10% budget floor, independent of `trace_related_files`. Docs already present in full from other context channels are not re-read; a diff-only changed file is still read here so its full text reaches the model. Subject to the shared doc token budget (the floor prevents starvation by related files but does not guarantee inclusion when the budget is exhausted by the diff and changed files themselves). Empty = disabled |
@@ -103,7 +103,7 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `findings_count` | Number of new findings posted (after the non-finding and unknown-file filters, threshold, cap, and cross-run dedup) |
 | `review_url`     | URL of the submitted review; empty when no review was posted                                                        |
-| `model_used`     | Model that produced the accepted response                                                                           |
+| `model_used`     | Model(s) that produced the accepted responses, comma-separated when phases were routed to different models          |
 | `skipped_reason` | Non-empty when the review was skipped (e.g. diff too large)                                                         |
 
 ## How it works
@@ -111,13 +111,13 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 1. Resolves the PR from the triggering event (supports `pull_request`, `pull_request_target`, and `issue_comment` events); once the PR context is known, opens a check run under the token's identity (best-effort — skipped when the token lacks `checks: write`)
 2. Fetches the unified diff via the GitHub API — PRs that exceed the API's diff size limit are skipped
 3. Reads the conventions file and changed source files (token-budgeted), traces imports to find related code files, and scans doc files (`.md`, `.json`) for mentions of changed paths
-4. Builds a structured prompt with randomized delimiter nonces (prompt injection defense); on re-runs, prior bot comment bodies are included so the model can self-suppress conceptual duplicates. Sends it to OpenRouter
-5. Validates the response against a strict Zod schema, retrying with a fallback model if the primary fails
-6. Drops non-findings (see [Non-finding filter](#non-finding-filter)) and findings on files the model was never given (see [Unknown-file filter](#unknown-file-filter)), then on re-runs deduplicates against previously posted inline comments (by hidden HTML anchor)
+4. Builds a structured prompt with randomized delimiter nonces (prompt injection defense); on re-runs, prior bot comment bodies are included so the model can self-suppress conceptual duplicates. Sends one request per review phase to OpenRouter — `combined` is a single request, `parallel` runs three focused requests at once, `sequential` runs them in order with each phase seeing the earlier findings (see the `phases` input)
+5. Validates each response against a strict Zod schema, retrying with a fallback model if the primary fails. A phase that fails after its retry ladder is named on the status comment and the check run while the other phases' findings still post; the run fails only when no phase completes
+6. Drops non-findings (see [Non-finding filter](#non-finding-filter)) and findings on files the model was never given (see [Unknown-file filter](#unknown-file-filter)), collapses findings that two phases reported on the same lines, then on re-runs deduplicates against previously posted inline comments (by hidden HTML anchor)
 7. Filters remaining findings by severity threshold, deduplicates overlapping findings within the run, and caps if configured
 8. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
 9. Posts one review with inline comments (invisible body); beyond-diff findings post as standalone PR comments; every run upserts a status comment with cross-run totals
-10. Completes the check run with the outcome — the conclusion grades the run, not the code: `success` for any completed review (with or without findings — the count is in the check title), `neutral` for a skip, `failure` only when the pipeline itself errors
+10. Completes the check run with the outcome — the conclusion grades the run, not the code: `success` for any completed review (with or without findings — the count is in the check title, and a review that lost a phase says so there too), `neutral` for a skip, `failure` only when the pipeline itself errors
 
 ## Non-finding filter
 
@@ -139,15 +139,16 @@ umm-actually is in early development — the core review pipeline works but ther
 
 **Shipped (V1)**
 
-- Single-pass review with inline findings anchored to diff lines
-- Structured output with retry ladder and fallback model
+- Inline findings anchored to diff lines
+- Phased review — the `phases` input runs every dimension in one model call (`combined`, the default) or splits them into three focused calls, at once (`parallel`) or in order (`sequential`); findings two phases report on the same lines collapse to one
+- Structured output with retry ladder and fallback model, per phase
 - Import-tracing: changed code is traced into callers via reverse-import scan
 - Doc-mention scan: unchanged docs (`.md`, `.json`) that reference changed code reach the prompt for staleness detection
 - Token-budgeted context (changed files + related files + related docs + conventions)
 - Prompt injection defense (randomized delimiter nonces)
 - Skip-path handling with posted reasons (oversized diff, empty diff, API limits)
-- Cost transparency (per-run model/token/USD report in workflow summary)
-- Every posted comment — inline findings, beyond-diff findings, and the status comment — ends with an `umm-actually · <model>` byline naming the model that produced it, so runs under different models or fallbacks stay distinguishable on the PR
+- Cost transparency (per-attempt phase/model/token/USD report in workflow summary, failed attempts included)
+- Every posted comment — inline findings, beyond-diff findings, and the status comment — ends with an `umm-actually · <model>` byline naming the model(s) the run used, so runs under different models or fallbacks stay distinguishable on the PR
 - `@umm review` comment trigger for on-demand re-reviews
 - Cross-run finding dedup — re-runs detect previously posted inline findings via hidden HTML anchors and post only new ones; prior bot comment bodies also feed into the prompt for conceptual dedup (the model self-suppresses even when positional anchors differ). An updatable summary comment tracks totals
 - Non-finding filter — deterministic drop of findings that amount to "no bug here" (`N/A` prefixes, "no action needed" suggestions, "…is correct" titles) before threshold and cap

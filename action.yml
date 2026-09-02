@@ -93,7 +93,7 @@ outputs:
   review_url:
     description: URL of the submitted review; empty when no review was posted
   model_used:
-    description: Model that produced the accepted response
+    description: Model(s) that produced the accepted responses, comma-separated when phases were routed to different models
   skipped_reason:
     description: Non-empty when the review was skipped (e.g. diff too large)
 

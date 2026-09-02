@@ -1037,9 +1037,9 @@ export const orchestrate = async (
   }
 }
 
-/** V1 one-shot strategy — builds a prompt from the review context and sends
- *  it to OpenRouter. V1.5/V2 will swap in different strategies behind the
- *  same GenerateFindings interface. */
+/** Prompted strategy — builds the prompt for one review phase and sends it
+ *  to OpenRouter; the stage dispatcher calls it once per phase. V1.5/V2
+ *  tool-loop strategies swap in behind the same GenerateFindings interface. */
 export const createPromptedGenerateFindings = (
   {
     openrouterClient,
@@ -1062,7 +1062,11 @@ export const createPromptedGenerateFindings = (
       delimiterNonce,
     })
 
-    log.info("requesting review", { model, fallbackModel })
+    log.info("requesting review", {
+      phase: reviewContext.phase.id,
+      model,
+      fallbackModel,
+    })
 
     return openrouterClient.requestReview({
       systemPrompt,
