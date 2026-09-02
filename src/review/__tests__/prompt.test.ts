@@ -343,7 +343,7 @@ describe("buildUserPrompt", () => {
     })
 
     expect(userPrompt).toContain(
-      '<prior_findings-abc123def456 note="already reported by earlier phases — do not re-report">',
+      '<prior_findings-abc123def456 note="already reported by earlier phases — do not re-report the same issue; a different defect at the same location is still a finding">',
     )
     expect(userPrompt).toContain(priorFinding.title)
   })

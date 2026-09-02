@@ -215,7 +215,7 @@ export const buildUserPrompt = ({
   const priorFindingsSection =
     priorFindings.length === 0
       ? ""
-      : `<${priorFindingsTag} note="already reported by earlier phases — do not re-report">\n${JSON.stringify(priorFindings, null, 2)}\n</${priorFindingsTag}>`
+      : `<${priorFindingsTag} note="already reported by earlier phases — do not re-report the same issue; a different defect at the same location is still a finding">\n${JSON.stringify(priorFindings, null, 2)}\n</${priorFindingsTag}>`
 
   const priorBotCommentsSection =
     priorBotComments.length === 0
