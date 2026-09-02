@@ -957,6 +957,7 @@ export const orchestrate = async (
   logger.info("review settings from action inputs", {
     model: config.model,
     fallbackModel: config.fallbackModel || null,
+    phases: config.phases,
     severityThreshold: config.severityThreshold,
     maxFindings: config.maxFindings ?? "uncapped",
     traceRelatedFiles: config.traceRelatedFiles,
