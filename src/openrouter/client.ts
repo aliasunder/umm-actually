@@ -192,9 +192,6 @@ const withDeadline = async <T>(
   // Wrapped before the race so a late rejection can never surface as an
   // unhandled rejection
   const settled = toResult(start(controller.signal))
-  const settledBounded = async (): Promise<BoundedResult<T>> => {
-    return toBounded(await settled)
-  }
   const deadline = Promise.withResolvers<BoundedResult<T>>()
   const timer = setTimeout(() => {
     // Resolve before aborting so the race winner never depends on
@@ -204,7 +201,7 @@ const withDeadline = async <T>(
   }, timeoutMs)
 
   const bounded = await Promise.race([
-    settledBounded(),
+    settled.then(toBounded),
     deadline.promise,
   ]).finally(() => clearTimeout(timer))
   if (bounded.status !== "timed_out") return bounded
