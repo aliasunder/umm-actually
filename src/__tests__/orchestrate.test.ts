@@ -116,6 +116,8 @@ const expectedReviewSummary = (
   renderReviewSummary({
     prContext: fixturePrContext,
     conventionsFile: "AGENTS.md",
+    phasesCompleted: ["combined"],
+    phasesIncomplete: [],
     changedFilePaths: [fixtureChangedFile.path],
     relatedFilePaths: [],
     relatedFilesExcludedPaths: [],
@@ -131,6 +133,7 @@ const expectedReviewSummary = (
     totalFromModel: fixtureReviewResponse.findings.length,
     droppedAsNonFinding: 0,
     droppedAsUnknownFile: 0,
+    duplicatesAcrossPhases: 0,
     duplicatesRemoved: 0,
     droppedBelowThreshold: 0,
     droppedAsOverlapping: 0,
@@ -492,6 +495,7 @@ describe("orchestrate", () => {
         reviewUrl: "",
         modelUsed: "",
         skippedReason: "unsupported event: push",
+        phases: [],
         reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
       })
@@ -529,6 +533,7 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "",
         skippedReason: skipReason,
+        phases: [],
         reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
       })
@@ -557,6 +562,7 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "",
         skippedReason: skipReason,
+        phases: [],
         reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
       })
@@ -584,6 +590,7 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "",
         skippedReason: skipReason,
+        phases: [],
         reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
       })
@@ -624,6 +631,7 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "test/model",
         skippedReason: "",
+        phases: [{ phase: "combined", status: "completed" }],
         reviewSummaryMarkdown: expectedReviewSummary(),
         costSummaryMarkdown: expectedCostSummary,
       })
@@ -1666,6 +1674,7 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "test/model",
         skippedReason: "",
+        phases: [{ phase: "combined", status: "completed" }],
         reviewSummaryMarkdown: expectedReviewSummary({
           totalFromModel: 2,
           droppedAsNonFinding: 1,
@@ -1691,6 +1700,7 @@ describe("orchestrate", () => {
           kept: 1,
           droppedAsNonFinding: 1,
           droppedAsUnknownFile: 0,
+          duplicatesAcrossPhases: 0,
         },
       })
     })
@@ -1727,6 +1737,7 @@ describe("orchestrate", () => {
         reviewUrl: "",
         modelUsed: "test/model",
         skippedReason: "",
+        phases: [{ phase: "combined", status: "completed" }],
         reviewSummaryMarkdown: expectedReviewSummary({
           relatedFilePaths: ["src/caller.ts"],
           tokenBudgetRemainingForDocs:
@@ -1774,6 +1785,7 @@ describe("orchestrate", () => {
         reviewUrl: "https://github.com/test/review/1",
         modelUsed: "test/model",
         skippedReason: "",
+        phases: [{ phase: "combined", status: "completed" }],
         reviewSummaryMarkdown: expectedReviewSummary({
           totalFromModel: 2,
           droppedAsUnknownFile: 1,
@@ -1794,6 +1806,7 @@ describe("orchestrate", () => {
         level: "warn",
         message: "dropping finding: file not in prompt context",
         data: {
+          phase: "combined",
           file: "deploy/railway/README.md and the same issues...",
           line: 493,
           category: "subtle_bugs",
@@ -1807,6 +1820,7 @@ describe("orchestrate", () => {
           kept: 1,
           droppedAsNonFinding: 0,
           droppedAsUnknownFile: 1,
+          duplicatesAcrossPhases: 0,
         },
       })
     })
@@ -1875,7 +1889,12 @@ describe("orchestrate", () => {
       expect(missingLogger.messages).toContainEqual({
         level: "warn",
         message: "dropping finding: file not in prompt context",
-        data: { file: "AGENTS.md", line: 1, category: "correctness" },
+        data: {
+          phase: "combined",
+          file: "AGENTS.md",
+          line: 1,
+          category: "correctness",
+        },
       })
     })
   })

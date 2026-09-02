@@ -3,6 +3,9 @@ import type { PrContext } from "../github/event.js"
 export type ReviewSummaryStats = {
   prContext: PrContext
   conventionsFile: string | null
+  phasesCompleted: string[]
+  /** Phases that ended without an accepted response — their findings are absent. */
+  phasesIncomplete: string[]
   changedFilePaths: string[]
   relatedFilePaths: string[]
   relatedFilesExcludedPaths: string[]
@@ -21,6 +24,8 @@ export type ReviewSummaryStats = {
   droppedAsNonFinding: number
   /** Findings naming a file the model was never given. */
   droppedAsUnknownFile: number
+  /** Findings two phases reported on overlapping lines of one file. */
+  duplicatesAcrossPhases: number
   duplicatesRemoved: number
   droppedBelowThreshold: number
   droppedAsOverlapping: number
@@ -41,6 +46,10 @@ const renderPaths = (paths: string[]): string =>
  *  each finding. */
 export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
   const sha = stats.prContext.headSha.slice(0, 7)
+  const incompleteClause =
+    stats.phasesIncomplete.length === 0
+      ? ""
+      : ` · incomplete: ${stats.phasesIncomplete.join(", ")}`
 
   return [
     "### umm-actually review summary",
@@ -48,6 +57,8 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     `PR #${stats.prContext.prNumber} · \`${stats.prContext.headRef}\` → \`${stats.prContext.baseRef}\` · \`${sha}\``,
     "",
     `**Instructions:** ${stats.conventionsFile ?? "none"}`,
+    "",
+    `**Phases:** ${renderPaths(stats.phasesCompleted)}${incompleteClause}`,
     "",
     "#### Context",
     "",
@@ -71,6 +82,7 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     `| Raw from model | ${stats.totalFromModel} |`,
     `| Dropped as non-findings | ${stats.droppedAsNonFinding} |`,
     `| Dropped as unknown file | ${stats.droppedAsUnknownFile} |`,
+    `| Duplicates (cross-phase) | ${stats.duplicatesAcrossPhases} |`,
     `| Duplicates (cross-run) | ${stats.duplicatesRemoved} |`,
     `| Dropped below threshold | ${stats.droppedBelowThreshold} |`,
     `| Dropped as overlapping | ${stats.droppedAsOverlapping} |`,

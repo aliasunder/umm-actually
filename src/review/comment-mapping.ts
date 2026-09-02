@@ -338,6 +338,7 @@ export const buildStatusComment = ({
   droppedByCap,
   model,
   contextNotes = [],
+  incompletePhases = [],
 }: {
   sha: string
   isFirstRun: boolean
@@ -347,6 +348,8 @@ export const buildStatusComment = ({
   droppedByCap: Finding[]
   model: string
   contextNotes?: string[]
+  /** Ids of review phases that ended without an accepted response. */
+  incompletePhases?: string[]
 }): string => {
   const shaShort = sha.slice(0, 7)
   const verb = isFirstRun ? "reviewed" : "re-reviewed"
@@ -367,6 +370,14 @@ export const buildStatusComment = ({
     droppedByCap.length === 0
       ? ""
       : `_${droppedByCap.length} lower-severity finding(s) omitted by the max_findings cap: ${droppedByCap.map((finding) => `\`${finding.file}:${finding.line}\``).join(", ")}_`
+  // The error text stays in the check run: it embeds model slugs and
+  // provider response bodies that do not belong on the PR timeline.
+  const incompleteNote =
+    incompletePhases.length === 0
+      ? ""
+      : incompletePhases.length === 1
+        ? `_Review phase \`${incompletePhases[0]}\` did not complete; its findings are missing from this run. See the check run for details._`
+        : `_Review phases ${incompletePhases.map((phaseId) => `\`${phaseId}\``).join(", ")} did not complete; their findings are missing from this run. See the check run for details._`
   const contextSection =
     contextNotes.length === 0
       ? ""
@@ -378,6 +389,7 @@ export const buildStatusComment = ({
     findingsLine,
     unpostedNote,
     capNote,
+    incompleteNote,
     contextSection,
     attribution,
   ]
