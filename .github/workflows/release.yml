@@ -222,18 +222,18 @@ jobs:
         run: gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
 
       # The checkout is detached at the pin commit; CHANGELOG.md lives on main.
-      # The script leaves the file untouched when the version is already
-      # listed, so a resumed run has nothing to commit.
+      # A version already listed (a resumed run, or an entry merged by hand)
+      # is left alone — the script itself would insert a duplicate.
       - name: Update CHANGELOG.md on main
         run: |
           git fetch origin main
           git checkout main
-          bash .github/scripts/update-changelog.sh "${RELEASE_TAG#v}" "$RUNNER_TEMP/release-notes.md"
-          git add CHANGELOG.md
-          if git diff --cached --quiet; then
-            echo "CHANGELOG.md already lists ${RELEASE_TAG#v} — nothing to commit."
+          if grep -q "^## \[${RELEASE_TAG#v}\]" CHANGELOG.md; then
+            echo "CHANGELOG.md already lists ${RELEASE_TAG#v} — nothing to do."
             exit 0
           fi
+          bash .github/scripts/update-changelog.sh "${RELEASE_TAG#v}" "$RUNNER_TEMP/release-notes.md"
+          git add CHANGELOG.md
           git config user.name "umm-actually[bot]"
           git config user.email "umm-actually[bot]@users.noreply.github.com"
           git commit -m "docs: update CHANGELOG.md for $RELEASE_TAG"
