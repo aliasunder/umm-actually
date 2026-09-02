@@ -196,6 +196,55 @@ describe("renderReviewSummary", () => {
     )
   })
 
+  it("lists the completed phases and names the incomplete ones", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      phasesCompleted: ["correctness-security", "conventions-tests"],
+      phasesIncomplete: ["subtle-bugs"],
+    })
+
+    expect(summary).toBe(
+      [
+        "### umm-actually review summary",
+        "",
+        "PR #7 · `feat/trim-names` → `main` · `abc123d`",
+        "",
+        "**Instructions:** AGENTS.md",
+        "",
+        "**Phases:** correctness-security, conventions-tests · incomplete: subtle-bugs",
+        "",
+        "#### Context",
+        "",
+        "| type | count | paths |",
+        "| --- | --- | --- |",
+        "| Changed files | 1 | src/greeter.ts |",
+        "| Related files | 0 | — |",
+        "| Priority docs | 0 | — |",
+        "| Priority docs (already in context) | 0 | — |",
+        "| Priority docs (not included) | 0 | — |",
+        "| Mention-matched docs | 0 | — |",
+        "| Excluded (related files cap) | 0 | — |",
+        "| Excluded (docs cap) | 0 | — |",
+        "",
+        "**Token budget:** 300000 total · 12000 diff · 30000 priority-doc floor · 250000 left for docs",
+        "",
+        "#### Findings pipeline",
+        "",
+        "| stage | count |",
+        "| --- | --- |",
+        "| Raw from model | 3 |",
+        "| Dropped as non-findings | 0 |",
+        "| Dropped as unknown file | 0 |",
+        "| Duplicates (cross-phase) | 0 |",
+        "| Duplicates (cross-run) | 0 |",
+        "| Dropped below threshold | 0 |",
+        "| Dropped as overlapping | 0 |",
+        "| Dropped by cap | 0 |",
+        "| **Posted** | **3** |",
+      ].join("\n"),
+    )
+  })
+
   it("renders the budget split when changed files consumed everything", () => {
     const summary = renderReviewSummary({
       ...baseStats,

@@ -9,10 +9,11 @@ import type {
 } from "../github/client.js"
 import type { PrContext } from "../github/event.js"
 import type { ContextReader } from "../context/workspace.js"
-import type {
-  ModelAttempt,
-  OpenRouterClient,
-  StructuredReviewResult,
+import {
+  ReviewRequestError,
+  type ModelAttempt,
+  type OpenRouterClient,
+  type StructuredReviewResult,
 } from "../openrouter/client.js"
 import { estimateTokens, type PromptFile } from "../review/prompt.js"
 import { annotateDiff } from "../diff/annotate-diff.js"
@@ -28,7 +29,12 @@ import {
   type ReviewComment,
 } from "../review/comment-mapping.js"
 import { filterNonFindings } from "../review/filter-non-findings.js"
-import { COMBINED_PHASE } from "../review/phases.js"
+import {
+  COMBINED_PHASE,
+  CONVENTIONS_TESTS_PHASE,
+  CORRECTNESS_SECURITY_PHASE,
+  SUBTLE_BUGS_PHASE,
+} from "../review/phases.js"
 import { selectFindings } from "../review/select-findings.js"
 import { renderCostSummary } from "../openrouter/cost-summary.js"
 import {
@@ -178,6 +184,7 @@ const expectedStatus = ({
   totalCount,
   droppedByCap = [],
   contextNotes = [],
+  incompletePhases = [],
 }: {
   isFirstRun: boolean
   postedCount: number
@@ -185,6 +192,7 @@ const expectedStatus = ({
   totalCount: number
   droppedByCap?: Finding[]
   contextNotes?: string[]
+  incompletePhases?: string[]
 }) => ({
   prNumber: 7,
   anchor: STATUS_ANCHOR,
@@ -197,6 +205,7 @@ const expectedStatus = ({
     droppedByCap,
     model: "test/model",
     contextNotes,
+    incompletePhases,
   }),
 })
 
@@ -2540,6 +2549,250 @@ describe("orchestrate", () => {
         data: { checkRunId: 555, error: "[Error]: HTTP 500" },
       })
     })
+  })
+})
+
+describe("staged phases", () => {
+  const splitPhaseIds = [
+    "correctness-security",
+    "conventions-tests",
+    "subtle-bugs",
+  ]
+  const completedSplitPhases = splitPhaseIds.map((phase) => ({
+    phase,
+    status: "completed" as const,
+  }))
+  const splitAttempts = splitPhaseIds.map((phase) => ({
+    ...fixtureAttempt,
+    phase,
+  }))
+
+  it("runs parallel as one stage: every split phase is called with no prior findings and identical findings collapse across phases", async () => {
+    const stubs = makeOrchestrateDeps({ config: { phases: "parallel" } })
+    const logger = createTestLogger()
+
+    const result = await orchestrate(stubs.deps, logger)
+
+    expect(
+      stubs.generateFindingsCalls.map((call) => [
+        call.phase,
+        call.priorFindings,
+      ]),
+    ).toEqual([
+      [CORRECTNESS_SECURITY_PHASE, []],
+      [CONVENTIONS_TESTS_PHASE, []],
+      [SUBTLE_BUGS_PHASE, []],
+    ])
+    // Every phase returned the same fixture findings: the first phase's copy
+    // survives, the other two phases' copies are cross-phase duplicates
+    expect(result).toEqual({
+      findingsCount: expectedSelection.selected.length,
+      reviewUrl: "https://github.com/test/review/1",
+      modelUsed: "test/model",
+      skippedReason: "",
+      phases: completedSplitPhases,
+      reviewSummaryMarkdown: expectedReviewSummary({
+        phasesCompleted: splitPhaseIds,
+        totalFromModel: fixtureReviewResponse.findings.length * 3,
+        duplicatesAcrossPhases: fixtureReviewResponse.findings.length * 2,
+      }),
+      costSummaryMarkdown: renderCostSummary({
+        attempts: splitAttempts,
+        modelUsed: "test/model",
+      }),
+    })
+    expect(stubs.postFindingsReviewCalls).toEqual([
+      expectedFindingsReview(expectedSelection.selected),
+    ])
+  })
+
+  it("runs sequential as three stages, passing every earlier phase's raw findings forward", async () => {
+    const correctnessFinding = makeFinding({ line: 145, title: "From cs" })
+    const conventionsFinding = makeFinding({
+      line: 3,
+      category: "conventions",
+      title: "From ct",
+    })
+    const findingsByPhase: Record<string, Finding[]> = {
+      "correctness-security": [correctnessFinding],
+      "conventions-tests": [conventionsFinding],
+      "subtle-bugs": [],
+    }
+    const stubs = makeOrchestrateDeps({
+      config: { phases: "sequential" },
+      generateFindings: async (reviewContext) => {
+        stubs.generateFindingsCalls.push(reviewContext)
+        return {
+          review: {
+            analysis: "",
+            findings: findingsByPhase[reviewContext.phase.id] ?? [],
+          },
+          modelUsed: "test/model",
+          attempts: [fixtureAttempt],
+        }
+      },
+    })
+    const logger = createTestLogger()
+
+    await orchestrate(stubs.deps, logger)
+
+    expect(
+      stubs.generateFindingsCalls.map((call) => [
+        call.phase.id,
+        call.priorFindings,
+      ]),
+    ).toEqual([
+      ["correctness-security", []],
+      ["conventions-tests", [correctnessFinding]],
+      ["subtle-bugs", [correctnessFinding, conventionsFinding]],
+    ])
+  })
+
+  it("posts the surviving phases' findings when one phase fails, naming the gap on the status comment and the check run", async () => {
+    const timeoutAttempt: ModelAttempt = {
+      model: "test/model",
+      outcome: "timeout",
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      errorSummary: "no response within 900s",
+    }
+    const stubs = makeOrchestrateDeps({
+      config: { phases: "parallel" },
+      generateFindings: async (reviewContext) => {
+        stubs.generateFindingsCalls.push(reviewContext)
+        if (reviewContext.phase.id === "subtle-bugs") {
+          throw new ReviewRequestError({
+            message: "review request failed after 1 attempt(s)",
+            attempts: [timeoutAttempt],
+            aborted: false,
+          })
+        }
+        return {
+          review: fixtureReviewResponse,
+          modelUsed: "test/model",
+          attempts: [fixtureAttempt],
+        }
+      },
+    })
+    const logger = createTestLogger()
+
+    const result = await orchestrate(stubs.deps, logger)
+
+    const expectedCost = renderCostSummary({
+      attempts: [
+        { ...fixtureAttempt, phase: "correctness-security" },
+        { ...fixtureAttempt, phase: "conventions-tests" },
+        { ...timeoutAttempt, phase: "subtle-bugs" },
+      ],
+      modelUsed: "test/model",
+    })
+    expect(result).toEqual({
+      findingsCount: expectedSelection.selected.length,
+      reviewUrl: "https://github.com/test/review/1",
+      modelUsed: "test/model",
+      skippedReason: "",
+      phases: [
+        { phase: "correctness-security", status: "completed" },
+        { phase: "conventions-tests", status: "completed" },
+        {
+          phase: "subtle-bugs",
+          status: "failed",
+          reason:
+            "[ReviewRequestError]: review request failed after 1 attempt(s)",
+        },
+      ],
+      reviewSummaryMarkdown: expectedReviewSummary({
+        phasesCompleted: ["correctness-security", "conventions-tests"],
+        phasesIncomplete: ["subtle-bugs"],
+        totalFromModel: fixtureReviewResponse.findings.length * 2,
+        duplicatesAcrossPhases: fixtureReviewResponse.findings.length,
+      }),
+      costSummaryMarkdown: expectedCost,
+    })
+    expect(stubs.postFindingsReviewCalls).toEqual([
+      expectedFindingsReview(expectedSelection.selected),
+    ])
+    expect(stubs.upsertSummaryCommentCalls).toEqual([
+      expectedStatus({
+        isFirstRun: true,
+        postedCount: expectedSelection.selected.length,
+        totalCount: expectedSelection.selected.length,
+        incompletePhases: ["subtle-bugs"],
+      }),
+    ])
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "success",
+        output: {
+          title: `${expectedSelection.selected.length} findings (1 of 3 phases incomplete)`,
+          summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.\n\nIncomplete phases: \`subtle-bugs\` ([ReviewRequestError]: review request failed after 1 attempt(s))\n\n${expectedCost}`,
+        },
+      },
+    ])
+  })
+
+  it("fails the run with every phase's error when no phase completes", async () => {
+    const stubs = makeOrchestrateDeps({
+      config: { phases: "parallel" },
+      generateFindings: async (reviewContext) => {
+        throw new Error(`${reviewContext.phase.id} exploded`)
+      },
+    })
+    const logger = createTestLogger()
+
+    const expectedMessage =
+      "all 3 review phases failed: correctness-security: [Error]: correctness-security exploded; conventions-tests: [Error]: conventions-tests exploded; subtle-bugs: [Error]: subtle-bugs exploded"
+    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+      expectedMessage,
+    )
+    expect(stubs.postFindingsReviewCalls).toEqual([])
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "failure",
+        output: {
+          title: "Error — review did not complete",
+          summary: `[Error]: ${expectedMessage}`,
+        },
+      },
+    ])
+  })
+
+  it("joins the routed models when phases were served by different models", async () => {
+    const stubs = makeOrchestrateDeps({
+      config: { phases: "parallel" },
+      generateFindings: async (reviewContext) => {
+        stubs.generateFindingsCalls.push(reviewContext)
+        return {
+          review: fixtureReviewResponse,
+          modelUsed:
+            reviewContext.phase.id === "subtle-bugs"
+              ? "fallback/model"
+              : "test/model",
+          attempts: [fixtureAttempt],
+        }
+      },
+    })
+    const logger = createTestLogger()
+
+    const result = await orchestrate(stubs.deps, logger)
+
+    expect(result.modelUsed).toBe("test/model, fallback/model")
+    const mapped = mapFindingsToReview({
+      findings: expectedSelection.selected,
+      commentableByPath: fixtureCommentableByPath,
+      model: "test/model, fallback/model",
+    })
+    expect(stubs.postFindingsReviewCalls).toEqual([
+      {
+        prNumber: 7,
+        commitId: fixturePrContext.headSha,
+        body: REVIEW_MARKER,
+        comments: mapped.comments,
+      },
+    ])
   })
 })
 
