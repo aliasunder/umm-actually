@@ -64,6 +64,7 @@ import { filterUnknownFileFindings } from "./review/filter-unknown-file-findings
 import { mergePhaseFindings } from "./review/merge-phase-findings.js"
 import { renderReviewSummary } from "./review/review-summary.js"
 import {
+  AllPhasesFailedError,
   runStages,
   type PhaseOutcome,
   type RunPhase,
@@ -437,6 +438,24 @@ const filterPhaseFindings = (
     droppedAsNonFinding,
     droppedAsUnknownFile: droppedAsUnknownFile.length,
   }
+}
+
+/** A run where every phase failed still billed its attempts; the failure
+ *  summary carries the cost table so they are not lost with the findings. */
+const describePipelineFailure = ({
+  pipelineError,
+  costSummary,
+}: {
+  pipelineError: unknown
+  costSummary: boolean
+}): string => {
+  const description = describeError(pipelineError)
+  if (!costSummary || !(pipelineError instanceof AllPhasesFailedError)) {
+    return description
+  }
+  const attempts = pipelineError.outcomes.flatMap(phaseAttempts)
+  if (attempts.length === 0) return description
+  return `${description}\n\n${renderCostSummary({ attempts, modelUsed: "none" })}`
 }
 
 const sumBy = <Item>(
@@ -1029,7 +1048,10 @@ export const orchestrate = async (
         conclusion: "failure",
         output: {
           title: "Error — review did not complete",
-          summary: describeError(pipelineError),
+          summary: describePipelineFailure({
+            pipelineError,
+            costSummary: config.costSummary,
+          }),
         },
       },
       logger,

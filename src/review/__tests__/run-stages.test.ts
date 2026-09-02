@@ -3,7 +3,11 @@ import { createTestLogger } from "../../__tests__/test-logger.js"
 import type { StructuredReviewResult } from "../../openrouter/client.js"
 import type { Finding } from "../finding.js"
 import type { ReviewPhase } from "../phases.js"
-import { runStages, type RunPhase } from "../run-stages.js"
+import {
+  AllPhasesFailedError,
+  runStages,
+  type RunPhase,
+} from "../run-stages.js"
 import { makeFinding } from "./make-finding.js"
 
 const makePhase = (id: string): ReviewPhase => ({
@@ -147,7 +151,7 @@ describe("runStages", () => {
     ])
   })
 
-  it("rethrows the only failure unchanged when nothing completed", async () => {
+  it("throws an error carrying the outcomes when the only phase fails", async () => {
     const failure = new Error("model exploded")
     const { runPhase } = makeRunPhase({ a: () => Promise.reject(failure) })
 
@@ -155,10 +159,18 @@ describe("runStages", () => {
       runStages({ stages: [[phaseA]], runPhase }, createTestLogger()),
     )
 
-    expect(rejection).toBe(failure)
+    if (!(rejection instanceof AllPhasesFailedError)) {
+      throw new Error("expected an AllPhasesFailedError")
+    }
+    expect(rejection.message).toBe(
+      "every review phase failed: a: [Error]: model exploded",
+    )
+    expect(rejection.outcomes).toEqual([
+      { phase: phaseA, status: "failed", error: failure },
+    ])
   })
 
-  it("aggregates every failure into one message when nothing completed", async () => {
+  it("names every failure in the message when nothing completed", async () => {
     const { runPhase } = makeRunPhase({
       a: () => Promise.reject(new Error("boom a")),
       b: () => Promise.reject(new Error("boom b")),
@@ -167,7 +179,7 @@ describe("runStages", () => {
     await expect(
       runStages({ stages: [[phaseA], [phaseB]], runPhase }, createTestLogger()),
     ).rejects.toThrow(
-      "all 2 review phases failed: a: [Error]: boom a; b: [Error]: boom b",
+      "every review phase failed: a: [Error]: boom a; b: [Error]: boom b",
     )
   })
 

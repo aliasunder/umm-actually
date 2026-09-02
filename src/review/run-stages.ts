@@ -13,6 +13,26 @@ export type RunPhase = (params: {
   priorFindings: Finding[]
 }) => Promise<StructuredReviewResult>
 
+const describeFailure = (outcome: PhaseOutcome): string => {
+  return outcome.status === "failed"
+    ? `${outcome.phase.id}: ${describeError(outcome.error)}`
+    : `${outcome.phase.id}: completed`
+}
+
+/** Thrown when no phase completed. `outcomes` keeps every phase's error so
+ *  the caller can still account for the attempts the failed phases billed. */
+export class AllPhasesFailedError extends Error {
+  readonly outcomes: PhaseOutcome[]
+
+  constructor(outcomes: PhaseOutcome[]) {
+    super(
+      `every review phase failed: ${outcomes.map(describeFailure).join("; ")}`,
+    )
+    this.name = "AllPhasesFailedError"
+    this.outcomes = outcomes
+  }
+}
+
 /** The client marks an auth/credit failure as aborted: the key is bad for
  *  every model, so no later stage can succeed either. */
 const isAbortedRequest = (error: unknown): boolean => {
@@ -83,8 +103,7 @@ const completedFindings = (outcomes: PhaseOutcome[]): Finding[] => {
  * every earlier stage's findings (non-findings removed) to the next stage as
  * prior findings.
  * Outcomes come back in stage-then-phase order regardless of completion
- * order. Throws only when no phase completed: one failure is rethrown as-is,
- * several are aggregated into one message.
+ * order. Throws AllPhasesFailedError only when no phase completed.
  */
 export const runStages = async (
   { stages, runPhase }: { stages: ReviewStage[]; runPhase: RunPhase },
@@ -122,12 +141,9 @@ export const runStages = async (
     }
   }
 
-  const failures = outcomes.filter((outcome) => outcome.status === "failed")
-  if (failures.length < outcomes.length) return outcomes
-  if (failures.length === 1 && failures[0]) throw failures[0].error
-  throw new Error(
-    `all ${failures.length} review phases failed: ${failures
-      .map((failure) => `${failure.phase.id}: ${describeError(failure.error)}`)
-      .join("; ")}`,
+  const anyCompleted = outcomes.some(
+    (outcome) => outcome.status === "completed",
   )
+  if (anyCompleted) return outcomes
+  throw new AllPhasesFailedError(outcomes)
 }

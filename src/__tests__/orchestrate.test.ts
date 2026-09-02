@@ -2500,7 +2500,8 @@ describe("orchestrate", () => {
           conclusion: "failure",
           output: {
             title: "Error — review did not complete",
-            summary: "[Error]: model exploded",
+            summary:
+              "[AllPhasesFailedError]: every review phase failed: combined: [Error]: model exploded",
           },
         },
       ])
@@ -2743,7 +2744,7 @@ describe("staged phases", () => {
     const logger = createTestLogger()
 
     const expectedMessage =
-      "all 3 review phases failed: correctness-security: [Error]: correctness-security exploded; conventions-tests: [Error]: conventions-tests exploded; subtle-bugs: [Error]: subtle-bugs exploded"
+      "every review phase failed: correctness-security: [Error]: correctness-security exploded; conventions-tests: [Error]: conventions-tests exploded; subtle-bugs: [Error]: subtle-bugs exploded"
     await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
       expectedMessage,
     )
@@ -2754,7 +2755,47 @@ describe("staged phases", () => {
         conclusion: "failure",
         output: {
           title: "Error — review did not complete",
-          summary: `[Error]: ${expectedMessage}`,
+          summary: `[AllPhasesFailedError]: ${expectedMessage}`,
+        },
+      },
+    ])
+  })
+
+  it("carries the billed attempts into the failure summary when every phase fails", async () => {
+    const timeoutAttempt: ModelAttempt = {
+      model: "test/model",
+      outcome: "timeout",
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      errorSummary: "no response within 900s",
+    }
+    const stubs = makeOrchestrateDeps({
+      generateFindings: async () => {
+        throw new ReviewRequestError({
+          message: "review request failed after 1 attempt(s)",
+          attempts: [timeoutAttempt],
+          aborted: false,
+        })
+      },
+    })
+    const logger = createTestLogger()
+
+    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+      "every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+    )
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "failure",
+        output: {
+          title: "Error — review did not complete",
+          summary: `[AllPhasesFailedError]: every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)\n\n${renderCostSummary(
+            {
+              attempts: [{ ...timeoutAttempt, phase: "combined" }],
+              modelUsed: "none",
+            },
+          )}`,
         },
       },
     ])
