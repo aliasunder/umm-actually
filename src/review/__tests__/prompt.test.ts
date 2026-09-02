@@ -81,7 +81,27 @@ describe("buildSystemPrompt", () => {
         "the diff (traced regressions, pre-existing bugs) are still valuable — report",
         "them with their real file and line; they are rendered in the review body",
         "instead of inline.",
+        "",
+        'File anchoring: when you fill "file", copy the exact path="…" attribute of one',
+        'file block or the path in one "=== path ===" diff header — nothing appended,',
+        "nothing paraphrased. Boundary: a finding on a path that has no file block and",
+        "no diff header is dropped before posting, so when the defect lives in a file",
+        "you were not given, report it against the provided file that calls into it.",
       ].join("\n"),
+    )
+  })
+
+  it('requires "file" to be copied from a file block path attribute or a diff header', () => {
+    const systemPrompt = buildSystemPrompt({ phase: combinedPhase }).replace(
+      /\s+/g,
+      " ",
+    )
+
+    expect(systemPrompt).toContain(
+      'copy the exact path="…" attribute of one file block or the path in one "=== path ===" diff header — nothing appended, nothing paraphrased',
+    )
+    expect(systemPrompt).toContain(
+      "a finding on a path that has no file block and no diff header is dropped before posting",
     )
   })
 

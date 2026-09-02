@@ -52,6 +52,7 @@ import {
   type PromptFile,
 } from "./review/prompt.js"
 import { filterNonFindings } from "./review/filter-non-findings.js"
+import { filterUnknownFileFindings } from "./review/filter-unknown-file-findings.js"
 import { renderReviewSummary } from "./review/review-summary.js"
 import { selectFindings } from "./review/select-findings.js"
 
@@ -537,6 +538,21 @@ const runReviewPipeline = async (
 
   const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
 
+  // Every path the model can see: diff headers (deleted files render a
+  // header but have no new path, so they are added here), file blocks, and
+  // the conventions section when the file was found.
+  const deletedPaths = files.flatMap((file) => {
+    return file.deleted === true && file.from ? [file.from] : []
+  })
+  const promptFilePaths = [
+    ...changedPaths,
+    ...deletedPaths,
+    ...changedFiles.map((file) => file.path),
+    ...relatedFiles.map((file) => file.path),
+    ...relatedDocs.map((file) => file.path),
+    ...(conventions !== null ? [config.conventionsFile] : []),
+  ]
+
   logger.info("context sent to model", {
     conventionsFile: conventions
       ? conventionsReadInFullByPriorityDocs
@@ -622,14 +638,29 @@ const runReviewPipeline = async (
 
   const { modelUsed, attempts } = structuredResult
 
-  // Step 12: filter non-findings before selection so cap slots aren't wasted
-  const { findings: realFindings, droppedAsNonFinding } = filterNonFindings(
-    structuredResult.review.findings,
-  )
+  // Step 12: filter non-findings and findings on files the model never saw
+  // before selection so cap slots aren't wasted
+  const { findings: nonFindingFiltered, droppedAsNonFinding } =
+    filterNonFindings(structuredResult.review.findings)
+  const { findings: realFindings, droppedAsUnknownFile } =
+    filterUnknownFileFindings({
+      findings: nonFindingFiltered,
+      knownPaths: promptFilePaths,
+    })
+  // Per-drop warn on purpose: each one is a model-quality event, not loop
+  // chatter, and the title is omitted because it may be garbage
+  for (const finding of droppedAsUnknownFile) {
+    logger.warn("dropping finding: file not in prompt context", {
+      file: finding.file,
+      line: finding.line,
+      category: finding.category,
+    })
+  }
   logger.info("non-finding filter applied to model output", {
     totalFromModel: structuredResult.review.findings.length,
     kept: realFindings.length,
     droppedAsNonFinding,
+    droppedAsUnknownFile: droppedAsUnknownFile.length,
   })
 
   // Step 12.5: cross-run dedup — every run walks the same path; a first run
@@ -766,6 +797,7 @@ const runReviewPipeline = async (
     tokenBudgetRemainingForDocs: docRemainingTokens,
     totalFromModel: structuredResult.review.findings.length,
     droppedAsNonFinding,
+    droppedAsUnknownFile: droppedAsUnknownFile.length,
     duplicatesRemoved: realFindings.length - newFindings.length,
     droppedBelowThreshold,
     droppedAsOverlapping,

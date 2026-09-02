@@ -99,12 +99,12 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 
 ## Outputs
 
-| Output           | Description                                                                                   |
-| ---------------- | --------------------------------------------------------------------------------------------- |
-| `findings_count` | Number of new findings posted (after non-finding filter, threshold, cap, and cross-run dedup) |
-| `review_url`     | URL of the submitted review; empty when no review was posted                                  |
-| `model_used`     | Model that produced the accepted response                                                     |
-| `skipped_reason` | Non-empty when the review was skipped (e.g. diff too large)                                   |
+| Output           | Description                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `findings_count` | Number of new findings posted (after the non-finding and unknown-file filters, threshold, cap, and cross-run dedup) |
+| `review_url`     | URL of the submitted review; empty when no review was posted                                                        |
+| `model_used`     | Model that produced the accepted response                                                                           |
+| `skipped_reason` | Non-empty when the review was skipped (e.g. diff too large)                                                         |
 
 ## How it works
 
@@ -113,7 +113,7 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 3. Reads the conventions file and changed source files (token-budgeted), traces imports to find related code files, and scans doc files (`.md`, `.json`) for mentions of changed paths
 4. Builds a structured prompt with randomized delimiter nonces (prompt injection defense); on re-runs, prior bot comment bodies are included so the model can self-suppress conceptual duplicates. Sends it to OpenRouter
 5. Validates the response against a strict Zod schema, retrying with a fallback model if the primary fails
-6. Drops non-findings (see [Non-finding filter](#non-finding-filter)), then on re-runs deduplicates against previously posted inline comments (by hidden HTML anchor)
+6. Drops non-findings (see [Non-finding filter](#non-finding-filter)) and findings on files the model was never given (see [Unknown-file filter](#unknown-file-filter)), then on re-runs deduplicates against previously posted inline comments (by hidden HTML anchor)
 7. Filters remaining findings by severity threshold, deduplicates overlapping findings within the run, and caps if configured
 8. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
 9. Posts one review with inline comments (invisible body); beyond-diff findings post as standalone PR comments; every run upserts a status comment with cross-run totals
@@ -128,6 +128,10 @@ Models sometimes report "findings" that conclude the code is fine — titled `N/
 - its **failure_scenario** ends with a leaked conclusion — `…no bug` / `…no bug here` or `…analysis was wrong`
 
 The patterns are deliberately anchored to the start or end of a field, so real findings survive: a scenario like "No failure occurs until the third retry…" or "None of the guards catch this input" never matches. Dropped counts are logged per run (`non-finding filter applied to model output`).
+
+## Unknown-file filter
+
+A finding's `file` must name a file the model was given: a diff header (including renamed-from and deleted paths), a changed, related, or priority-doc file block, or the conventions file. A finding on any other path is ungrounded — the model saw nothing there — and is dropped before threshold, dedup, and cap. Paths are normalized before comparison (`./src/x.ts` and `src/x.ts` match), but only whole paths match: a bare filename or a directory prefix does not. Each drop is logged as a warning (`dropping finding: file not in prompt context`) with the file, line, and category; the per-run count appears in the job summary.
 
 ## Status
 
@@ -147,6 +151,7 @@ umm-actually is in early development — the core review pipeline works but ther
 - `@umm review` comment trigger for on-demand re-reviews
 - Cross-run finding dedup — re-runs detect previously posted inline findings via hidden HTML anchors and post only new ones; prior bot comment bodies also feed into the prompt for conceptual dedup (the model self-suppresses even when positional anchors differ). An updatable summary comment tracks totals
 - Non-finding filter — deterministic drop of findings that amount to "no bug here" (`N/A` prefixes, "no action needed" suggestions, "…is correct" titles) before threshold and cap
+- Unknown-file filter — findings on a path the model was never given are dropped before posting instead of surfacing as beyond-diff comments
 - Branded check run — the review reports as its own check via the Checks API, with the App avatar and the outcome on the check's details page
 
 **Planned**
