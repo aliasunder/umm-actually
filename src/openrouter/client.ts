@@ -158,10 +158,10 @@ const toBounded = <T>(result: SettledResult<T>): BoundedResult<T> => {
 /** An honoured AbortSignal rejects with an error named "AbortError"; the
  *  SDK wraps it in its own error with the AbortError as `cause`. Duck-typed
  *  down the cause chain, like errorStatusCode, so stubs need no SDK internals. */
-const isAbortError = (error: unknown): boolean => {
-  if (typeof error !== "object" || error === null) return false
+const isAbortError = (error: unknown, depth = 0): boolean => {
+  if (depth > 5 || typeof error !== "object" || error === null) return false
   if ("name" in error && error.name === "AbortError") return true
-  return "cause" in error && isAbortError(error.cause)
+  return "cause" in error && isAbortError(error.cause, depth + 1)
 }
 
 type LateSettlement = "response" | "abort_error" | "error"
