@@ -85,14 +85,21 @@ jobs:
           fi
 
       # A lookup failure fails the gate rather than reporting "no release":
-      # that answer would make the release job try to create a duplicate.
+      # that answer would make the release job try to create a duplicate. A
+      # draft also fails the gate: `gh release view` finds drafts, so treating
+      # one as published would skip the create step and complete green with
+      # nothing published.
       - name: Check whether a GitHub Release already exists for the tag
         id: release
         if: steps.tag.outputs.semver-tag == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view "$RELEASE_TAG" --json tagName > /dev/null 2> "$RUNNER_TEMP/release-view.err"; then
+          if gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' > "$RUNNER_TEMP/release-view.out" 2> "$RUNNER_TEMP/release-view.err"; then
+            if [ "$(cat "$RUNNER_TEMP/release-view.out")" = "true" ]; then
+              echo "::error::a draft GitHub Release exists for $RELEASE_TAG — publish or delete it, then re-run"
+              exit 1
+            fi
             echo "release-exists=true" >> "$GITHUB_OUTPUT"
             echo "GitHub Release $RELEASE_TAG already exists."
           elif grep -q "release not found" "$RUNNER_TEMP/release-view.err"; then
