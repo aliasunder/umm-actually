@@ -131,28 +131,22 @@ const summarizeError = (error: unknown): string => {
   return message.length > 200 ? `${message.slice(0, 200)}…` : message
 }
 
-type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown }
+/** How the SDK call itself ended. */
+type SettledResult<T> =
+  { status: "resolved"; value: T } | { status: "rejected"; error: unknown }
+
+/** A settled call, or the deadline winning before it settled. */
+type BoundedResult<T> = SettledResult<T> | { status: "timed_out" }
 
 /** Converts a throwing promise into a discriminated result — avoids
  *  try/catch nesting at every SDK call site. */
 const toResult = async <T>(promise: Promise<T>): Promise<SettledResult<T>> => {
   try {
     const value = await promise
-    return { ok: true, value }
+    return { status: "resolved", value }
   } catch (error) {
-    return { ok: false, error }
+    return { status: "rejected", error }
   }
-}
-
-type BoundedResult<T> =
-  | { status: "resolved"; value: T }
-  | { status: "rejected"; error: unknown }
-  | { status: "timed_out" }
-
-const toBounded = <T>(result: SettledResult<T>): BoundedResult<T> => {
-  return result.ok
-    ? { status: "resolved", value: result.value }
-    : { status: "rejected", error: result.error }
 }
 
 /** Real cause chains are two deep at most; the bound only stops a cyclic
@@ -172,7 +166,7 @@ const isAbortError = (error: unknown, depth = 0): boolean => {
 type LateSettlement = "response" | "abort_error" | "error"
 
 const describeLateSettlement = <T>(late: SettledResult<T>): LateSettlement => {
-  if (late.ok) return "response"
+  if (late.status === "resolved") return "response"
   if (isAbortError(late.error)) return "abort_error"
   return "error"
 }
@@ -208,10 +202,11 @@ const withDeadline = async <T>(
     controller.abort()
   }, timeoutMs)
 
-  const bounded = await Promise.race([
-    settled.then(toBounded),
-    deadline.promise,
-  ]).finally(() => clearTimeout(timer))
+  const bounded = await Promise.race([settled, deadline.promise]).finally(
+    () => {
+      clearTimeout(timer)
+    },
+  )
   if (bounded.status !== "timed_out") return bounded
 
   logger.warn("request deadline elapsed", { ...logContext, timeoutMs })
@@ -221,7 +216,9 @@ const withDeadline = async <T>(
       elapsedMs: DateTime.now().diff(startedAt).toMillis(),
       timeoutMs,
       settledWith: describeLateSettlement(late),
-      ...(late.ok ? {} : { error: summarizeError(late.error) }),
+      ...(late.status === "rejected"
+        ? { error: summarizeError(late.error) }
+        : {}),
     })
   }
   // Observed, not awaited: the deadline has already been reported and the
