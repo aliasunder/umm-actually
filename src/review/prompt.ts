@@ -215,7 +215,7 @@ export const buildUserPrompt = ({
   const priorFindingsSection =
     priorFindings.length === 0
       ? ""
-      : `<${priorFindingsTag} note="already reported by earlier phases — do not re-report them; a later report on the same lines is merged into the earlier one">\n${JSON.stringify(priorFindings, null, 2)}\n</${priorFindingsTag}>`
+      : `<${priorFindingsTag} note="already reported by earlier phases — do not re-report them; when a later report overlaps one of these lines, only the higher-severity finding of the two is kept">\n${JSON.stringify(priorFindings, null, 2)}\n</${priorFindingsTag}>`
 
   const priorBotCommentsSection =
     priorBotComments.length === 0

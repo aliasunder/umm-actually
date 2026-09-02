@@ -343,7 +343,7 @@ describe("buildUserPrompt", () => {
     })
 
     expect(userPrompt).toContain(
-      '<prior_findings-abc123def456 note="already reported by earlier phases — do not re-report them; a later report on the same lines is merged into the earlier one">',
+      '<prior_findings-abc123def456 note="already reported by earlier phases — do not re-report them; when a later report overlaps one of these lines, only the higher-severity finding of the two is kept">',
     )
     expect(userPrompt).toContain(priorFinding.title)
   })
