@@ -106,7 +106,7 @@ const expectedMapped = mapFindingsToReview({
   model: "test/model",
 })
 const expectedCostSummary = renderCostSummary({
-  attempts: [fixtureAttempt],
+  attempts: [{ ...fixtureAttempt, phase: "combined" }],
   modelUsed: "test/model",
 })
 

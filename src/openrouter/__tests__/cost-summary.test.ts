@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
-import type { ModelAttempt } from "../client.js"
-import { renderCostSummary } from "../cost-summary.js"
+import { renderCostSummary, type PhaseAttempt } from "../cost-summary.js"
 
-const acceptedAttempt: ModelAttempt = {
+const acceptedAttempt: PhaseAttempt = {
+  phase: "combined",
   model: "openai/gpt-5-mini",
   outcome: "accepted",
   promptTokens: 12000,
@@ -10,6 +10,11 @@ const acceptedAttempt: ModelAttempt = {
   costUsd: 0.0421,
   errorSummary: null,
 }
+
+const tableHeader = [
+  "| attempt | phase | model | outcome | prompt tokens | completion tokens | cost |",
+  "| --- | --- | --- | --- | --- | --- | --- |",
+]
 
 describe("renderCostSummary", () => {
   it("renders a well-formed empty table for zero attempts", () => {
@@ -24,8 +29,7 @@ describe("renderCostSummary", () => {
         "",
         "Model used: openai/gpt-5-mini",
         "",
-        "| attempt | model | outcome | prompt tokens | completion tokens | cost |",
-        "| --- | --- | --- | --- | --- | --- |",
+        ...tableHeader,
         "",
         "Total cost: n/a",
       ].join("\n"),
@@ -33,7 +37,8 @@ describe("renderCostSummary", () => {
   })
 
   it("renders a timeout attempt row verbatim with n/a cells", () => {
-    const timeoutAttempt: ModelAttempt = {
+    const timeoutAttempt: PhaseAttempt = {
+      phase: "combined",
       model: "openai/gpt-5-mini",
       outcome: "timeout",
       promptTokens: null,
@@ -52,10 +57,9 @@ describe("renderCostSummary", () => {
         "",
         "Model used: openai/gpt-5-mini",
         "",
-        "| attempt | model | outcome | prompt tokens | completion tokens | cost |",
-        "| --- | --- | --- | --- | --- | --- |",
-        "| 1 | openai/gpt-5-mini | timeout | n/a | n/a | n/a |",
-        "| 2 | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
+        ...tableHeader,
+        "| 1 | combined | openai/gpt-5-mini | timeout | n/a | n/a | n/a |",
+        "| 2 | combined | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
         "",
         "Total cost: $0.042100 (some attempts unpriced)",
       ].join("\n"),
@@ -74,9 +78,8 @@ describe("renderCostSummary", () => {
         "",
         "Model used: openai/gpt-5-mini",
         "",
-        "| attempt | model | outcome | prompt tokens | completion tokens | cost |",
-        "| --- | --- | --- | --- | --- | --- |",
-        "| 1 | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
+        ...tableHeader,
+        "| 1 | combined | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
         "",
         "Total cost: $0.042100",
       ].join("\n"),
@@ -84,7 +87,8 @@ describe("renderCostSummary", () => {
   })
 
   it("renders n/a cells and flags a partially priced total", () => {
-    const failedAttempt: ModelAttempt = {
+    const failedAttempt: PhaseAttempt = {
+      phase: "combined",
       model: "openai/gpt-5-mini",
       outcome: "api_error",
       promptTokens: null,
@@ -104,10 +108,9 @@ describe("renderCostSummary", () => {
         "",
         "Model used: openai/gpt-5-mini",
         "",
-        "| attempt | model | outcome | prompt tokens | completion tokens | cost |",
-        "| --- | --- | --- | --- | --- | --- |",
-        "| 1 | openai/gpt-5-mini | api_error | n/a | n/a | n/a |",
-        "| 2 | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
+        ...tableHeader,
+        "| 1 | combined | openai/gpt-5-mini | api_error | n/a | n/a | n/a |",
+        "| 2 | combined | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
         "",
         "Total cost: $0.042100 (some attempts unpriced)",
       ].join("\n"),
@@ -115,7 +118,8 @@ describe("renderCostSummary", () => {
   })
 
   it("sums costs across attempts when every attempt is priced", () => {
-    const fallbackAttempt: ModelAttempt = {
+    const fallbackAttempt: PhaseAttempt = {
+      phase: "combined",
       model: "anthropic/claude-haiku-4.5",
       outcome: "accepted",
       promptTokens: 11000,
@@ -138,18 +142,50 @@ describe("renderCostSummary", () => {
         "",
         "Model used: anthropic/claude-haiku-4.5",
         "",
-        "| attempt | model | outcome | prompt tokens | completion tokens | cost |",
-        "| --- | --- | --- | --- | --- | --- |",
-        "| 1 | openai/gpt-5-mini | schema_mismatch | 12000 | 800 | $0.042100 |",
-        "| 2 | anthropic/claude-haiku-4.5 | accepted | 11000 | 600 | $0.010000 |",
+        ...tableHeader,
+        "| 1 | combined | openai/gpt-5-mini | schema_mismatch | 12000 | 800 | $0.042100 |",
+        "| 2 | combined | anthropic/claude-haiku-4.5 | accepted | 11000 | 600 | $0.010000 |",
         "",
         "Total cost: $0.052100",
       ].join("\n"),
     )
   })
 
+  it("renders attempts from several phases in the given order under a joined model line", () => {
+    const summary = renderCostSummary({
+      attempts: [
+        { ...acceptedAttempt, phase: "correctness-security" },
+        {
+          ...acceptedAttempt,
+          phase: "conventions-tests",
+          model: "anthropic/claude-haiku-4.5",
+          promptTokens: 11000,
+          completionTokens: 600,
+          costUsd: 0.01,
+        },
+        { ...acceptedAttempt, phase: "subtle-bugs" },
+      ],
+      modelUsed: "openai/gpt-5-mini, anthropic/claude-haiku-4.5",
+    })
+
+    expect(summary).toBe(
+      [
+        "### umm-actually cost summary",
+        "",
+        "Model used: openai/gpt-5-mini, anthropic/claude-haiku-4.5",
+        "",
+        ...tableHeader,
+        "| 1 | correctness-security | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
+        "| 2 | conventions-tests | anthropic/claude-haiku-4.5 | accepted | 11000 | 600 | $0.010000 |",
+        "| 3 | subtle-bugs | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
+        "",
+        "Total cost: $0.094200",
+      ].join("\n"),
+    )
+  })
+
   it("renders an n/a total when no attempt carries a cost", () => {
-    const unpricedAttempt: ModelAttempt = {
+    const unpricedAttempt: PhaseAttempt = {
       ...acceptedAttempt,
       costUsd: null,
     }
@@ -165,9 +201,8 @@ describe("renderCostSummary", () => {
         "",
         "Model used: openai/gpt-5-mini",
         "",
-        "| attempt | model | outcome | prompt tokens | completion tokens | cost |",
-        "| --- | --- | --- | --- | --- | --- |",
-        "| 1 | openai/gpt-5-mini | accepted | 12000 | 800 | n/a |",
+        ...tableHeader,
+        "| 1 | combined | openai/gpt-5-mini | accepted | 12000 | 800 | n/a |",
         "",
         "Total cost: n/a",
       ].join("\n"),

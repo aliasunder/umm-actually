@@ -707,7 +707,10 @@ const runReviewPipeline = async (
   // event, no prose); the rest post as individual issue comments so every
   // new finding is a visible event. All narration lives in the status
   // comment. Unposted findings carry no anchor and re-report next run.
-  const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
+  const costSummaryMarkdown = renderCostSummary({
+    attempts: attempts.map((attempt) => ({ ...attempt, phase: phase.id })),
+    modelUsed,
+  })
   const { comments, bodyFindings } = mapFindingsToReview({
     findings: selected,
     commentableByPath,
