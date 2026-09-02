@@ -161,6 +161,14 @@ const isAbortError = (error: unknown): boolean => {
   return error instanceof Error && error.name === "AbortError"
 }
 
+type LateSettlement = "response" | "abort_error" | "error"
+
+const describeLateSettlement = <T>(late: SettledResult<T>): LateSettlement => {
+  if (late.ok) return "response"
+  if (isAbortError(late.error)) return "abort_error"
+  return "error"
+}
+
 /** Bounds an SDK call with a deadline that is authoritative in this scope:
  *  it wins the race whether or not the SDK honours the abort, so a request
  *  the provider keeps serving cannot hold the attempt open. The abandoned
@@ -207,11 +215,7 @@ const withDeadline = async <T>(
       ...logContext,
       elapsedMs: DateTime.now().diff(startedAt).toMillis(),
       timeoutMs,
-      settledWith: late.ok
-        ? "response"
-        : isAbortError(late.error)
-          ? "abort_error"
-          : "error",
+      settledWith: describeLateSettlement(late),
       ...(late.ok ? {} : { error: summarizeError(late.error) }),
     })
   }
