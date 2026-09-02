@@ -368,10 +368,20 @@ describe("requestReview", () => {
   it("aborts the signal at the deadline and records the orphan settling with an AbortError when the SDK honours it", async () => {
     vi.useFakeTimers()
     try {
+      // Shaped like the SDK's rejection: its own error wrapping the
+      // DOMException the aborted fetch raised
       const rejectOnAbort = (options: StubOptions): Promise<unknown> => {
         return new Promise((_resolve, reject) => {
           options?.signal?.addEventListener("abort", () =>
-            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+            reject(
+              Object.assign(new Error("Request aborted by client"), {
+                name: "RequestAbortedError",
+                cause: new DOMException(
+                  "This operation was aborted",
+                  "AbortError",
+                ),
+              }),
+            ),
           )
         })
       }
@@ -408,7 +418,7 @@ describe("requestReview", () => {
           elapsedMs: 45_000,
           timeoutMs: 45_000,
           settledWith: "abort_error",
-          error: "aborted",
+          error: "Request aborted by client",
         },
       })
     } finally {
