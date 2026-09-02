@@ -1,5 +1,23 @@
 # Changelog
 
+
+## [0.3.14] — 2026-09-02
+
+### Bug Fixes
+
+- Make the per-attempt request deadline authoritative (#75)
+- Drop findings whose file the model was never given (#74)
+- **release:** Pass previous release as --notes-start-tag (#71)
+
+### CI / Infrastructure
+
+- **release:** Adopt CHANGELOG.md pattern with generated release notes (#72)
+
+### Maintenance
+
+- **deps:** Bump @openrouter/sdk in the production group (#68)
+- **deps-dev:** Bump the development group with 3 updates (#69)
+
 ## [0.3.14] — 2026-09-02
 
 ### Bug Fixes
