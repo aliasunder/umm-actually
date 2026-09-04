@@ -516,6 +516,16 @@ describe("filterNonFindings", () => {
     expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
   })
 
+  it("drops a finding whose title contains 'not a problem'", () => {
+    const finding = makeFinding({
+      title: "Unhandled rejection in cleanup — not a problem",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
   it("drops a finding whose failure_scenario ends with 'Not a defect.'", () => {
     const finding = makeFinding({
       failure_scenario:
