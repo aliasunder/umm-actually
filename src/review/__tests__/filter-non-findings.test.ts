@@ -463,4 +463,145 @@ describe("filterNonFindings", () => {
 
     expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
   })
+
+  // --- Self-negating titles ---
+
+  it("drops a finding whose title ends with 'not actionable'", () => {
+    const finding = makeFinding({
+      title: "Edge-case navigation race — not actionable",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose title contains 'not a defect'", () => {
+    const finding = makeFinding({
+      title: "Deferred script ordering — not a defect",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose title contains 'not a real issue'", () => {
+    const finding = makeFinding({
+      title: "Theoretical type coercion — not a real issue",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose title contains 'not a real bug'", () => {
+    const finding = makeFinding({
+      title: "Config ordering sensitivity — not a real bug",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose title contains 'not an issue' (grammatical 'an' before vowel)", () => {
+    const finding = makeFinding({
+      title: "Config ordering sensitivity — not an issue",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose title contains 'not a problem'", () => {
+    const finding = makeFinding({
+      title: "Unhandled rejection in cleanup — not a problem",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose failure_scenario ends with 'Not a defect.'", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "Both scripts attach before any user navigation, so pageviews are covered. Not a defect.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  // --- Self-negating: passthrough cases ---
+
+  it("keeps a finding whose title contains 'actionable' without 'not'", () => {
+    const finding = makeFinding({
+      title: "Actionable race condition in the retry loop",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  it("keeps a finding whose failure_scenario mentions 'defect' mid-sentence", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "The defect causes silent data loss when the buffer overflows.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  it("keeps a finding whose title qualifies the negation with a continuation", () => {
+    const finding = makeFinding({
+      title:
+        "Record leak is not a bug on single-threaded builds but races under concurrency",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  it("keeps a finding whose title contains 'not a' outside the alternation set", () => {
+    const finding = makeFinding({
+      title: "Return type is not a promise but callers await it",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [finding], droppedAsNonFinding: 0 })
+  })
+
+  // --- Self-negating scenario suffixes ---
+
+  it("drops a finding whose failure_scenario ends with 'Not actionable.'", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "The boundary exists to cover this path. Not actionable.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
+
+  it("drops a finding whose failure_scenario ends with 'Not a real issue.'", () => {
+    const finding = makeFinding({
+      failure_scenario:
+        "After re-tracing, the check handles this correctly. Not a real issue.",
+    })
+
+    const result = filterNonFindings([finding])
+
+    expect(result).toEqual({ findings: [], droppedAsNonFinding: 1 })
+  })
 })
