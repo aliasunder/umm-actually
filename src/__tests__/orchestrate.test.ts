@@ -2098,6 +2098,44 @@ describe("orchestrate", () => {
       ])
     })
 
+    it("dedups via content tier when title matches but category differs", async () => {
+      const findings = fixtureReviewResponse.findings
+      const targetFinding = findings[0]
+      if (!targetFinding) {
+        throw new Error("expected at least one fixture finding")
+      }
+      const shiftedAnchor = computeAnchorKey({
+        ...targetFinding,
+        category: "subtle_bugs",
+        line: targetFinding.line + 10,
+      })
+
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchBotReviewComments: async () => [
+            existingComment(
+              `**${targetFinding.title}**\nHigh severity · subtle_bugs · high confidence\n\nSome description.\n\n<!-- umm-actually:${shiftedAnchor} -->`,
+            ),
+          ],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(findings.length - 1)
+      expect(logger.messages).toContainEqual({
+        level: "info",
+        message: "content-tier dedup suppressed finding",
+        data: {
+          file: targetFinding.file,
+          line: targetFinding.line,
+          category: targetFinding.category,
+          title: targetFinding.title,
+        },
+      })
+    })
+
     it("legacy title-hash anchors don't dedup", async () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {

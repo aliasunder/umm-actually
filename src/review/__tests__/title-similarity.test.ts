@@ -92,7 +92,7 @@ describe("titleSimilarity", () => {
   })
 
   it("deduplicates left tokens so duplicates do not inflate the ratio", () => {
-    // Without dedup: intersection counts "check" twice → 2, union → 3, ratio 0.67
+    // Without dedup: filter counts "check" twice + "email" → 3, union Set → 2, ratio 1.5
     // With dedup: both sides are {check, email} → ratio 1.0
     expect(
       titleSimilarity({
