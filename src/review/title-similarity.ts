@@ -67,9 +67,9 @@ export const titleSimilarity = ({
   const leftSet = new Set(leftTokens)
   const rightSet = new Set(rightTokens)
   if (leftSet.size === 0 || rightSet.size === 0) return 0
-  const intersection = [...leftSet].filter((token) =>
-    rightSet.has(token),
-  ).length
+  const intersection = [...leftSet].filter((token) => {
+    return rightSet.has(token)
+  }).length
   const union = new Set([...leftSet, ...rightSet]).size
   return intersection / union
 }
