@@ -42,7 +42,16 @@ const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->\s*$/
  * too-narrow one merely produces a visible duplicate.
  */
 const LINE_PROXIMITY = 5
+
+/** Jaccard similarity floor for the content-based dedup tier. 0.5 requires
+ *  at least half of the combined content-word vocabulary to overlap — high
+ *  enough that differently-worded findings on the same topic survive, low
+ *  enough that rephrased duplicates are caught. */
 const CONTENT_SIMILARITY_THRESHOLD = 0.5
+
+/** Line-distance ceiling for content-based dedup. Wider than LINE_PROXIMITY
+ *  because title similarity already gates relevance — the radius only needs
+ *  to absorb code motion between pushes, not conceptual proximity. */
 const CONTENT_LINE_PROXIMITY = 50
 
 /** Extracts the bold title from the first line of a rendered finding comment. */
@@ -103,9 +112,7 @@ export const extractAnchors = (comments: AnchorSource[]): AnchorEntry[] => {
     if (anchor === null) return []
     const line = comment.line ?? comment.originalLine ?? anchor.line
     const titleMatch = TITLE_PATTERN.exec(comment.body)?.[1]
-    const entry: AnchorEntry = { ...anchor, line }
-    if (titleMatch) entry.title = titleMatch
-    return [entry]
+    return [{ ...anchor, line, ...(titleMatch && { title: titleMatch }) }]
   })
 }
 

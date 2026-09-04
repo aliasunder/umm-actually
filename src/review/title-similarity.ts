@@ -55,10 +55,13 @@ export const normalizeTitle = (title: string): string[] => {
   return [...new Set(tokens)].toSorted()
 }
 
-export const titleSimilarity = (a: string[], b: string[]): number => {
-  if (a.length === 0 || b.length === 0) return 0
-  const setB = new Set(b)
-  const intersection = a.filter((token) => setB.has(token)).length
-  const union = new Set([...a, ...b]).size
+export const titleSimilarity = (
+  leftTokens: string[],
+  rightTokens: string[],
+): number => {
+  if (leftTokens.length === 0 || rightTokens.length === 0) return 0
+  const rightSet = new Set(rightTokens)
+  const intersection = leftTokens.filter((token) => rightSet.has(token)).length
+  const union = new Set([...leftTokens, ...rightTokens]).size
   return intersection / union
 }
