@@ -55,6 +55,7 @@ export const normalizeTitle = (title: string): string[] => {
   return [...new Set(tokens)].toSorted()
 }
 
+/** Jaccard similarity: |A ∩ B| / |A ∪ B|. 0 = disjoint, 1 = identical. */
 export const titleSimilarity = (
   leftTokens: string[],
   rightTokens: string[],
