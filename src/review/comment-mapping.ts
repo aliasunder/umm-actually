@@ -1,5 +1,6 @@
 import type { CommentableFile } from "../diff/commentable-lines.js"
 import type { Finding } from "./finding.js"
+import { normalizeTitle, titleSimilarity } from "./title-similarity.js"
 
 /** Wire shape for POST /pulls/{n}/reviews comments[] entries. */
 export type ReviewComment = {
@@ -42,7 +43,26 @@ const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->\s*$/
  */
 const LINE_PROXIMITY = 5
 
-export type AnchorEntry = { file: string; category: string; line: number }
+/** Jaccard similarity floor for the content-based dedup tier. 0.5 requires
+ *  at least half of the combined content-word vocabulary to overlap — high
+ *  enough that differently-worded findings on the same topic survive, low
+ *  enough that rephrased duplicates are caught. */
+const CONTENT_SIMILARITY_THRESHOLD = 0.5
+
+/** Line-distance ceiling for content-based dedup. Wider than LINE_PROXIMITY
+ *  because title similarity already gates relevance — the radius only needs
+ *  to absorb code motion between pushes, not conceptual proximity. */
+const CONTENT_LINE_PROXIMITY = 50
+
+/** Extracts the bold title from the first line of a rendered finding comment. */
+const TITLE_PATTERN = /^\*\*(.+?)\*\*/m
+
+export type AnchorEntry = {
+  file: string
+  category: string
+  line: number
+  title?: string
+}
 
 /** What extractAnchors needs from an existing inline comment: the body
  *  (carrying the anchor key) plus GitHub's two positions — `line` is the
@@ -91,27 +111,58 @@ export const extractAnchors = (comments: AnchorSource[]): AnchorEntry[] => {
     const anchor = parseAnchorKey(comment.body)
     if (anchor === null) return []
     const line = comment.line ?? comment.originalLine ?? anchor.line
-    return [{ ...anchor, line }]
+    const titleMatch = TITLE_PATTERN.exec(comment.body)?.[1]
+    return [{ ...anchor, line, ...(titleMatch && { title: titleMatch }) }]
   })
 }
 
-/** True when a finding is within LINE_PROXIMITY of an existing anchor.
- *  Takes any anchor-shaped location — a Finding satisfies it, and so does
- *  another AnchorEntry (coalesceAnchors compares anchors to anchors). */
+const isPositionalDuplicate = ({
+  finding,
+  anchor,
+}: {
+  finding: AnchorEntry
+  anchor: AnchorEntry
+}): boolean => {
+  return (
+    anchor.file === finding.file &&
+    anchor.category === finding.category &&
+    Math.abs(anchor.line - finding.line) <= LINE_PROXIMITY
+  )
+}
+
+/** Fails open to positional-only when either side lacks a title. */
+const isContentDuplicate = ({
+  finding,
+  anchor,
+}: {
+  finding: AnchorEntry
+  anchor: AnchorEntry
+}): boolean => {
+  if (!finding.title || !anchor.title) return false
+  if (anchor.file !== finding.file) return false
+  if (Math.abs(anchor.line - finding.line) > CONTENT_LINE_PROXIMITY)
+    return false
+  return (
+    titleSimilarity({
+      leftTokens: normalizeTitle(finding.title),
+      rightTokens: normalizeTitle(anchor.title),
+    }) >= CONTENT_SIMILARITY_THRESHOLD
+  )
+}
+
 export const isDuplicateFinding = (
   finding: AnchorEntry,
   anchors: AnchorEntry[],
 ): boolean => {
   return anchors.some((anchor) => {
     return (
-      anchor.file === finding.file &&
-      anchor.category === finding.category &&
-      Math.abs(anchor.line - finding.line) <= LINE_PROXIMITY
+      isPositionalDuplicate({ finding, anchor }) ||
+      isContentDuplicate({ finding, anchor })
     )
   })
 }
 
-/** Collapses anchors the proximity rule would treat as one finding. A
+/** Collapses anchors the dedup rules would treat as one finding. A
  *  fail-open fetch can repost an already-anchored finding, leaving two
  *  anchors for it — the status comment counts findings, not anchors. */
 export const coalesceAnchors = (anchors: AnchorEntry[]): AnchorEntry[] => {
