@@ -32,11 +32,11 @@
   "dependencies": {
     "@actions/core": "3.0.1",
     "@actions/github": "9.1.1",
-    "@openrouter/sdk": "1.2.57",
+    "@openrouter/sdk": "1.2.85",
     "env-var": "7.5.0",
     "luxon": "3.7.2",
     "parse-diff": "0.12.0",
-    "zod": "4.4.3"
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
