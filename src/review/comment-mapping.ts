@@ -156,7 +156,7 @@ export const isDuplicateFinding = (
   })
 }
 
-/** Collapses anchors the proximity rule would treat as one finding. A
+/** Collapses anchors the dedup rules would treat as one finding. A
  *  fail-open fetch can repost an already-anchored finding, leaving two
  *  anchors for it — the status comment counts findings, not anchors. */
 export const coalesceAnchors = (anchors: AnchorEntry[]): AnchorEntry[] => {
