@@ -9,7 +9,7 @@
  * |--------------|------------------------------|-----------------------------------|
  * | `combined`   | 1 stage, 1 phase             | all dimensions in one call        |
  * | `parallel`   | 1 stage, 3 phases            | 3 calls fire at once (fast)       |
- * | `sequential` | 3 stages, 1 phase each       | each call sees prior findings     |
+ * | `sequential` | 3 stages, 3 phases (1 each)  | each call sees prior findings     |
  *
  * All three modes use the same three phase definitions — they differ only
  * in how those phases are grouped into stages.
