@@ -1,10 +1,18 @@
 /**
- * Review phase definitions and the stage resolver. A phase is one model call
- * carrying a set of instruction sections. A stage is the phases that run
- * concurrently; stages run in order, and each later stage sees the earlier
- * stages' findings. `combined` is one stage of one phase carrying every
- * dimension; `parallel` and `sequential` split the dimensions into the same
- * three phases and differ only in how those phases are laid out in stages.
+ * Review phase definitions and the stage resolver.
+ *
+ * - Phase: one model call carrying a set of review dimensions
+ * - Stage: which phases run concurrently; stages run in order, each
+ *   later stage sees the earlier stages' findings
+ *
+ * | Mode         | Layout                       | Behavior                          |
+ * |--------------|------------------------------|-----------------------------------|
+ * | `combined`   | 1 stage, 1 phase             | all dimensions in one call        |
+ * | `parallel`   | 1 stage, 3 phases            | 3 calls fire at once (fast)       |
+ * | `sequential` | 3 stages, 1 phase each       | each call sees prior findings     |
+ *
+ * All three modes use the same three phase definitions — they differ only
+ * in how those phases are grouped into stages.
  *
  * Dimension content is written for a single-call reviewer: every check must
  * be resolvable by reasoning over the provided files — no assumption of
