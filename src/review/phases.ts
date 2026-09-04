@@ -313,6 +313,8 @@ export const REPORTING_RULES = `REPORTING RULES — these override intuition:
 
 /** Opens every split phase's instructions. The boundary keeps a phase from
  *  dropping a real bug because another phase "owns" that dimension. */
+/** Tells the model which dimensions this phase covers, so it spends its
+ *  analysis budget on them instead of duplicating another phase's work. */
 export const buildPassScope = (dimensionTitles: string[]): string => {
   return `PASS SCOPE: this pass covers ${dimensionTitles.join(", ")}. Other passes
 cover the remaining dimensions; spend your analysis on these. Boundary: a

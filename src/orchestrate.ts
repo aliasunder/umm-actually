@@ -442,6 +442,8 @@ const filterPhaseFindings = (
 
 /** A run where every phase failed still billed its attempts; the failure
  *  summary carries the cost table so they are not lost with the findings. */
+/** Renders the check-run summary when the pipeline throws. Appends
+ *  a cost table when every phase failed — the operator still pays. */
 const describePipelineFailure = ({
   pipelineError,
   costSummary,

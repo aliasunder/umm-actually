@@ -1,3 +1,15 @@
+/**
+ * Dispatch stack for phased reviews:
+ *
+ *   runStages        — loops over stages in order, threading prior findings
+ *     └ runStage     — fires one stage's phases concurrently via Promise.all
+ *         └ runPhase — caller-provided: one model call for one phase
+ *
+ * A stage is a group of phases that run at the same time. In `parallel`
+ * mode there is one stage with all three phases; in `sequential` mode
+ * there are three stages with one phase each (see phases.ts for the
+ * layout table).
+ */
 import { describeError, type Logger } from "../logger.js"
 import type { StructuredReviewResult } from "../openrouter/client.js"
 import { filterNonFindings } from "./filter-non-findings.js"
@@ -44,6 +56,8 @@ const isAbortedRequest = (error: unknown): boolean => {
   )
 }
 
+/** Fires one stage's phases concurrently. Each phase is tried
+ *  independently — a failed phase does not cancel its siblings. */
 const runStage = async (
   {
     stage,
