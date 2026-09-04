@@ -2801,7 +2801,7 @@ describe("staged phases", () => {
           summary: `[AllPhasesFailedError]: ${expectedMessage}\n\n${renderCostSummary(
             {
               attempts: [{ ...billedAttempt, phase: "correctness-security" }],
-              modelUsed: "none",
+              modelUsed: "test/model",
             },
           )}`,
         },
@@ -2841,7 +2841,7 @@ describe("staged phases", () => {
           summary: `[AllPhasesFailedError]: every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)\n\n${renderCostSummary(
             {
               attempts: [{ ...timeoutAttempt, phase: "combined" }],
-              modelUsed: "none",
+              modelUsed: "test/model",
             },
           )}`,
         },

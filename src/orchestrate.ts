@@ -455,7 +455,9 @@ const describePipelineFailure = ({
   }
   const attempts = pipelineError.outcomes.flatMap(phaseAttempts)
   if (attempts.length === 0) return description
-  return `${description}\n\n${renderCostSummary({ attempts, modelUsed: "none" })}`
+  const models = [...new Set(attempts.map((attempt) => attempt.model))]
+  const modelUsed = models.length > 0 ? models.join(", ") : "none"
+  return `${description}\n\n${renderCostSummary({ attempts, modelUsed })}`
 }
 
 const sumBy = <Item>(

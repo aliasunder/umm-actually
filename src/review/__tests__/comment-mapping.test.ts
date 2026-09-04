@@ -604,8 +604,8 @@ describe("extractAnchors", () => {
     const anchors = extractAnchors(comments)
 
     expect(anchors).toEqual([
-      { file: "src/a.ts", category: "correctness", line: 48 },
-      { file: "src/b.ts", category: "security", line: 100 },
+      { file: "src/a.ts", category: "correctness", line: 48, title: undefined },
+      { file: "src/b.ts", category: "security", line: 100, title: undefined },
     ])
   })
 
@@ -618,7 +618,12 @@ describe("extractAnchors", () => {
     const anchors = extractAnchors([anchorSource(body)])
 
     expect(anchors).toEqual([
-      { file: "src/untouched.ts", category: "correctness", line: 30 },
+      {
+        file: "src/untouched.ts",
+        category: "correctness",
+        line: 30,
+        title: "Whitespace-only keys pass the empty-key guard",
+      },
     ])
   })
 
@@ -633,7 +638,7 @@ describe("extractAnchors", () => {
     const anchors = extractAnchors(comments)
 
     expect(anchors).toEqual([
-      { file: "src/a.ts", category: "correctness", line: 40 },
+      { file: "src/a.ts", category: "correctness", line: 40, title: undefined },
     ])
   })
 
@@ -645,7 +650,7 @@ describe("extractAnchors", () => {
     const anchors = extractAnchors(comments)
 
     expect(anchors).toEqual([
-      { file: "src/a.ts", category: "correctness", line: 42 },
+      { file: "src/a.ts", category: "correctness", line: 42, title: undefined },
     ])
   })
 
@@ -660,7 +665,7 @@ describe("extractAnchors", () => {
     const anchors = extractAnchors(comments)
 
     expect(anchors).toEqual([
-      { file: "src/b.ts", category: "security", line: 55 },
+      { file: "src/b.ts", category: "security", line: 55, title: undefined },
     ])
   })
 
@@ -687,7 +692,7 @@ describe("extractAnchors", () => {
     const anchors = extractAnchors(comments)
 
     expect(anchors).toEqual([
-      { file: "src/b.ts", category: "security", line: 20 },
+      { file: "src/b.ts", category: "security", line: 20, title: undefined },
     ])
   })
 
@@ -713,7 +718,40 @@ describe("extractAnchors", () => {
     const anchors = extractAnchors(comments)
 
     expect(anchors).toEqual([
-      { file: "src/a.ts", category: "correctness", line: 10 },
+      { file: "src/a.ts", category: "correctness", line: 10, title: undefined },
+    ])
+  })
+
+  it("extracts the bold title from a rendered comment body", () => {
+    const comments = [
+      anchorSource(
+        "**Null dereference on user.email**\nMedium severity · correctness · high confidence\n\nDescription here.\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
+      ),
+    ]
+
+    const anchors = extractAnchors(comments)
+
+    expect(anchors).toEqual([
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 42,
+        title: "Null dereference on user.email",
+      },
+    ])
+  })
+
+  it("returns title as undefined when the body has no bold header", () => {
+    const comments = [
+      anchorSource(
+        "Plain text body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
+      ),
+    ]
+
+    const anchors = extractAnchors(comments)
+
+    expect(anchors).toEqual([
+      { file: "src/a.ts", category: "correctness", line: 42, title: undefined },
     ])
   })
 
@@ -798,6 +836,180 @@ describe("isDuplicateFinding", () => {
       ),
     ).toBe(false)
   })
+
+  // --- Content dedup layer ---
+
+  it("matches via content: same file, similar title, line within 50, different category", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email before toLowerCase",
+      },
+    ]
+
+    expect(
+      isDuplicateFinding(
+        {
+          file: "src/a.ts",
+          category: "subtle_bugs",
+          line: 70,
+          title: "Null check missing on user.email toLowerCase call",
+        },
+        anchors,
+      ),
+    ).toBe(true)
+  })
+
+  it("rejects content match when title similarity is below threshold", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email",
+      },
+    ]
+
+    expect(
+      isDuplicateFinding(
+        {
+          file: "src/a.ts",
+          category: "correctness",
+          line: 70,
+          title: "Race condition in async handler",
+        },
+        anchors,
+      ),
+    ).toBe(false)
+  })
+
+  it("rejects content match when line distance exceeds 50", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email",
+      },
+    ]
+
+    expect(
+      isDuplicateFinding(
+        {
+          file: "src/a.ts",
+          category: "correctness",
+          line: 101,
+          title: "Missing null check on user.email",
+        },
+        anchors,
+      ),
+    ).toBe(false)
+  })
+
+  it("skips content match when the finding has no title", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check",
+      },
+    ]
+
+    expect(
+      isDuplicateFinding(
+        { file: "src/a.ts", category: "security", line: 55 },
+        anchors,
+      ),
+    ).toBe(false)
+  })
+
+  it("skips content match when the anchor has no title", () => {
+    const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
+
+    expect(
+      isDuplicateFinding(
+        {
+          file: "src/a.ts",
+          category: "security",
+          line: 55,
+          title: "Missing null check",
+        },
+        anchors,
+      ),
+    ).toBe(false)
+  })
+
+  it("matches via content at exactly CONTENT_LINE_PROXIMITY (50 lines apart)", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email",
+      },
+    ]
+
+    expect(
+      isDuplicateFinding(
+        {
+          file: "src/a.ts",
+          category: "subtle_bugs",
+          line: 100,
+          title: "Missing null check on user.email",
+        },
+        anchors,
+      ),
+    ).toBe(true)
+  })
+
+  it("matches via content at exactly CONTENT_SIMILARITY_THRESHOLD (Jaccard 0.5)", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "alpha beta gamma",
+      },
+    ]
+
+    expect(
+      isDuplicateFinding(
+        {
+          file: "src/a.ts",
+          category: "subtle_bugs",
+          line: 55,
+          title: "alpha beta delta",
+        },
+        anchors,
+      ),
+    ).toBe(true)
+  })
+
+  it("rejects content match when file differs", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email",
+      },
+    ]
+
+    expect(
+      isDuplicateFinding(
+        {
+          file: "src/b.ts",
+          category: "correctness",
+          line: 50,
+          title: "Missing null check on user.email",
+        },
+        anchors,
+      ),
+    ).toBe(false)
+  })
 })
 
 describe("coalesceAnchors", () => {
@@ -829,6 +1041,32 @@ describe("coalesceAnchors", () => {
     ]
 
     expect(coalesceAnchors(anchors)).toEqual(anchors)
+  })
+
+  it("coalesces content-similar anchors across different categories", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email",
+      },
+      {
+        file: "src/a.ts",
+        category: "subtle_bugs",
+        line: 55,
+        title: "Missing null check on user.email",
+      },
+    ]
+
+    expect(coalesceAnchors(anchors)).toEqual([
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email",
+      },
+    ])
   })
 
   it("returns an empty array for no anchors", () => {
