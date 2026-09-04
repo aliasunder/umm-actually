@@ -19,9 +19,10 @@ const CONFIRMATION_PREFIX =
 /** Declarative confirmation titles — "…is correct" / "…is accurate" — end-anchored. */
 const CONFIRMATION_TITLE_SUFFIX = /\bis\s+(?:correct|accurate)\s*\.?\s*$/i
 
-/** Self-negating title — the model reports then retracts in the same title. */
+/** Self-negating title — requires a separator or end-of-title after the
+ *  phrase so qualified retractions survive ("not a bug on X but Y…"). */
 const SELF_NEGATING_TITLE =
-  /\bnot (?:actionable|a defect|an? (?:real )?(?:issue|bug|problem))\b/i
+  /\bnot (?:actionable|a defect|an? (?:real )?(?:issue|bug|problem))\s*(?:[—–:.-]|$)/i
 
 /** Prior-finding resolution confirmations — "Prior bot finding addressed: …"
  *  — start-anchored with a required resolution verb, so real findings about
@@ -33,7 +34,7 @@ const CONFIRMATION_TITLE_PREFIX =
  *  ("…No bug here.", "…my analysis was wrong.") — self-referential verdicts
  *  that never legitimately end a failure description. */
 const CONFIRMATION_SCENARIO_SUFFIX =
-  /(?:\bno bug(?: here)?|\bnot a defect|\banalysis was wrong)\s*\.?\s*$/i
+  /(?:\bno bug(?: here)?|\bnot (?:actionable|a defect|an? (?:real )?(?:issue|bug|problem))|\banalysis was wrong)\s*\.?\s*$/i
 
 /** Start-of-field signal shared by title, failure_scenario, and suggestion:
  *  an explicit non-finding prefix or a separator-anchored confirmation phrase. */
