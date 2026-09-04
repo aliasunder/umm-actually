@@ -41,9 +41,8 @@ const hasNonFindingSignal = (text: string): boolean => {
   return NON_FINDING_PREFIX.test(text) || CONFIRMATION_PREFIX.test(text)
 }
 
-/** Checks title, failure_scenario, and suggestion against start- and
- *  end-anchored patterns that signal the model reported a non-finding
- *  rather than a real defect. */
+/** Checks title, failure_scenario, and suggestion for patterns that
+ *  signal the model reported a non-finding rather than a real defect. */
 const isNonFinding = (finding: Finding): boolean => {
   const title = finding.title.trim()
   const failureScenario = finding.failure_scenario.trim()
