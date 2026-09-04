@@ -675,7 +675,7 @@ const runReviewPipeline = async (
     if (tier) {
       dedupCounts[tier]++
       if (tier === "content") {
-        logger.warn("content-tier dedup suppressed finding", {
+        logger.debug("content-tier dedup suppressed finding", {
           file: finding.file,
           line: finding.line,
           category: finding.category,
