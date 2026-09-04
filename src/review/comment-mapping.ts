@@ -1,5 +1,6 @@
 import type { CommentableFile } from "../diff/commentable-lines.js"
 import type { Finding } from "./finding.js"
+import { normalizeTitle, titleSimilarity } from "./title-similarity.js"
 
 /** Wire shape for POST /pulls/{n}/reviews comments[] entries. */
 export type ReviewComment = {
@@ -41,8 +42,18 @@ const ANCHOR_PATTERN = /<!-- umm-actually:(.+?) -->\s*$/
  * too-narrow one merely produces a visible duplicate.
  */
 const LINE_PROXIMITY = 5
+const CONTENT_SIMILARITY_THRESHOLD = 0.5
+const CONTENT_LINE_PROXIMITY = 50
 
-export type AnchorEntry = { file: string; category: string; line: number }
+/** Extracts the bold title from the first line of a rendered finding comment. */
+const TITLE_PATTERN = /^\*\*(.+?)\*\*/m
+
+export type AnchorEntry = {
+  file: string
+  category: string
+  line: number
+  title?: string
+}
 
 /** What extractAnchors needs from an existing inline comment: the body
  *  (carrying the anchor key) plus GitHub's two positions — `line` is the
@@ -91,22 +102,49 @@ export const extractAnchors = (comments: AnchorSource[]): AnchorEntry[] => {
     const anchor = parseAnchorKey(comment.body)
     if (anchor === null) return []
     const line = comment.line ?? comment.originalLine ?? anchor.line
-    return [{ ...anchor, line }]
+    const titleMatch = TITLE_PATTERN.exec(comment.body)?.[1]
+    const entry: AnchorEntry = { ...anchor, line }
+    if (titleMatch) entry.title = titleMatch
+    return [entry]
   })
 }
 
-/** True when a finding is within LINE_PROXIMITY of an existing anchor.
- *  Takes any anchor-shaped location — a Finding satisfies it, and so does
- *  another AnchorEntry (coalesceAnchors compares anchors to anchors). */
+const isPositionalDuplicate = (
+  finding: AnchorEntry,
+  anchor: AnchorEntry,
+): boolean => {
+  return (
+    anchor.file === finding.file &&
+    anchor.category === finding.category &&
+    Math.abs(anchor.line - finding.line) <= LINE_PROXIMITY
+  )
+}
+
+/** Fails open to positional-only when either side lacks a title. */
+const isContentDuplicate = (
+  finding: AnchorEntry,
+  anchor: AnchorEntry,
+): boolean => {
+  if (!finding.title || !anchor.title) return false
+  if (anchor.file !== finding.file) return false
+  if (Math.abs(anchor.line - finding.line) > CONTENT_LINE_PROXIMITY)
+    return false
+  return (
+    titleSimilarity(
+      normalizeTitle(finding.title),
+      normalizeTitle(anchor.title),
+    ) >= CONTENT_SIMILARITY_THRESHOLD
+  )
+}
+
 export const isDuplicateFinding = (
   finding: AnchorEntry,
   anchors: AnchorEntry[],
 ): boolean => {
   return anchors.some((anchor) => {
     return (
-      anchor.file === finding.file &&
-      anchor.category === finding.category &&
-      Math.abs(anchor.line - finding.line) <= LINE_PROXIMITY
+      isPositionalDuplicate(finding, anchor) ||
+      isContentDuplicate(finding, anchor)
     )
   })
 }
