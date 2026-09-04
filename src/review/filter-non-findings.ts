@@ -19,6 +19,10 @@ const CONFIRMATION_PREFIX =
 /** Declarative confirmation titles — "…is correct" / "…is accurate" — end-anchored. */
 const CONFIRMATION_TITLE_SUFFIX = /\bis\s+(?:correct|accurate)\s*\.?\s*$/i
 
+/** Self-negating title — the model reports then retracts in the same title. */
+const SELF_NEGATING_TITLE =
+  /\bnot (?:actionable|a defect|a (?:real )?(?:issue|bug|problem))\b/i
+
 /** Prior-finding resolution confirmations — "Prior bot finding addressed: …"
  *  — start-anchored with a required resolution verb, so real findings about
  *  prior-comment handling ("Prior bot comments cap drops newest…") survive. */
@@ -29,7 +33,7 @@ const CONFIRMATION_TITLE_PREFIX =
  *  ("…No bug here.", "…my analysis was wrong.") — self-referential verdicts
  *  that never legitimately end a failure description. */
 const CONFIRMATION_SCENARIO_SUFFIX =
-  /(?:\bno bug(?: here)?|\banalysis was wrong)\s*\.?\s*$/i
+  /(?:\bno bug(?: here)?|\bnot a defect|\banalysis was wrong)\s*\.?\s*$/i
 
 /** Start-of-field signal shared by title, failure_scenario, and suggestion:
  *  an explicit non-finding prefix or a separator-anchored confirmation phrase. */
@@ -46,6 +50,7 @@ const isNonFinding = (finding: Finding): boolean => {
   if (hasNonFindingSignal(title)) return true
   if (CONFIRMATION_TITLE_SUFFIX.test(title)) return true
   if (CONFIRMATION_TITLE_PREFIX.test(title)) return true
+  if (SELF_NEGATING_TITLE.test(title)) return true
   if (hasNonFindingSignal(failureScenario)) return true
   if (CONFIRMATION_SCENARIO_SUFFIX.test(failureScenario)) return true
   if (finding.suggestion && hasNonFindingSignal(finding.suggestion.trim())) {
