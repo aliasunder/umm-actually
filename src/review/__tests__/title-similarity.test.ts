@@ -63,13 +63,17 @@ describe("titleSimilarity", () => {
     expect(titleSimilarity(["alpha"], [])).toBe(0)
   })
 
+  it("returns 0 when both sets are empty", () => {
+    expect(titleSimilarity([], [])).toBe(0)
+  })
+
   it("computes Jaccard correctly for overlapping sets", () => {
     const a = ["check", "email", "missing", "null", "user"]
     const b = ["call", "email", "tolowercase", "unguarded", "user"]
 
     // intersection: {email, user} = 2
     // union: {check, email, missing, null, user, call, tolowercase, unguarded} = 8
-    expect(titleSimilarity(a, b)).toBeCloseTo(2 / 8)
+    expect(titleSimilarity(a, b)).toBe(2 / 8)
   })
 
   it("returns 0.5 for sets sharing exactly half their combined vocabulary", () => {

@@ -908,6 +908,52 @@ describe("isDuplicateFinding", () => {
     ).toBe(false)
   })
 
+  it("matches via content at exactly CONTENT_LINE_PROXIMITY (50 lines apart)", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email",
+      },
+    ]
+
+    expect(
+      isDuplicateFinding(
+        {
+          file: "src/a.ts",
+          category: "subtle_bugs",
+          line: 100,
+          title: "Missing null check on user.email",
+        },
+        anchors,
+      ),
+    ).toBe(true)
+  })
+
+  it("matches via content at exactly CONTENT_SIMILARITY_THRESHOLD (Jaccard 0.5)", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "alpha beta gamma",
+      },
+    ]
+
+    expect(
+      isDuplicateFinding(
+        {
+          file: "src/a.ts",
+          category: "subtle_bugs",
+          line: 55,
+          title: "alpha beta delta",
+        },
+        anchors,
+      ),
+    ).toBe(true)
+  })
+
   it("rejects content match when file differs", () => {
     const anchors = [
       {
@@ -961,6 +1007,32 @@ describe("coalesceAnchors", () => {
     ]
 
     expect(coalesceAnchors(anchors)).toEqual(anchors)
+  })
+
+  it("coalesces content-similar anchors across different categories", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email",
+      },
+      {
+        file: "src/a.ts",
+        category: "subtle_bugs",
+        line: 55,
+        title: "Missing null check on user.email",
+      },
+    ]
+
+    expect(coalesceAnchors(anchors)).toEqual([
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email",
+      },
+    ])
   })
 
   it("returns an empty array for no anchors", () => {
