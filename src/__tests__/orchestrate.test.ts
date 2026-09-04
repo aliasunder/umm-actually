@@ -2761,6 +2761,43 @@ describe("staged phases", () => {
     ])
   })
 
+  it("continues a sequential run when an early phase fails non-fatally", async () => {
+    const stubs = makeOrchestrateDeps({
+      config: { phases: "sequential" },
+      generateFindings: async (reviewContext) => {
+        stubs.generateFindingsCalls.push(reviewContext)
+        if (reviewContext.phase.id === "correctness-security") {
+          throw new Error("model returned invalid JSON")
+        }
+        return {
+          review: fixtureReviewResponse,
+          modelUsed: "test/model",
+          attempts: [fixtureAttempt],
+        }
+      },
+    })
+    const logger = createTestLogger()
+
+    const result = await orchestrate(stubs.deps, logger)
+
+    expect(stubs.generateFindingsCalls.map((call) => call.phase.id)).toEqual([
+      "correctness-security",
+      "conventions-tests",
+      "subtle-bugs",
+    ])
+    expect(result.findingsCount).toBeGreaterThan(0)
+    expect(
+      result.phases.map((phaseStatus) => ({
+        phase: phaseStatus.phase,
+        status: phaseStatus.status,
+      })),
+    ).toEqual([
+      { phase: "correctness-security", status: "failed" },
+      { phase: "conventions-tests", status: "completed" },
+      { phase: "subtle-bugs", status: "completed" },
+    ])
+  })
+
   it("stops a sequential run after an auth/credit abort and reports the skipped phases", async () => {
     const billedAttempt: ModelAttempt = {
       model: "test/model",
