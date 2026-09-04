@@ -128,7 +128,7 @@ Models sometimes report "findings" that conclude the code is fine — titled `N/
 - its **title** contains a self-negating phrase followed by a separator or end-of-title — `…not actionable`, `…not a defect`, `…not a(n) (real) issue/bug/problem`
 - its **failure_scenario** ends with a leaked conclusion — `…no bug` / `…no bug here`, `…not actionable` / `…not a defect` / `…not a(n) (real) issue/bug/problem`, or `…analysis was wrong`
 
-The patterns are deliberately anchored to the start or end of a field, so real findings survive: a scenario like "No failure occurs until the third retry…" or "None of the guards catch this input" never matches. Dropped counts are logged per run (`non-finding filter applied to model output`).
+The patterns are deliberately anchored (start-of-field, end-of-field, or separator-delimited) so real findings survive: a scenario like "No failure occurs until the third retry…" or "None of the guards catch this input" never matches. Dropped counts are logged per run (`non-finding filter applied to model output`).
 
 ## Unknown-file filter
 
