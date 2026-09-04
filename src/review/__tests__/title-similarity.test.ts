@@ -45,43 +45,49 @@ describe("titleSimilarity", () => {
   it("returns 1.0 for identical token sets", () => {
     const tokens = ["check", "email", "missing", "null", "user"]
 
-    expect(titleSimilarity(tokens, tokens)).toBe(1)
+    expect(titleSimilarity({ leftTokens: tokens, rightTokens: tokens })).toBe(1)
   })
 
   it("returns 0 for completely disjoint sets", () => {
-    const a = ["alpha", "beta"]
-    const b = ["gamma", "delta"]
-
-    expect(titleSimilarity(a, b)).toBe(0)
+    expect(
+      titleSimilarity({
+        leftTokens: ["alpha", "beta"],
+        rightTokens: ["gamma", "delta"],
+      }),
+    ).toBe(0)
   })
 
   it("returns 0 when the first set is empty", () => {
-    expect(titleSimilarity([], ["alpha"])).toBe(0)
+    expect(titleSimilarity({ leftTokens: [], rightTokens: ["alpha"] })).toBe(0)
   })
 
   it("returns 0 when the second set is empty", () => {
-    expect(titleSimilarity(["alpha"], [])).toBe(0)
+    expect(titleSimilarity({ leftTokens: ["alpha"], rightTokens: [] })).toBe(0)
   })
 
   it("returns 0 when both sets are empty", () => {
-    expect(titleSimilarity([], [])).toBe(0)
+    expect(titleSimilarity({ leftTokens: [], rightTokens: [] })).toBe(0)
   })
 
   it("computes Jaccard correctly for overlapping sets", () => {
-    const a = ["check", "email", "missing", "null", "user"]
-    const b = ["call", "email", "tolowercase", "unguarded", "user"]
-
     // intersection: {email, user} = 2
     // union: {check, email, missing, null, user, call, tolowercase, unguarded} = 8
-    expect(titleSimilarity(a, b)).toBe(2 / 8)
+    expect(
+      titleSimilarity({
+        leftTokens: ["check", "email", "missing", "null", "user"],
+        rightTokens: ["call", "email", "tolowercase", "unguarded", "user"],
+      }),
+    ).toBe(2 / 8)
   })
 
   it("returns 0.5 for sets sharing exactly half their combined vocabulary", () => {
-    const a = ["alpha", "beta", "gamma"]
-    const b = ["alpha", "beta", "delta"]
-
     // intersection: {alpha, beta} = 2
     // union: {alpha, beta, gamma, delta} = 4
-    expect(titleSimilarity(a, b)).toBe(0.5)
+    expect(
+      titleSimilarity({
+        leftTokens: ["alpha", "beta", "gamma"],
+        rightTokens: ["alpha", "beta", "delta"],
+      }),
+    ).toBe(0.5)
   })
 })

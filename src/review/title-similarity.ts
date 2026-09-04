@@ -56,10 +56,13 @@ export const normalizeTitle = (title: string): string[] => {
 }
 
 /** Jaccard similarity: |A ∩ B| / |A ∪ B|. 0 = disjoint, 1 = identical. */
-export const titleSimilarity = (
-  leftTokens: string[],
-  rightTokens: string[],
-): number => {
+export const titleSimilarity = ({
+  leftTokens,
+  rightTokens,
+}: {
+  leftTokens: string[]
+  rightTokens: string[]
+}): number => {
   if (leftTokens.length === 0 || rightTokens.length === 0) return 0
   const rightSet = new Set(rightTokens)
   const intersection = leftTokens.filter((token) => rightSet.has(token)).length

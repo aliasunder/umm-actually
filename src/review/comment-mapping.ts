@@ -116,10 +116,13 @@ export const extractAnchors = (comments: AnchorSource[]): AnchorEntry[] => {
   })
 }
 
-const isPositionalDuplicate = (
-  finding: AnchorEntry,
-  anchor: AnchorEntry,
-): boolean => {
+const isPositionalDuplicate = ({
+  finding,
+  anchor,
+}: {
+  finding: AnchorEntry
+  anchor: AnchorEntry
+}): boolean => {
   return (
     anchor.file === finding.file &&
     anchor.category === finding.category &&
@@ -128,19 +131,22 @@ const isPositionalDuplicate = (
 }
 
 /** Fails open to positional-only when either side lacks a title. */
-const isContentDuplicate = (
-  finding: AnchorEntry,
-  anchor: AnchorEntry,
-): boolean => {
+const isContentDuplicate = ({
+  finding,
+  anchor,
+}: {
+  finding: AnchorEntry
+  anchor: AnchorEntry
+}): boolean => {
   if (!finding.title || !anchor.title) return false
   if (anchor.file !== finding.file) return false
   if (Math.abs(anchor.line - finding.line) > CONTENT_LINE_PROXIMITY)
     return false
   return (
-    titleSimilarity(
-      normalizeTitle(finding.title),
-      normalizeTitle(anchor.title),
-    ) >= CONTENT_SIMILARITY_THRESHOLD
+    titleSimilarity({
+      leftTokens: normalizeTitle(finding.title),
+      rightTokens: normalizeTitle(anchor.title),
+    }) >= CONTENT_SIMILARITY_THRESHOLD
   )
 }
 
@@ -150,8 +156,8 @@ export const isDuplicateFinding = (
 ): boolean => {
   return anchors.some((anchor) => {
     return (
-      isPositionalDuplicate(finding, anchor) ||
-      isContentDuplicate(finding, anchor)
+      isPositionalDuplicate({ finding, anchor }) ||
+      isContentDuplicate({ finding, anchor })
     )
   })
 }
