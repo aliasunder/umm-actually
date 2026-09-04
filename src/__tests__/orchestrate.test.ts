@@ -2134,6 +2134,19 @@ describe("orchestrate", () => {
           title: targetFinding.title,
         },
       })
+      expect(logger.messages).toContainEqual({
+        level: "info",
+        message: "cross-run dedup against prior bot comments",
+        data: {
+          statusCommentFound: false,
+          existingAnchorCount: 1,
+          priorBotCommentCount: 1,
+          findingsAfterFilter: findings.length,
+          findingsSurvivedDedup: findings.length - 1,
+          droppedByPositional: 0,
+          droppedByContent: 1,
+        },
+      })
     })
 
     it("legacy title-hash anchors don't dedup", async () => {
