@@ -21,7 +21,7 @@ const CONFIRMATION_TITLE_SUFFIX = /\bis\s+(?:correct|accurate)\s*\.?\s*$/i
 
 /** Self-negating title — the model reports then retracts in the same title. */
 const SELF_NEGATING_TITLE =
-  /\bnot (?:actionable|a defect|a (?:real )?(?:issue|bug|problem))\b/i
+  /\bnot (?:actionable|a defect|an? (?:real )?(?:issue|bug|problem))\b/i
 
 /** Prior-finding resolution confirmations — "Prior bot finding addressed: …"
  *  — start-anchored with a required resolution verb, so real findings about
