@@ -113,7 +113,7 @@ The `@umm review` comment trigger lets you re-request a review on any PR by comm
 3. Reads the conventions file and changed source files (token-budgeted), traces imports to find related code files, and scans doc files (`.md`, `.json`) for mentions of changed paths
 4. Builds a structured prompt with randomized delimiter nonces (prompt injection defense); on re-runs, prior bot comment bodies are included so the model can self-suppress conceptual duplicates. Sends it to OpenRouter
 5. Validates the response against a strict Zod schema, retrying with a fallback model if the primary fails
-6. Drops non-findings (see [Non-finding filter](#non-finding-filter)) and findings on files the model was never given (see [Unknown-file filter](#unknown-file-filter)), then on re-runs deduplicates against previously posted inline comments (by hidden HTML anchor)
+6. Drops non-findings (see [Non-finding filter](#non-finding-filter)) and findings on files the model was never given (see [Unknown-file filter](#unknown-file-filter)), then on re-runs deduplicates against previously posted inline comments (two-tier: positional match by hidden HTML anchor, or content match by title similarity within 50 lines)
 7. Filters remaining findings by severity threshold, deduplicates overlapping findings within the run, and caps if configured
 8. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
 9. Posts one review with inline comments (invisible body); beyond-diff findings post as standalone PR comments; every run upserts a status comment with cross-run totals
