@@ -9,7 +9,7 @@ LLM-powered pull request review as a GitHub Action. One consolidated review per 
 - Posts exactly **one** PR review with inline comments anchored to diff lines — no duplicate comments, no unrequested-reviewer badges
 - Structured output end to end: every finding carries a category, severity, confidence, and a concrete failure scenario
 - **Drops non-findings before they post** — findings that conclude "no bug here" (an `N/A — …` title, a "no action needed" suggestion, a "…is correct" title) are filtered deterministically
-- Model-agnostic via OpenRouter — pick your model, see your per-call costs
+- Model-agnostic via OpenRouter — pick your model, see your per-call costs; every posted comment carries an `umm-actually · <model>` byline naming the model that produced it
 - Findings that can't be anchored to the diff (e.g. callers outside the changed files) are posted as standalone comments on the PR
 - PRs with oversized diffs are skipped gracefully with a body-only review stating the reason
 - Reports as its **own branded check run** in the PR checks list — the App's avatar, the outcome as the check title (findings count, clean pass, or skip reason), and a details page carrying the summary and per-run cost
@@ -133,31 +133,12 @@ The patterns are deliberately anchored to the start or end of a field, so real f
 
 A finding's `file` must name a file the model was given: a diff header (including renamed-from and deleted paths), a changed, related, or priority-doc file block, or the conventions file. A finding on any other path is ungrounded — the model saw nothing there — and is dropped before threshold, dedup, and cap. Paths are normalized before comparison (`./src/x.ts` and `src/x.ts` match), but only whole paths match: a bare filename or a directory prefix does not. Each drop is logged as a warning (`dropping finding: file not in prompt context`) with the file, line, and category; the per-run count appears in the job summary.
 
-## Status
-
-umm-actually is in early development — the core review pipeline works but there's more to build. Here's what's shipped and what's in progress:
-
-**Shipped (V1)**
-
-- Single-pass review with inline findings anchored to diff lines
-- Structured output with retry ladder and fallback model
-- Import-tracing: changed code is traced into callers via reverse-import scan
-- Doc-mention scan: unchanged docs (`.md`, `.json`) that reference changed code reach the prompt for staleness detection
-- Token-budgeted context (changed files + related files + related docs + conventions)
-- Prompt injection defense (randomized delimiter nonces)
-- Skip-path handling with posted reasons (oversized diff, empty diff, API limits)
-- Cost transparency (per-run model/token/USD report in workflow summary)
-- Every posted comment — inline findings, beyond-diff findings, and the status comment — ends with an `umm-actually · <model>` byline naming the model that produced it, so runs under different models or fallbacks stay distinguishable on the PR
-- `@umm review` comment trigger for on-demand re-reviews
-- Cross-run finding dedup — re-runs detect previously posted inline findings via hidden HTML anchors and post only new ones; prior bot comment bodies also feed into the prompt for conceptual dedup (the model self-suppresses even when positional anchors differ). An updatable summary comment tracks totals
-- Non-finding filter — deterministic drop of findings that amount to "no bug here" (`N/A` prefixes, "no action needed" suggestions, "…is correct" titles) before threshold and cap
-- Unknown-file filter — findings on a path the model was never given are dropped before posting instead of surfacing as beyond-diff comments
-- Branded check run — the review reports as its own check via the Checks API, with the App avatar and the outcome on the check's details page
-
-**Planned**
+## Roadmap
 
 - V1.5: `read_file` verification tool — the model can read additional files before finalizing findings
 - V2: bounded agentic exploration — multi-step investigation with tool use behind a `generateFindings` seam
+
+See the [CHANGELOG](./CHANGELOG.md) for what each release shipped.
 
 ## License
 
