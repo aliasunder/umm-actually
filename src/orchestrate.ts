@@ -23,7 +23,7 @@ import {
   buildStatusComment,
   coalesceAnchors,
   extractAnchors,
-  isDuplicateFinding,
+  classifyDuplicate,
   mapFindingsToReview,
   renderStandaloneFinding,
   REVIEW_MARKER,
@@ -668,9 +668,24 @@ const runReviewPipeline = async (
   // inline comments (live positions) and its beyond-diff issue comments
   // (anchor lines). Runs before the cap so duplicates don't consume slots.
   const existingAnchors = [...inlineState.anchors, ...issueState.anchors]
-  const newFindings = realFindings.filter(
-    (finding) => !isDuplicateFinding(finding, existingAnchors),
-  )
+  const newFindings: Finding[] = []
+  const dedupCounts = { positional: 0, content: 0 }
+  for (const finding of realFindings) {
+    const tier = classifyDuplicate(finding, existingAnchors)
+    if (tier) {
+      dedupCounts[tier]++
+      if (tier === "content") {
+        logger.warn("content-tier dedup suppressed finding", {
+          file: finding.file,
+          line: finding.line,
+          category: finding.category,
+          title: finding.title,
+        })
+      }
+    } else {
+      newFindings.push(finding)
+    }
+  }
 
   logger.info("cross-run dedup against prior bot comments", {
     statusCommentFound: issueState.statusCommentExists,
@@ -678,6 +693,8 @@ const runReviewPipeline = async (
     priorBotCommentCount: priorBotComments.length,
     findingsAfterFilter: realFindings.length,
     findingsSurvivedDedup: newFindings.length,
+    droppedByPositional: dedupCounts.positional,
+    droppedByContent: dedupCounts.content,
   })
 
   const {

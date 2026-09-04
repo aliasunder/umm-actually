@@ -55,7 +55,8 @@ export const normalizeTitle = (title: string): string[] => {
   return [...new Set(tokens)].toSorted()
 }
 
-/** Jaccard similarity: |A ∩ B| / |A ∪ B|. 0 = disjoint, 1 = identical. */
+/** Jaccard similarity: |A ∩ B| / |A ∪ B|. 0 = disjoint, 1 = identical.
+ *  Deduplicates internally so the result stays in [0, 1] for arbitrary input. */
 export const titleSimilarity = ({
   leftTokens,
   rightTokens,
@@ -63,9 +64,12 @@ export const titleSimilarity = ({
   leftTokens: string[]
   rightTokens: string[]
 }): number => {
-  if (leftTokens.length === 0 || rightTokens.length === 0) return 0
+  const leftSet = new Set(leftTokens)
   const rightSet = new Set(rightTokens)
-  const intersection = leftTokens.filter((token) => rightSet.has(token)).length
-  const union = new Set([...leftTokens, ...rightTokens]).size
+  if (leftSet.size === 0 || rightSet.size === 0) return 0
+  const intersection = [...leftSet].filter((token) =>
+    rightSet.has(token),
+  ).length
+  const union = new Set([...leftSet, ...rightSet]).size
   return intersection / union
 }

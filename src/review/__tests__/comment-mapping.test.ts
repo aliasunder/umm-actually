@@ -1009,7 +1009,7 @@ describe("coalesceAnchors", () => {
     expect(coalesceAnchors(anchors)).toEqual(anchors)
   })
 
-  it("coalesces content-similar anchors across different categories", () => {
+  it("keeps content-similar anchors across different categories as distinct findings", () => {
     const anchors = [
       {
         file: "src/a.ts",
@@ -1025,14 +1025,7 @@ describe("coalesceAnchors", () => {
       },
     ]
 
-    expect(coalesceAnchors(anchors)).toEqual([
-      {
-        file: "src/a.ts",
-        category: "correctness",
-        line: 50,
-        title: "Missing null check on user.email",
-      },
-    ])
+    expect(coalesceAnchors(anchors)).toEqual(anchors)
   })
 
   it("returns an empty array for no anchors", () => {

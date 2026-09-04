@@ -150,24 +150,37 @@ const isContentDuplicate = ({
   )
 }
 
+export type DuplicateTier = "positional" | "content"
+
+/** Returns which dedup tier matched, or null if the finding is new. */
+export const classifyDuplicate = (
+  finding: AnchorEntry,
+  anchors: AnchorEntry[],
+): DuplicateTier | null => {
+  for (const anchor of anchors) {
+    if (isPositionalDuplicate({ finding, anchor })) return "positional"
+  }
+  for (const anchor of anchors) {
+    if (isContentDuplicate({ finding, anchor })) return "content"
+  }
+  return null
+}
+
 export const isDuplicateFinding = (
   finding: AnchorEntry,
   anchors: AnchorEntry[],
-): boolean => {
-  return anchors.some((anchor) => {
-    return (
-      isPositionalDuplicate({ finding, anchor }) ||
-      isContentDuplicate({ finding, anchor })
-    )
-  })
-}
+): boolean => classifyDuplicate(finding, anchors) !== null
 
-/** Collapses anchors the dedup rules would treat as one finding. A
- *  fail-open fetch can repost an already-anchored finding, leaving two
- *  anchors for it — the status comment counts findings, not anchors. */
+/** Collapses positionally overlapping anchors for the tracked-findings
+ *  count. Uses positional dedup only — content similarity must not
+ *  collapse genuinely distinct prior findings that happen to share
+ *  title vocabulary. */
 export const coalesceAnchors = (anchors: AnchorEntry[]): AnchorEntry[] => {
   return anchors.reduce<AnchorEntry[]>((kept, anchor) => {
-    if (isDuplicateFinding(anchor, kept)) return kept
+    const positionalMatch = kept.some((existing) => {
+      return isPositionalDuplicate({ finding: anchor, anchor: existing })
+    })
+    if (positionalMatch) return kept
     return [...kept, anchor]
   }, [])
 }
