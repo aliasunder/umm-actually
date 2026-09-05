@@ -6,18 +6,22 @@ import {
   newFilePath,
 } from "./diff/commentable-lines.js"
 import { annotateDiff } from "./diff/annotate-diff.js"
-import type { Logger } from "./logger.js"
+import { describeError, type Logger } from "./logger.js"
 import type {
   CheckRunConclusion,
   CheckRunOutput,
   GithubClient,
 } from "./github/client.js"
 import { resolvePullRequestEvent, type PrContext } from "./github/event.js"
-import type {
-  OpenRouterClient,
-  StructuredReviewResult,
+import {
+  ReviewRequestError,
+  type OpenRouterClient,
+  type StructuredReviewResult,
 } from "./openrouter/client.js"
-import { renderCostSummary } from "./openrouter/cost-summary.js"
+import {
+  renderCostSummary,
+  type PhaseAttempt,
+} from "./openrouter/cost-summary.js"
 import type { ContextReader } from "./context/workspace.js"
 import {
   buildStatusComment,
@@ -41,7 +45,11 @@ import {
   type Finding,
   type FindingSeverity,
 } from "./review/finding.js"
-import { resolvePhases, type ReviewPhase } from "./review/phases.js"
+import {
+  resolveStages,
+  type ReviewPhase,
+  type ReviewStage,
+} from "./review/phases.js"
 import {
   buildSystemPrompt,
   buildUserPrompt,
@@ -53,7 +61,14 @@ import {
 } from "./review/prompt.js"
 import { filterNonFindings } from "./review/filter-non-findings.js"
 import { filterUnknownFileFindings } from "./review/filter-unknown-file-findings.js"
+import { mergePhaseFindings } from "./review/merge-phase-findings.js"
 import { renderReviewSummary } from "./review/review-summary.js"
+import {
+  AllPhasesFailedError,
+  runStages,
+  type PhaseOutcome,
+  type RunPhase,
+} from "./review/run-stages.js"
 import { selectFindings } from "./review/select-findings.js"
 
 /** Fraction of contextBudgetTokens reserved for priority docs — related files
@@ -76,11 +91,19 @@ export type GenerateFindings = (
   reviewContext: ReviewContext,
 ) => Promise<StructuredReviewResult>
 
+/** How each review phase ended; a failed phase's findings are absent from
+ *  the run and its reason is the error text, not a remediation. */
+export type PhaseStatus =
+  | { phase: string; status: "completed" }
+  | { phase: string; status: "failed"; reason: string }
+
 export type OrchestrateResult = {
   findingsCount: number
   reviewUrl: string
+  /** Routed model slugs the completed phases used, comma-joined when they differ. */
   modelUsed: string
   skippedReason: string
+  phases: PhaseStatus[]
   reviewSummaryMarkdown: string | null
   costSummaryMarkdown: string | null
 }
@@ -104,12 +127,6 @@ const stripAnchorComment = (body: string): string =>
 
 const buildSkipBody = (reason: string): string =>
   `**umm-actually** — review skipped\n\n${reason}\n\n---\n*umm-actually*`
-
-const describeError = (error: unknown): string => {
-  return error instanceof Error
-    ? `[${error.name}]: ${error.message}`
-    : String(error)
-}
 
 type InlineCommentState = {
   anchors: AnchorEntry[]
@@ -238,6 +255,7 @@ const SKIPPED_RESULT_BASE: Omit<
 > = {
   findingsCount: 0,
   modelUsed: "",
+  phases: [],
   reviewSummaryMarkdown: null,
   costSummaryMarkdown: null,
 }
@@ -306,7 +324,9 @@ const completeCheckRunSafely = async (
  *  The conclusion grades the run, not the code: a completed review is
  *  `success` whether or not it posted findings (the count lives in the
  *  title), a skip is `neutral` (no review happened), and `failure` is
- *  reserved for the pipeline itself erroring. */
+ *  reserved for the pipeline itself erroring. A review that lost some of
+ *  its phases still ran and posted, so it stays `success` and the title
+ *  carries the gap. */
 const resolveCheckRunCompletion = ({
   result,
   costSummaryMarkdown,
@@ -324,12 +344,27 @@ const resolveCheckRunCompletion = ({
       },
     }
   }
+
+  const incompletePhases = result.phases.filter(
+    (phase) => phase.status === "failed",
+  )
+  const incompleteSuffix =
+    incompletePhases.length === 0
+      ? ""
+      : ` (${incompletePhases.length} of ${result.phases.length} phases incomplete)`
+  const incompleteSection =
+    incompletePhases.length === 0
+      ? ""
+      : `\n\nIncomplete phases: ${incompletePhases
+          .map((phase) => `\`${phase.phase}\` (${phase.reason})`)
+          .join(", ")}`
+
   if (result.findingsCount === 0) {
     return {
       conclusion: "success",
       output: {
-        title: "No findings above threshold",
-        summary: `Reviewed with \`${result.modelUsed}\` — no findings above threshold.${costSection}`,
+        title: `No findings above threshold${incompleteSuffix}`,
+        summary: `Reviewed with \`${result.modelUsed}\` — no findings above threshold.${incompleteSection}${costSection}`,
       },
     }
   }
@@ -340,10 +375,104 @@ const resolveCheckRunCompletion = ({
   return {
     conclusion: "success",
     output: {
-      title: findingsLabel,
-      summary: `Reviewed with \`${result.modelUsed}\` — ${findingsLabel} posted.${costSection}`,
+      title: `${findingsLabel}${incompleteSuffix}`,
+      summary: `Reviewed with \`${result.modelUsed}\` — ${findingsLabel} posted.${incompleteSection}${costSection}`,
     },
   }
+}
+
+type CompletedPhase = Extract<PhaseOutcome, { status: "completed" }>
+
+const describePhaseOutcome = (outcome: PhaseOutcome): PhaseStatus => {
+  if (outcome.status === "completed") {
+    return { phase: outcome.phase.id, status: "completed" }
+  }
+  return {
+    phase: outcome.phase.id,
+    status: "failed",
+    reason: describeError(outcome.error),
+  }
+}
+
+/** A failed phase's billed attempts ride on the client's error; any other
+ *  failure reached no provider and billed nothing. */
+const phaseAttempts = (outcome: PhaseOutcome): PhaseAttempt[] => {
+  const attempts =
+    outcome.status === "completed"
+      ? outcome.result.attempts
+      : outcome.error instanceof ReviewRequestError
+        ? outcome.error.attempts
+        : []
+  return attempts.map((attempt) => ({ ...attempt, phase: outcome.phase.id }))
+}
+
+type FilteredPhaseFindings = {
+  findings: Finding[]
+  droppedAsNonFinding: number
+  droppedAsUnknownFile: number
+}
+
+/** Drops non-findings and findings on files the model never saw. */
+const filterPhaseFindings = (
+  { outcome, knownPaths }: { outcome: CompletedPhase; knownPaths: string[] },
+  logger: Logger,
+): FilteredPhaseFindings => {
+  const { findings: nonFindingFiltered, droppedAsNonFinding } =
+    filterNonFindings(outcome.result.review.findings)
+  const { findings, droppedAsUnknownFile } = filterUnknownFileFindings({
+    findings: nonFindingFiltered,
+    knownPaths,
+  })
+  // Per-drop warn on purpose: each one is a model-quality event, not loop
+  // chatter, and the title is omitted because it may be garbage
+  for (const finding of droppedAsUnknownFile) {
+    logger.warn("dropping finding: file not in prompt context", {
+      phase: outcome.phase.id,
+      file: finding.file,
+      line: finding.line,
+      category: finding.category,
+    })
+  }
+  return {
+    findings,
+    droppedAsNonFinding,
+    droppedAsUnknownFile: droppedAsUnknownFile.length,
+  }
+}
+
+/** A run where every phase failed still billed its attempts; the failure
+ *  summary carries the cost table so they are not lost with the findings. */
+/** Renders the check-run summary when the pipeline throws. Appends
+ *  a cost table when every phase failed — the operator still pays. */
+const describePipelineFailure = ({
+  pipelineError,
+  costSummary,
+}: {
+  pipelineError: unknown
+  costSummary: boolean
+}): string => {
+  const description = describeError(pipelineError)
+  if (!costSummary || !(pipelineError instanceof AllPhasesFailedError)) {
+    return description
+  }
+  const attempts = pipelineError.outcomes.flatMap(phaseAttempts)
+  if (attempts.length === 0) return description
+  const models = [...new Set(attempts.map((attempt) => attempt.model))]
+  const modelUsed = models.length > 0 ? models.join(", ") : "none"
+  return `${description}\n\n${renderCostSummary({ attempts, modelUsed })}`
+}
+
+const sumBy = <Item>(
+  items: Item[],
+  valueOf: (item: Item) => number,
+): number => {
+  return items.reduce((sum, item) => sum + valueOf(item), 0)
+}
+
+const incompletePhaseIds = (phases: PhaseStatus[]): string[] => {
+  return phases
+    .filter((phase) => phase.status === "failed")
+    .map((phase) => phase.phase)
 }
 
 /** Steps 4–14: diff fetch through status comment — everything downstream of
@@ -354,12 +483,12 @@ const runReviewPipeline = async (
     deps,
     prContext,
     severityThreshold,
-    phases,
+    stages,
   }: {
     deps: OrchestrateDeps
     prContext: PrContext
     severityThreshold: FindingSeverity
-    phases: ReviewPhase[]
+    stages: ReviewStage[]
   },
   logger: Logger,
 ): Promise<OrchestrateResult> => {
@@ -619,48 +748,61 @@ const runReviewPipeline = async (
     .map(stripAnchorComment)
     .slice(-PRIOR_COMMENT_CAP)
 
-  // Step 10–11: generate findings (V1: single combined phase)
-  const phase = phases[0]
-  if (!phase) {
-    throw new Error("resolvePhases returned no phases")
+  // Step 10–11: generate findings — one model call per phase, stages in order
+  const runPhase: RunPhase = ({ phase, priorFindings }) => {
+    return generateFindings({
+      prContext,
+      phase,
+      conventions: conventionsForPrompt,
+      changedFiles,
+      relatedFiles,
+      relatedDocs,
+      annotatedDiff,
+      priorFindings,
+      priorBotComments,
+    })
   }
-  const structuredResult = await generateFindings({
-    prContext,
-    phase,
-    conventions: conventionsForPrompt,
-    changedFiles,
-    relatedFiles,
-    relatedDocs,
-    annotatedDiff,
-    priorFindings: [],
-    priorBotComments,
+  const phaseOutcomes = await runStages({ stages, runPhase }, logger)
+  const completedPhases = phaseOutcomes.filter(
+    (outcome) => outcome.status === "completed",
+  )
+  const phases = phaseOutcomes.map(describePhaseOutcome)
+  const modelUsed = [
+    ...new Set(completedPhases.map((outcome) => outcome.result.modelUsed)),
+  ].join(", ")
+  const attempts = phaseOutcomes.flatMap(phaseAttempts)
+  logger.info("review phases finished", {
+    completed: completedPhases.map((outcome) => outcome.phase.id),
+    incomplete: incompletePhaseIds(phases),
   })
 
-  const { modelUsed, attempts } = structuredResult
-
-  // Step 12: filter non-findings and findings on files the model never saw
-  // before selection so cap slots aren't wasted
-  const { findings: nonFindingFiltered, droppedAsNonFinding } =
-    filterNonFindings(structuredResult.review.findings)
-  const { findings: realFindings, droppedAsUnknownFile } =
-    filterUnknownFileFindings({
-      findings: nonFindingFiltered,
-      knownPaths: promptFilePaths,
-    })
-  // Per-drop warn on purpose: each one is a model-quality event, not loop
-  // chatter, and the title is omitted because it may be garbage
-  for (const finding of droppedAsUnknownFile) {
-    logger.warn("dropping finding: file not in prompt context", {
-      file: finding.file,
-      line: finding.line,
-      category: finding.category,
-    })
-  }
+  // Step 12: per phase, drop non-findings and findings on files the model
+  // never saw, then collapse cross-phase duplicates — all before selection so
+  // cap slots aren't wasted
+  const filteredPhases = completedPhases.map((outcome) => {
+    return filterPhaseFindings({ outcome, knownPaths: promptFilePaths }, logger)
+  })
+  const totalFromModel = sumBy(
+    completedPhases,
+    (outcome) => outcome.result.review.findings.length,
+  )
+  const droppedAsNonFinding = sumBy(
+    filteredPhases,
+    (filtered) => filtered.droppedAsNonFinding,
+  )
+  const droppedAsUnknownFile = sumBy(
+    filteredPhases,
+    (filtered) => filtered.droppedAsUnknownFile,
+  )
+  const { findings: realFindings, duplicatesAcrossPhases } = mergePhaseFindings(
+    filteredPhases.map((filtered) => filtered.findings),
+  )
   logger.info("non-finding filter applied to model output", {
-    totalFromModel: structuredResult.review.findings.length,
+    totalFromModel,
     kept: realFindings.length,
     droppedAsNonFinding,
-    droppedAsUnknownFile: droppedAsUnknownFile.length,
+    droppedAsUnknownFile,
+    duplicatesAcrossPhases,
   })
 
   // Step 12.5: cross-run dedup — every run walks the same path; a first run
@@ -782,6 +924,7 @@ const runReviewPipeline = async (
     droppedByCap,
     model: modelUsed,
     contextNotes,
+    incompletePhases: incompletePhaseIds(phases),
   })
   try {
     await githubClient.upsertSummaryComment({
@@ -798,6 +941,8 @@ const runReviewPipeline = async (
   const reviewSummaryMarkdown = renderReviewSummary({
     prContext,
     conventionsFile: conventions ? config.conventionsFile : null,
+    phasesCompleted: completedPhases.map((outcome) => outcome.phase.id),
+    phasesIncomplete: incompletePhaseIds(phases),
     changedFilePaths: changedFiles.map((file) => file.path),
     relatedFilePaths: relatedFiles.map((file) => file.path),
     relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
@@ -812,9 +957,10 @@ const runReviewPipeline = async (
     tokenBudgetUsedByDiff: diffTokens,
     tokenBudgetPriorityDocFloor: priorityDocFloor,
     tokenBudgetRemainingForDocs: docRemainingTokens,
-    totalFromModel: structuredResult.review.findings.length,
+    totalFromModel,
     droppedAsNonFinding,
-    droppedAsUnknownFile: droppedAsUnknownFile.length,
+    droppedAsUnknownFile,
+    duplicatesAcrossPhases,
     duplicatesRemoved: realFindings.length - newFindings.length,
     droppedBelowThreshold,
     droppedAsOverlapping,
@@ -827,6 +973,7 @@ const runReviewPipeline = async (
     reviewUrl: inlineOutcome.url,
     modelUsed,
     skippedReason: "",
+    phases,
     reviewSummaryMarkdown,
     costSummaryMarkdown,
   }
@@ -845,11 +992,12 @@ export const orchestrate = async (
 
   // Step 1: fail-fast validation — throws before any network call
   const severityThreshold = resolveSeverityThreshold(config.severityThreshold)
-  const phases = resolvePhases(config.phases)
+  const stages = resolveStages(config.phases)
 
   logger.info("review settings from action inputs", {
     model: config.model,
     fallbackModel: config.fallbackModel || null,
+    phases: config.phases,
     severityThreshold: config.severityThreshold,
     maxFindings: config.maxFindings ?? "uncapped",
     traceRelatedFiles: config.traceRelatedFiles,
@@ -899,7 +1047,7 @@ export const orchestrate = async (
 
   try {
     const result = await runReviewPipeline(
-      { deps, prContext, severityThreshold, phases },
+      { deps, prContext, severityThreshold, stages },
       logger,
     )
     const completion = resolveCheckRunCompletion({
@@ -921,7 +1069,10 @@ export const orchestrate = async (
         conclusion: "failure",
         output: {
           title: "Error — review did not complete",
-          summary: describeError(pipelineError),
+          summary: describePipelineFailure({
+            pipelineError,
+            costSummary: config.costSummary,
+          }),
         },
       },
       logger,
@@ -930,9 +1081,9 @@ export const orchestrate = async (
   }
 }
 
-/** V1 one-shot strategy — builds a prompt from the review context and sends
- *  it to OpenRouter. V1.5/V2 will swap in different strategies behind the
- *  same GenerateFindings interface. */
+/** Prompted strategy — builds the prompt for one review phase and sends it
+ *  to OpenRouter; the stage dispatcher calls it once per phase. V1.5/V2
+ *  tool-loop strategies swap in behind the same GenerateFindings interface. */
 export const createPromptedGenerateFindings = (
   {
     openrouterClient,
@@ -955,7 +1106,11 @@ export const createPromptedGenerateFindings = (
       delimiterNonce,
     })
 
-    log.info("requesting review", { model, fallbackModel })
+    log.info("requesting review", {
+      phase: reviewContext.phase.id,
+      model,
+      fallbackModel,
+    })
 
     return openrouterClient.requestReview({
       systemPrompt,

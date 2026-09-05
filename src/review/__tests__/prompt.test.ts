@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { PrContext } from "../../github/event.js"
-import { resolvePhases } from "../phases.js"
+import { COMBINED_PHASE as combinedPhase } from "../phases.js"
 import {
   buildSystemPrompt,
   buildUserPrompt,
@@ -9,11 +9,6 @@ import {
   generateDelimiterNonce,
 } from "../prompt.js"
 import { makeFinding } from "./make-finding.js"
-
-const resolvedPhases = resolvePhases("combined")
-const combinedPhase = resolvedPhases[0]
-if (combinedPhase === undefined)
-  throw new Error("combined phase missing from resolvePhases")
 
 const prContext: PrContext = {
   prNumber: 7,
@@ -71,7 +66,15 @@ describe("buildSystemPrompt", () => {
     expect(systemPrompt).toContain(
       "REPORTING RULES — these override intuition:",
     )
-    expect(systemPrompt).toContain('fill the "analysis" field')
+    expect(systemPrompt).toContain(
+      [
+        'Before reporting findings, fill the "analysis" field: for each changed file,',
+        "one line stating what you checked per dimension and which callers or related",
+        "files you traced. When verifying documentation or description claims, quote",
+        "the sentence you checked. Findings emitted without corresponding analysis are",
+        "not trustworthy.",
+      ].join("\n"),
+    )
     expect(systemPrompt).toContain("Severity rubric:")
     expect(systemPrompt).toContain(
       [
@@ -340,7 +343,7 @@ describe("buildUserPrompt", () => {
     })
 
     expect(userPrompt).toContain(
-      '<prior_findings-abc123def456 note="already reported by earlier phases — do not re-report">',
+      '<prior_findings-abc123def456 note="already reported by earlier phases — do not re-report them; when a later report overlaps one of these lines, only the higher-severity finding of the two is kept">',
     )
     expect(userPrompt).toContain(priorFinding.title)
   })

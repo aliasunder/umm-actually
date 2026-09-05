@@ -4,6 +4,7 @@ import { createTestLogger } from "../../__tests__/test-logger.js"
 import { reviewResponseJsonSchema } from "../../review/finding.js"
 import {
   createOpenRouterClient,
+  ReviewRequestError,
   type ChatRequestSubset,
   type OpenRouterLike,
 } from "../client.js"
@@ -119,6 +120,18 @@ const makeClient = (stub: { sdk: OpenRouterLike }) => {
 
 const makeStatusError = (statusCode: number): Error =>
   Object.assign(new Error(`HTTP ${statusCode}`), { statusCode })
+
+/** The rejection of a request expected to fail, so its fields can be asserted. */
+const captureRejection = async (
+  request: Promise<unknown>,
+): Promise<unknown> => {
+  try {
+    await request
+    return undefined
+  } catch (error) {
+    return error
+  }
+}
 
 const requestParams = {
   systemPrompt: "system prompt",
@@ -731,6 +744,67 @@ describe("requestReview", () => {
       "review request failed after 2 attempt(s): openai/gpt-5-mini: api_error (HTTP 500: HTTP 500); openai/gpt-5-mini: api_error (HTTP 503: HTTP 503)",
     )
     expect(stub.sendCalls).toHaveLength(2)
+  })
+
+  it("carries every billed attempt on the error when the ladder is exhausted", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeStatusError(500) },
+        { error: makeStatusError(503) },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    const failure = await captureRejection(
+      client.requestReview({ ...requestParams, fallbackModel: null }),
+    )
+
+    if (!(failure instanceof ReviewRequestError)) {
+      throw new Error("expected a ReviewRequestError")
+    }
+    expect(failure.aborted).toBe(false)
+    expect(failure.attempts).toEqual([
+      {
+        model: "openai/gpt-5-mini",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: "HTTP 500: HTTP 500",
+      },
+      {
+        model: "openai/gpt-5-mini",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: "HTTP 503: HTTP 503",
+      },
+    ])
+  })
+
+  it("marks the error as aborted on an auth/credit failure", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [{ error: makeStatusError(402) }],
+    })
+    const { client } = makeClient(stub)
+
+    const failure = await captureRejection(client.requestReview(requestParams))
+
+    if (!(failure instanceof ReviewRequestError)) {
+      throw new Error("expected a ReviewRequestError")
+    }
+    expect(failure.aborted).toBe(true)
+    expect(failure.attempts).toEqual([
+      {
+        model: "openai/gpt-5-mini",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: "HTTP 402: HTTP 402",
+      },
+    ])
   })
 
   it("makes at most four calls across both ladder models", async () => {

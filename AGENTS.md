@@ -25,7 +25,7 @@ src/
   openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, per-attempt deadline, structured-output retry ladder, cost summary
   diff/                    # pure transforms over parse-diff output
   context/                 # workspace I/O: conventions file, changed files, import-trace scan, doc-mention scan, priority docs
-  review/                  # pure review logic: finding schema, phases, prompt, non-finding filter, unknown-file filter, path normalization, selection, comment mapping, title similarity, context notes, summary
+  review/                  # pure review logic: finding schema, phases + stage dispatch, prompt, non-finding filter, unknown-file filter, cross-phase merge, path normalization, selection, comment mapping, title similarity, context notes, summary
   orchestrate.ts           # pipeline + createPromptedGenerateFindings — fully testable with stub clients
 ```
 
@@ -188,9 +188,19 @@ files. Prefer SDK-provided types over redefining shapes.
 ## Review instruction authoring
 
 The bot's system-prompt instructions live in `src/review/phases.ts`
-(dimension constants + reporting rules) and `src/review/prompt.ts`
-(identity/scope, proof-of-work, severity rubric, output discipline). When
-writing or updating a review instruction, follow this formula — each
+(dimension constants, the per-phase pass-scope line, reporting rules, and
+the phase groups each `phases` mode dispatches) and `src/review/prompt.ts`
+(identity/scope, proof-of-work, severity rubric, output discipline).
+
+**Phase/stage mechanics:** a phase is one model call carrying a set of
+review dimensions. A stage groups the phases that run concurrently; stages
+run in order, and each later stage sees the earlier stages' findings.
+`combined` = 1 stage, 1 phase; `parallel` = 1 stage, 3 phases;
+`sequential` = 3 stages, 3 phases (1 each). The dispatch stack is
+`runStages` → `runStage` → `runPhase` in `src/review/run-stages.ts`;
+cross-phase finding collapse lives in `src/review/merge-phase-findings.ts`.
+
+When writing or updating a review instruction, follow this formula — each
 element is here because its absence measurably cost findings in live runs:
 
 - **Trigger, not preference.** Action + condition + boundary: "when you see

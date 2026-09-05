@@ -278,6 +278,29 @@ type SingleAttempt =
       abort: boolean
     }
 
+/** Thrown when the ladder ends without an accepted response. Carries the
+ *  billed attempts so the caller can still account for their cost, and
+ *  whether the ladder stopped on an auth/credit error (no fallback tried). */
+export class ReviewRequestError extends Error {
+  readonly attempts: ModelAttempt[]
+  readonly aborted: boolean
+
+  constructor({
+    message,
+    attempts,
+    aborted,
+  }: {
+    message: string
+    attempts: ModelAttempt[]
+    aborted: boolean
+  }) {
+    super(message)
+    this.name = "ReviewRequestError"
+    this.attempts = attempts
+    this.aborted = aborted
+  }
+}
+
 const describeAttempt = (attempt: ModelAttempt): string => {
   const errorSuffix =
     attempt.errorSummary === null ? "" : ` (${attempt.errorSummary})`
@@ -523,9 +546,11 @@ export const createOpenRouterClient = (
           errorSummary: attemptResult.attempt.errorSummary,
         })
         if (attemptResult.abort) {
-          throw new Error(
-            `OpenRouter auth/credit error — aborting without fallback: ${summarizeAttempts(attempts)}`,
-          )
+          throw new ReviewRequestError({
+            message: `OpenRouter auth/credit error — aborting without fallback: ${summarizeAttempts(attempts)}`,
+            attempts,
+            aborted: true,
+          })
         }
         if (!attemptResult.retryable) break
         attemptNumber++
@@ -535,9 +560,11 @@ export const createOpenRouterClient = (
       }
     }
 
-    throw new Error(
-      `review request failed after ${attempts.length} attempt(s): ${summarizeAttempts(attempts)}`,
-    )
+    throw new ReviewRequestError({
+      message: `review request failed after ${attempts.length} attempt(s): ${summarizeAttempts(attempts)}`,
+      attempts,
+      aborted: false,
+    })
   }
 
   return { requestReview }

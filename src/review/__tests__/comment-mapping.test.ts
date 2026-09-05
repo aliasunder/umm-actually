@@ -465,6 +465,40 @@ describe("buildStatusComment", () => {
     )
   })
 
+  it("names a single incomplete phase without its error text", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      postedCount: 2,
+      unpostedCount: 0,
+      totalCount: 2,
+      droppedByCap: [],
+      model: "anthropic/claude-sonnet-4-6",
+      incompletePhases: ["subtle-bugs"],
+    })
+
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\n2 new finding(s) posted (2 tracked finding(s) across all runs).\n\n_Review phase \`subtle-bugs\` did not complete; its findings are missing from this run. See the check run for details._\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+    )
+  })
+
+  it("names several incomplete phases in the plural", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      postedCount: 0,
+      unpostedCount: 0,
+      totalCount: 0,
+      droppedByCap: [],
+      model: "anthropic/claude-sonnet-4-6",
+      incompletePhases: ["conventions-tests", "subtle-bugs"],
+    })
+
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\nNo findings above threshold.\n\n_Review phases \`conventions-tests\`, \`subtle-bugs\` did not complete; their findings are missing from this run. See the check run for details._\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+    )
+  })
+
   it("omits the context notes section when contextNotes is empty", () => {
     const body = buildStatusComment({
       sha: "abc123def456abc123def456abc123def456abc1",

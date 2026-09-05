@@ -45,6 +45,14 @@ const timerSafeSeconds = z.string().transform((value, ctx) => {
   return parsed
 })
 
+/** Mirrors the action.yml default — keep the two in sync. */
+const defaultPhases = "combined"
+
+/** Shape-only: the value is validated by its domain owner
+ *  (review/phases.ts resolveStages) at startup. Empty string means "not
+ *  provided" for the same reason as timerSafeSeconds. */
+const phasesOrDefault = z.string().transform((value) => value || defaultPhases)
+
 const configSchema = z.object({
   githubToken: z.string().min(1, "github_token is required"),
   openrouterApiKey: z.string().min(1, "openrouter_api_key is required"),
@@ -56,7 +64,7 @@ const configSchema = z.object({
   // (review/finding.ts resolveSeverityThreshold) at startup
   severityThreshold: z.string().min(1, "severity_threshold must not be empty"),
   conventionsFile: z.string().min(1, "conventions_file must not be empty"),
-  phases: z.string().min(1, "phases must not be empty"),
+  phases: phasesOrDefault,
   contextBudgetTokens: requiredPositiveInteger,
   traceRelatedFiles: z.boolean(),
   maxScanFiles: requiredPositiveInteger,

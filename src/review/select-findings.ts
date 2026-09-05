@@ -19,7 +19,7 @@ const lineRange = (finding: Finding): { start: number; end: number } => {
   }
 }
 
-const rangesOverlap = (first: Finding, second: Finding): boolean => {
+export const rangesOverlap = (first: Finding, second: Finding): boolean => {
   const firstRange = lineRange(first)
   const secondRange = lineRange(second)
   return (
@@ -38,8 +38,8 @@ const isDuplicate = (candidate: Finding, kept: Finding): boolean => {
 /**
  * Threshold-filter, dedupe, sort, and (only when a cap was provided) cap.
  * Dedupe keeps the higher-severity finding when two findings of the same
- * category overlap in the same file — in V2 this is also where cross-phase
- * duplicates collapse.
+ * category overlap in the same file. Duplicates between review phases are
+ * collapsed earlier, by merge-phase-findings.ts, without the category match.
  */
 export const selectFindings = ({
   findings,

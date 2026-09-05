@@ -388,6 +388,38 @@ ${attributionLine(model)}
 <!-- umm-actually:${computeAnchorKey(finding)} -->`
 }
 
+const buildFindingsLine = ({
+  isFirstRun,
+  postedCount,
+  unpostedCount,
+  totalCount,
+}: {
+  isFirstRun: boolean
+  postedCount: number
+  unpostedCount: number
+  totalCount: number
+}): string => {
+  if (postedCount > 0) {
+    return `${postedCount} new finding(s) posted (${totalCount} tracked finding(s) across all runs).`
+  }
+  if (unpostedCount > 0) {
+    return `No new findings posted (${totalCount} tracked finding(s) across all runs).`
+  }
+  return isFirstRun
+    ? "No findings above threshold."
+    : `No new findings (${totalCount} tracked finding(s) across all runs).`
+}
+
+const buildIncompleteNote = (incompletePhases: string[]): string => {
+  if (incompletePhases.length === 0) return ""
+  // The error text stays in the check run: it embeds model slugs and
+  // provider response bodies that do not belong on the PR timeline.
+  if (incompletePhases.length === 1) {
+    return `_Review phase \`${incompletePhases[0]}\` did not complete; its findings are missing from this run. See the check run for details._`
+  }
+  return `_Review phases ${incompletePhases.map((phaseId) => `\`${phaseId}\``).join(", ")} did not complete; their findings are missing from this run. See the check run for details._`
+}
+
 /** The single always-upserted status comment — the receipt that a run
  *  happened and the running cross-run state. Never carries finding text;
  *  findings are their own comments. Counts reflect what actually landed on
@@ -402,6 +434,7 @@ export const buildStatusComment = ({
   droppedByCap,
   model,
   contextNotes = [],
+  incompletePhases = [],
 }: {
   sha: string
   isFirstRun: boolean
@@ -411,18 +444,17 @@ export const buildStatusComment = ({
   droppedByCap: Finding[]
   model: string
   contextNotes?: string[]
+  /** Ids of review phases that ended without an accepted response. */
+  incompletePhases?: string[]
 }): string => {
   const shaShort = sha.slice(0, 7)
   const verb = isFirstRun ? "reviewed" : "re-reviewed"
-  const zeroLine = isFirstRun
-    ? "No findings above threshold."
-    : `No new findings (${totalCount} tracked finding(s) across all runs).`
-  const findingsLine =
-    postedCount > 0
-      ? `${postedCount} new finding(s) posted (${totalCount} tracked finding(s) across all runs).`
-      : unpostedCount > 0
-        ? `No new findings posted (${totalCount} tracked finding(s) across all runs).`
-        : zeroLine
+  const findingsLine = buildFindingsLine({
+    isFirstRun,
+    postedCount,
+    unpostedCount,
+    totalCount,
+  })
   const unpostedNote =
     unpostedCount === 0
       ? ""
@@ -431,6 +463,7 @@ export const buildStatusComment = ({
     droppedByCap.length === 0
       ? ""
       : `_${droppedByCap.length} lower-severity finding(s) omitted by the max_findings cap: ${droppedByCap.map((finding) => `\`${finding.file}:${finding.line}\``).join(", ")}_`
+  const incompleteNote = buildIncompleteNote(incompletePhases)
   const contextSection =
     contextNotes.length === 0
       ? ""
@@ -442,6 +475,7 @@ export const buildStatusComment = ({
     findingsLine,
     unpostedNote,
     capNote,
+    incompleteNote,
     contextSection,
     attribution,
   ]

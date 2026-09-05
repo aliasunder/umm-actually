@@ -85,6 +85,19 @@ describe("parseConfig", () => {
     expect(config.requestTimeoutSeconds).toBe(900)
   })
 
+  it("falls back to combined for an empty phases", () => {
+    const config = parseConfig(makeRawInputs({ phases: "" }))
+
+    expect(config.phases).toBe("combined")
+  })
+
+  it("passes phases through as a string for domain validation", () => {
+    // Value validation lives in review/phases.ts resolveStages
+    const config = parseConfig(makeRawInputs({ phases: "everything" }))
+
+    expect(config.phases).toBe("everything")
+  })
+
   it("rejects a zero request_timeout_seconds", () => {
     expect(() =>
       parseConfig(makeRawInputs({ requestTimeoutSeconds: "0" })),

@@ -98,6 +98,14 @@ const resolveLazyProps = (
   return Object.fromEntries(resolvedEntries)
 }
 
+/** `[ErrorName]: message` for log fields and user-facing summaries; a thrown
+ *  non-Error value is stringified. */
+export const describeError = (error: unknown): string => {
+  return error instanceof Error
+    ? `[${error.name}]: ${error.message}`
+    : String(error)
+}
+
 export const createLogger = (
   name: string,
   options?: {

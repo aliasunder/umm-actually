@@ -1,36 +1,97 @@
 import { describe, expect, it } from "vitest"
 import {
+  buildPassScope,
   CI_WORKFLOW_CHECKS,
   DIMENSION_CODE_QUALITY,
   DIMENSION_CORRECTNESS_SECURITY,
   DIMENSION_SUBTLE_BUGS,
   DIMENSION_TEST_QUALITY,
   REPORTING_RULES,
-  resolvePhases,
+  resolveStages,
 } from "../phases.js"
 
-describe("resolvePhases", () => {
-  it("resolves combined to a single phase carrying all four dimensions plus CI checks and reporting rules", () => {
-    const phases = resolvePhases("combined")
+// Test-owned copies of the phase shapes: drift in a phase's id, section
+// order, or scope line fails here rather than passing through the resolver.
+const expectedCombinedPhase = {
+  id: "combined",
+  instructionSections: [
+    DIMENSION_CORRECTNESS_SECURITY,
+    DIMENSION_CODE_QUALITY,
+    DIMENSION_TEST_QUALITY,
+    DIMENSION_SUBTLE_BUGS,
+    CI_WORKFLOW_CHECKS,
+    REPORTING_RULES,
+  ],
+}
 
-    expect(phases).toEqual([
-      {
-        id: "combined",
-        instructionSections: [
-          DIMENSION_CORRECTNESS_SECURITY,
-          DIMENSION_CODE_QUALITY,
-          DIMENSION_TEST_QUALITY,
-          DIMENSION_SUBTLE_BUGS,
-          CI_WORKFLOW_CHECKS,
-          REPORTING_RULES,
-        ],
-      },
+const expectedCorrectnessSecurityPhase = {
+  id: "correctness-security",
+  instructionSections: [
+    buildPassScope(["correctness & security", "CI workflow checks"]),
+    DIMENSION_CORRECTNESS_SECURITY,
+    CI_WORKFLOW_CHECKS,
+    REPORTING_RULES,
+  ],
+}
+
+const expectedConventionsTestsPhase = {
+  id: "conventions-tests",
+  instructionSections: [
+    buildPassScope(["code quality & conventions", "test quality & coverage"]),
+    DIMENSION_CODE_QUALITY,
+    DIMENSION_TEST_QUALITY,
+    REPORTING_RULES,
+  ],
+}
+
+const expectedSubtleBugsPhase = {
+  id: "subtle-bugs",
+  instructionSections: [
+    buildPassScope(["subtle bug patterns"]),
+    DIMENSION_SUBTLE_BUGS,
+    REPORTING_RULES,
+  ],
+}
+
+describe("resolveStages", () => {
+  it("resolves combined to one stage of one phase carrying all four dimensions plus CI checks and reporting rules", () => {
+    expect(resolveStages("combined")).toEqual([[expectedCombinedPhase]])
+  })
+
+  it("resolves parallel to one stage of the three split phases", () => {
+    expect(resolveStages("parallel")).toEqual([
+      [
+        expectedCorrectnessSecurityPhase,
+        expectedConventionsTestsPhase,
+        expectedSubtleBugsPhase,
+      ],
     ])
   })
 
-  it("rejects an unknown phases value with remediation", () => {
-    expect(() => resolvePhases("correctness,tests")).toThrow(
-      'unknown phases value "correctness,tests" — V1 supports only "combined"',
+  it("resolves sequential to three single-phase stages in dimension order", () => {
+    expect(resolveStages("sequential")).toEqual([
+      [expectedCorrectnessSecurityPhase],
+      [expectedConventionsTestsPhase],
+      [expectedSubtleBugsPhase],
+    ])
+  })
+
+  it("rejects an unknown phases value naming the valid modes", () => {
+    expect(() => resolveStages("correctness,tests")).toThrow(
+      'unknown phases value "correctness,tests" — valid: combined | parallel | sequential',
+    )
+  })
+})
+
+describe("buildPassScope", () => {
+  it("names the covered dimensions and keeps the cross-pass bug boundary", () => {
+    expect(buildPassScope(["subtle bug patterns"])).toBe(
+      [
+        "PASS SCOPE: this pass covers subtle bug patterns. Other passes",
+        "cover the remaining dimensions; spend your analysis on these. Boundary: a",
+        "concrete bug you notice while tracing is still reported with its real",
+        "category, never dropped because it belongs to another pass.",
+      ].join("\n"),
     )
   })
 })
@@ -149,6 +210,15 @@ describe("DIMENSION_TEST_QUALITY", () => {
     expect(normalized).toContain("wrong-error")
     expect(normalized).toContain("early-return")
     expect(normalized).toContain("wrong-item")
+  })
+
+  it("requires every changed it() to be enumerated in the analysis field", () => {
+    // Lives in the test dimension, not the shared proof-of-work section, so
+    // phases without the test dimension do not enumerate tests they are not
+    // reviewing
+    expect(DIMENSION_TEST_QUALITY.replace(/\s+/g, " ")).toContain(
+      'Proof of work: for each new or changed it() block in a test file, add one line to the "analysis" field naming the test, what the exact expected value would be, and whether the test asserts that exact value — a test you did not enumerate is a test you did not check.',
+    )
   })
 
   it("guards against false positives on optional chaining and loop-bounds continue", () => {

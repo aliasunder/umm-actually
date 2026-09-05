@@ -37,7 +37,7 @@ inputs:
     required: false
     default: AGENTS.md
   phases:
-    description: "Review phases to run. V1 supports: combined"
+    description: "How the review dimensions are dispatched: combined (one model call carrying every dimension) | parallel (three focused calls at once — each reads deeper than the single call; wall clock is the slowest of the three and prompt tokens roughly triple) | sequential (the same three calls in order, each seeing the earlier findings). Empty = combined, so workflows can wire an unset repo variable directly"
     required: false
     default: combined
   context_budget_tokens:
@@ -93,7 +93,7 @@ outputs:
   review_url:
     description: URL of the submitted review; empty when no review was posted
   model_used:
-    description: Model that produced the accepted response
+    description: Model(s) that produced the accepted responses, comma-separated when phases were routed to different models
   skipped_reason:
     description: Non-empty when the review was skipped (e.g. diff too large)
 

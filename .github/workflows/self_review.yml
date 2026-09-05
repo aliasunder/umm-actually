@@ -54,3 +54,4 @@ jobs:
           openrouter_api_key: ${{ secrets.OPENROUTER_KEY }}
           model: ${{ vars.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4-6' }}
           request_timeout_seconds: ${{ vars.UMM_REQUEST_TIMEOUT_SECONDS }}
+          phases: ${{ vars.UMM_PHASES }}
