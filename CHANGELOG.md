@@ -1,5 +1,36 @@
 # Changelog
 
+
+## [0.4.0] — 2026-09-05
+
+### Features
+
+- Run review phases in parallel or in sequence behind the phases input (#79)
+- **review:** Content-based cross-run dedup for shifted/reworded findings (#85)
+
+### Bug Fixes
+
+- **review:** Content dedup follow-ups — coalesceAnchors, titleSimilarity, logging (#86)
+- **review:** Filter self-negating findings the model labels not actionable (#84)
+
+### Documentation
+
+- **readme:** Drop the early-development status section (#83)
+- Update CHANGELOG.md for v0.3.14
+- Update CHANGELOG.md for v0.3.14 (#77)
+
+### CI / Infrastructure
+
+- **release:** Make the release workflow resumable and dispatchable (#78)
+- **release:** Fetch full history so release notes can range between tags (#76)
+
+### Maintenance
+
+- Bump default context_budget_tokens from 80K to 300K (#87)
+- **deps:** Bump node from `3638d9a` to `ba849c6` (#81)
+- **deps:** Bump the production group with 2 updates (#80)
+- **deps-dev:** Bump the development group with 4 updates (#82)
+
 ## [0.3.14] — 2026-09-02
 
 ### Bug Fixes
