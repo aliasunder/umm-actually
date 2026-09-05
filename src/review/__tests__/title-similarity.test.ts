@@ -90,4 +90,24 @@ describe("titleSimilarity", () => {
       }),
     ).toBe(0.5)
   })
+
+  it("deduplicates left tokens so duplicates do not inflate the ratio", () => {
+    // Without dedup: filter counts "check" twice + "email" → 3, union Set → 2, ratio 1.5
+    // With dedup: both sides are {check, email} → ratio 1.0
+    expect(
+      titleSimilarity({
+        leftTokens: ["check", "check", "email"],
+        rightTokens: ["check", "email"],
+      }),
+    ).toBe(1)
+  })
+
+  it("deduplicates right tokens so duplicates do not inflate the ratio", () => {
+    expect(
+      titleSimilarity({
+        leftTokens: ["alpha"],
+        rightTokens: ["alpha", "alpha", "beta"],
+      }),
+    ).toBe(0.5)
+  })
 })
