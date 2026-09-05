@@ -43,7 +43,7 @@ inputs:
   context_budget_tokens:
     description: Approximate token budget for prompt context (file contents + diff — conventions have a separate cap)
     required: false
-    default: "80000"
+    default: "300000"
   trace_related_files:
     description: Include related files in the prompt — import-tracing for caller regressions, and doc-mention scanning for staleness detection
     required: false
