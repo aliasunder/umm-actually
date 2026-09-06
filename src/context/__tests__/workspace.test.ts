@@ -148,6 +148,98 @@ describe("readConventions", () => {
   })
 })
 
+describe("readGitAttributes", () => {
+  it("returns the root .gitattributes content", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      ".gitattributes": "*.snap linguist-generated=true\n",
+    })
+    const contextReader = createContextReader(
+      defaultConfig(root),
+      createTestLogger(),
+    )
+
+    try {
+      const content = await contextReader.readGitAttributes()
+
+      expect(content).toBe("*.snap linguist-generated=true\n")
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("returns null when the repo has no .gitattributes", async () => {
+    const { contextReader, logger } = makeReader()
+
+    const content = await contextReader.readGitAttributes()
+
+    expect(content).toBeNull()
+    expect(logger.messages).toEqual([])
+  })
+
+  it("warns and returns null when .gitattributes exceeds the scan size cap", async () => {
+    const oversizedContent = "*.snap linguist-generated=true\n".repeat(4)
+    const { root, cleanup } = await makeTempWorkspace({
+      ".gitattributes": oversizedContent,
+    })
+    const logger = createTestLogger()
+    const contextReader = createContextReader(
+      { ...defaultConfig(root), maxScanBytes: 16 },
+      logger,
+    )
+
+    try {
+      const content = await contextReader.readGitAttributes()
+
+      expect(content).toBeNull()
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message:
+          ".gitattributes exceeds the scan size cap — linguist-generated rules unavailable",
+        data: { bytes: oversizedContent.length, maxScanBytes: 16 },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("warns and returns null when .gitattributes symlinks outside the workspace", async () => {
+    // The outside target must exist: a dangling link would reject with ENOENT
+    // (the silent missing-file path) and pass this test without the guard
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), "umm-outside-"))
+    await writeFile(
+      path.join(outsideRoot, "attrs"),
+      "* linguist-generated=true\n",
+      "utf8",
+    )
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": "# fixture\n",
+    })
+    await symlink(
+      path.join(outsideRoot, "attrs"),
+      path.join(root, ".gitattributes"),
+    )
+    const logger = createTestLogger()
+    const contextReader = createContextReader(defaultConfig(root), logger)
+
+    try {
+      const content = await contextReader.readGitAttributes()
+
+      expect(content).toBeNull()
+      expect(logger.messages).toEqual([
+        {
+          level: "warn",
+          message:
+            ".gitattributes resolves outside the reviewable workspace — linguist-generated rules unavailable",
+          data: {},
+        },
+      ])
+    } finally {
+      await cleanup()
+      await rm(outsideRoot, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("readChangedFiles", () => {
   it("includes files in full and subtracts their tokens from the budget", async () => {
     const { contextReader } = makeReader()
@@ -460,6 +552,7 @@ describe("findRelatedFiles", () => {
     const relatedFiles = await contextReader.findRelatedFiles({
       changedPaths: ["src/greeter.ts", "src/registry.ts"],
       budgetTokens: 100_000,
+      excludePaths: [],
     })
 
     expect(relatedFiles.files).toEqual([
@@ -490,6 +583,7 @@ describe("findRelatedFiles", () => {
     const relatedFiles = await contextReader.findRelatedFiles({
       changedPaths: ["src/lib/index.ts"],
       budgetTokens: 100_000,
+      excludePaths: [],
     })
 
     expect(relatedFiles.files).toEqual([
@@ -508,6 +602,7 @@ describe("findRelatedFiles", () => {
     const relatedFiles = await contextReader.findRelatedFiles({
       changedPaths: ["src/greeter.ts", "src/caller.ts"],
       budgetTokens: 100_000,
+      excludePaths: [],
     })
 
     expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual([
@@ -522,6 +617,7 @@ describe("findRelatedFiles", () => {
     const relatedFiles = await contextReader.findRelatedFiles({
       changedPaths: ["src/hub.ts"],
       budgetTokens: 100_000,
+      excludePaths: [],
     })
 
     expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual([
@@ -542,6 +638,7 @@ describe("findRelatedFiles", () => {
     const relatedFiles = await contextReader.findRelatedFiles({
       changedPaths: ["src/greeter.ts", "src/registry.ts"],
       budgetTokens: estimateTokens(consumerContent),
+      excludePaths: [],
     })
 
     expect(relatedFiles.files).toEqual([
@@ -568,6 +665,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 1_000_000,
+        excludePaths: [],
       })
 
       expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
@@ -596,6 +694,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
@@ -621,6 +720,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       // readable.ts still arriving proves the scan carried on past the failure
@@ -656,6 +756,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
@@ -681,6 +782,7 @@ describe("findRelatedFiles", () => {
       await contextReader.findRelatedFiles({
         changedPaths: ["filler-00000.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(logger.messages).toContainEqual({
@@ -711,6 +813,34 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
+      })
+
+      expect(relatedFiles.files.map((file) => file.path)).toEqual([
+        "src/legit.ts",
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("excludes importers whose exact paths are listed in the excludePaths param", async () => {
+    const importTarget = `import { target } from "../target.js"\nexport const found = target\n`
+    const { root, cleanup } = await makeTempWorkspace({
+      "target.ts": `export const target = "target"\n`,
+      "src/legit.ts": importTarget,
+      "generated/api-client.ts": importTarget,
+    })
+    const contextReader = createContextReader(
+      defaultConfig(root),
+      createTestLogger(),
+    )
+
+    try {
+      const relatedFiles = await contextReader.findRelatedFiles({
+        changedPaths: ["target.ts"],
+        budgetTokens: 100_000,
+        excludePaths: ["generated/api-client.ts"],
       })
 
       expect(relatedFiles.files.map((file) => file.path)).toEqual([
@@ -737,6 +867,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(relatedFiles.files.map((file) => file.path)).toEqual([
@@ -765,6 +896,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(relatedFiles.files.map((file) => file.path)).toEqual([

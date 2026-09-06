@@ -1,6 +1,6 @@
 import { readFile, readdir, realpath, stat } from "node:fs/promises"
 import path, { posix } from "node:path"
-import type { Logger } from "../logger.js"
+import { describeError, type Logger } from "../logger.js"
 import {
   CHARS_PER_TOKEN,
   estimateTokens,
@@ -29,6 +29,9 @@ export type ContextReader = {
   readConventions: (params: {
     conventionsFile: string
   }) => Promise<string | null>
+  /** Raw root .gitattributes content, or null when the repo has none;
+   *  parsing stays in the pure diff layer. */
+  readGitAttributes: () => Promise<string | null>
   readChangedFiles: (params: {
     changedPaths: string[]
     budgetTokens: number
@@ -37,6 +40,7 @@ export type ContextReader = {
   findRelatedFiles: (params: {
     changedPaths: string[]
     budgetTokens: number
+    excludePaths: string[]
   }) => Promise<RelatedFilesResult>
   readPriorityDocs: (params: {
     priorityDocs: string[]
@@ -201,6 +205,42 @@ export const createContextReader = (
     }
   }
 
+  /** The file is repo-committed and PR-author-controlled, so every failure
+   *  degrades to "no rules" instead of failing the run; only a missing file
+   *  is silent — the other cases warn so the degradation is auditable. */
+  const readGitAttributes = async (): Promise<string | null> => {
+    const absolutePath = resolveUnderRoot(".gitattributes")
+    try {
+      const safePath = await realPathIfSafe(absolutePath)
+      if (!safePath) {
+        logger.warn(
+          ".gitattributes resolves outside the reviewable workspace — linguist-generated rules unavailable",
+        )
+        return null
+      }
+      // Stat before reading: the file is PR-author-controlled and read on
+      // every run, so an oversized commit must degrade like the other
+      // failures instead of being pulled into memory whole. A failed stat
+      // falls through to the read path, which already logs per error kind.
+      const fileStats = await stat(safePath).catch(() => null)
+      if (fileStats && fileStats.size > config.maxScanBytes) {
+        logger.warn(
+          ".gitattributes exceeds the scan size cap — linguist-generated rules unavailable",
+          { bytes: fileStats.size, maxScanBytes: config.maxScanBytes },
+        )
+        return null
+      }
+      return await readFile(safePath, "utf8")
+    } catch (readError) {
+      if (isMissingFileError(readError)) return null
+      logger.warn(
+        "failed reading .gitattributes — linguist-generated rules unavailable",
+        { error: describeError(readError) },
+      )
+      return null
+    }
+  }
+
   /** null on any unreadable changed file. A symlink that resolves outside
    *  the safe zone is degraded to diff-only rather than fatal — one hostile
    *  or broken file must not kill the whole review — but gets its own
@@ -283,7 +323,7 @@ export const createContextReader = (
       // skip it without pulling it into memory. A failed stat falls through to
       // the read path, which already logs and degrades per error kind.
       const fileStats = await stat(safePath).catch(() => null)
-      if (fileStats !== null && fileStats.size > maxBytes) {
+      if (fileStats && fileStats.size > maxBytes) {
         logger.warn(
           "priority doc exceeds remaining context budget — skipping",
           {
@@ -348,10 +388,7 @@ export const createContextReader = (
       // A failed stat (e.g. deleted file) falls through to the read path,
       // which already logs and degrades per error kind.
       const fileStats = await stat(absolutePath).catch(() => null)
-      if (
-        fileStats !== null &&
-        fileStats.size > remainingTokens * CHARS_PER_TOKEN
-      ) {
+      if (fileStats && fileStats.size > remainingTokens * CHARS_PER_TOKEN) {
         files.push({ path: changedPath, content: "", includedAs: "diff-only" })
         continue
       }
@@ -441,19 +478,28 @@ export const createContextReader = (
   const scanWorkspaceSourceFiles = (): Promise<string[]> =>
     scanWorkspaceFiles(SCANNABLE_EXTENSIONS)
 
+  /** excludePaths carries the diff-excluded changed files: their content
+   *  must not re-enter the prompt through the import trace after the diff
+   *  partition removed them from the review subject. */
   const findRelatedFiles = async ({
     changedPaths,
     budgetTokens,
+    excludePaths,
   }: {
     changedPaths: string[]
     budgetTokens: number
+    excludePaths: string[]
   }): Promise<RelatedFilesResult> => {
     const changedPathSet = new Set(changedPaths)
+    const excludePathSet = new Set(
+      excludePaths.map((excludePath) => posix.normalize(excludePath)),
+    )
     const scannedPaths = await scanWorkspaceSourceFiles()
 
     const importers: ImporterCandidate[] = []
     for (const scannedPath of scannedPaths) {
       if (changedPathSet.has(scannedPath)) continue
+      if (excludePathSet.has(posix.normalize(scannedPath))) continue
       const content = await readScannedFileOrNull(scannedPath)
       if (!content) continue
       // A NUL byte marks binary content — the same exclusion readChangedFiles
@@ -672,6 +718,7 @@ export const createContextReader = (
 
   return {
     readConventions,
+    readGitAttributes,
     readChangedFiles,
     findRelatedFiles,
     readPriorityDocs,

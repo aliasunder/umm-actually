@@ -10,6 +10,7 @@ const makeInput = (
   priorityDocsRead: [],
   relatedFilesExcludedPaths: [],
   docsExcludedPaths: [],
+  diffExcludedFiles: [],
   ...overrides,
 })
 
@@ -164,13 +165,52 @@ describe("buildContextNotes", () => {
     ])
   })
 
-  it("orders in-context before not-included before related files before related docs", () => {
+  it("reports diff-excluded files with each file's exclusion source", () => {
+    const notes = buildContextNotes(
+      makeInput({
+        diffExcludedFiles: [
+          {
+            path: "package-lock.json",
+            additions: 1200,
+            deletions: 800,
+            source: "default_pattern",
+          },
+          {
+            path: "evals/run.json",
+            additions: 10,
+            deletions: 0,
+            source: "operator_pattern",
+          },
+          {
+            path: "gen/x.json",
+            additions: 5,
+            deletions: 5,
+            source: "linguist_generated",
+          },
+        ],
+      }),
+    )
+
+    expect(notes).toEqual([
+      "3 changed file(s) excluded from review: `package-lock.json` (built-in default list), `evals/run.json` (diff_exclude_paths input), `gen/x.json` (linguist-generated attribute)",
+    ])
+  })
+
+  it("orders in-context before not-included before related files before related docs before diff exclusions", () => {
     const notes = buildContextNotes(
       makeInput({
         priorityDocs: ["README.md", "MISSING.md"],
         priorityDocsInContext: ["README.md"],
         relatedFilesExcludedPaths: ["src/extra-a.ts"],
         docsExcludedPaths: ["docs/overflow.md"],
+        diffExcludedFiles: [
+          {
+            path: "package-lock.json",
+            additions: 1,
+            deletions: 1,
+            source: "default_pattern",
+          },
+        ],
       }),
     )
 
@@ -179,6 +219,7 @@ describe("buildContextNotes", () => {
       notIncludedNote("`MISSING.md`"),
       "1 related file(s) excluded by `max_related_files` cap: `src/extra-a.ts`",
       "1 related doc(s) excluded by `max_related_docs` cap: `docs/overflow.md`",
+      "1 changed file(s) excluded from review: `package-lock.json` (built-in default list)",
     ])
   })
 })

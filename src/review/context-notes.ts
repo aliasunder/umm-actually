@@ -1,4 +1,8 @@
 import { posix } from "node:path"
+import {
+  describeExclusionSource,
+  type ExcludedDiffFile,
+} from "../diff/exclude-diff-files.js"
 import type { PromptFile } from "./prompt.js"
 
 export type ContextNotesInput = {
@@ -11,6 +15,7 @@ export type ContextNotesInput = {
   priorityDocsRead: PromptFile[]
   relatedFilesExcludedPaths: string[]
   docsExcludedPaths: string[]
+  diffExcludedFiles: ExcludedDiffFile[]
 }
 
 /** Paths arrive from three sources that spell them differently — action
@@ -21,6 +26,10 @@ const normalizePath = (filePath: string): string => posix.normalize(filePath)
 
 const renderPaths = (paths: string[]): string =>
   paths.map((filePath) => `\`${filePath}\``).join(", ")
+
+const renderExcludedFile = (file: ExcludedDiffFile): string => {
+  return `\`${file.path}\` (${describeExclusionSource(file.source)})`
+}
 
 /** Priority docs satisfied by a higher-priority channel (changed files,
  *  related files, conventions) — their full text already reached the prompt
@@ -86,6 +95,7 @@ export const buildContextNotes = ({
   priorityDocsRead,
   relatedFilesExcludedPaths,
   docsExcludedPaths,
+  diffExcludedFiles,
 }: ContextNotesInput): string[] => {
   const inContextDocs = findInContextPriorityDocs({
     priorityDocs,
@@ -113,11 +123,16 @@ export const buildContextNotes = ({
     docsExcludedPaths.length === 0
       ? null
       : `${docsExcludedPaths.length} related doc(s) excluded by \`max_related_docs\` cap: ${renderPaths(docsExcludedPaths)}`
+  const diffExcludedNote =
+    diffExcludedFiles.length === 0
+      ? null
+      : `${diffExcludedFiles.length} changed file(s) excluded from review: ${diffExcludedFiles.map(renderExcludedFile).join(", ")}`
 
   return [
     inContextNote,
     priorityDocsNote,
     relatedFilesNote,
     relatedDocsNote,
+    diffExcludedNote,
   ].filter((note) => note !== null)
 }

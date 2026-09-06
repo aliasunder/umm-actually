@@ -1,3 +1,4 @@
+import { hasExcessiveWildcards } from "./diff/pattern-safety.js"
 import { normalizeWorkspacePath } from "./review/workspace-path.js"
 import { z } from "zod"
 
@@ -45,6 +46,81 @@ const timerSafeSeconds = z.string().transform((value, ctx) => {
   return parsed
 })
 
+/**
+ * Built-in diff exclusions — the file classes GitHub's linguist auto-collapses
+ * via rules no .gitattributes entry expresses (ecosystem lockfiles, minified
+ * sources, source maps). Snapshots are deliberately absent: linguist has no
+ * snapshot rule and GitHub renders them expanded, so repos opt them out via
+ * .gitattributes linguist-generated entries or the diff_exclude_paths input.
+ */
+export const DEFAULT_DIFF_EXCLUDE_PATTERNS = [
+  "**/package-lock.json",
+  "**/npm-shrinkwrap.json",
+  "**/yarn.lock",
+  "**/pnpm-lock.yaml",
+  "**/bun.lock",
+  "**/bun.lockb",
+  "**/deno.lock",
+  "**/composer.lock",
+  "**/Cargo.lock",
+  "**/Gemfile.lock",
+  "**/poetry.lock",
+  "**/uv.lock",
+  "**/go.sum",
+  "**/*.min.js",
+  "**/*.min.css",
+  "**/*.map",
+]
+
+export type DiffExcludeConfig = {
+  /** The built-in list, or empty when a leading "none" disabled it. Kept
+   *  separate from operatorPatterns: a repo's negated gitattributes entry
+   *  exempts a file from this tier but never from operator patterns. */
+  defaultPatterns: string[]
+  operatorPatterns: string[]
+}
+
+/** "" = the built-in default list (bare repo-variable wiring); a leading
+ *  "none" disables the defaults — with a non-empty default, the empty string
+ *  cannot mean both "default" and "off", so this input carries the action's
+ *  only off sentinel. Supplied patterns extend whichever base survives. */
+const diffExcludePathsInput = z.string().transform((value, ctx) => {
+  const entries = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+
+  const defaultsDisabled = entries[0] === "none"
+  const patternEntries = defaultsDisabled ? entries.slice(1) : entries
+
+  if (patternEntries.includes("none")) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        '"none" disables the default list only in leading position — move it first or remove it',
+    })
+    return z.NEVER
+  }
+
+  const operatorPatterns = patternEntries
+    .map(normalizeWorkspacePath)
+    .filter((pattern) => pattern !== "" && pattern !== ".")
+
+  const unsafePatterns = operatorPatterns.filter(hasExcessiveWildcards)
+  if (unsafePatterns.length > 0) {
+    ctx.addIssue({
+      code: "custom",
+      message: `pattern(s) exceed the wildcard cap (at most 2 "*" per path segment; "**" segments exempt): ${unsafePatterns.join(", ")}`,
+    })
+    return z.NEVER
+  }
+
+  return {
+    defaultPatterns: defaultsDisabled ? [] : DEFAULT_DIFF_EXCLUDE_PATTERNS,
+    operatorPatterns,
+  }
+})
+
 /** Mirrors the action.yml default — keep the two in sync. */
 const defaultPhases = "combined"
 
@@ -83,6 +159,8 @@ const configSchema = z.object({
       .map(normalizeWorkspacePath)
       .filter((segment) => segment !== "" && segment !== "."),
   ),
+  diffExcludePaths: diffExcludePathsInput,
+  respectLinguistGenerated: z.boolean(),
   costSummary: z.boolean(),
   prNumberOverride: optionalPositiveInteger,
 })
@@ -100,10 +178,11 @@ export type ActionConfig = z.infer<typeof configSchema>
  */
 export type RawInputs = Omit<
   Record<keyof ActionConfig, string>,
-  "traceRelatedFiles" | "costSummary"
+  "traceRelatedFiles" | "costSummary" | "respectLinguistGenerated"
 > & {
   traceRelatedFiles: boolean
   costSummary: boolean
+  respectLinguistGenerated: boolean
 }
 
 export const parseConfig = (rawInputs: RawInputs): ActionConfig => {
