@@ -258,9 +258,9 @@ describe("renderExcludedFilesNote", () => {
     expect(renderExcludedFilesNote(excluded)).toBe(
       [
         "3 changed file(s) excluded from review (content not shown):",
-        "- package-lock.json (+1200/-800, default exclusion)",
-        "- evals/run.json (+10/-0, diff_exclude_paths)",
-        "- gen/x.json (+5/-5, linguist-generated)",
+        "- package-lock.json (+1200/-800, built-in default list)",
+        "- evals/run.json (+10/-0, diff_exclude_paths input)",
+        "- gen/x.json (+5/-5, linguist-generated attribute)",
       ].join("\n"),
     )
   })
@@ -296,7 +296,7 @@ describe("summarizeExclusionSources", () => {
     ]
 
     expect(summarizeExclusionSources(excluded)).toBe(
-      "1 by diff_exclude_paths, 1 by linguist-generated, 2 by default exclusion",
+      "1 by diff_exclude_paths input, 1 by linguist-generated attribute, 2 by built-in default list",
     )
   })
 
@@ -310,6 +310,8 @@ describe("summarizeExclusionSources", () => {
       },
     ]
 
-    expect(summarizeExclusionSources(excluded)).toBe("1 by default exclusion")
+    expect(summarizeExclusionSources(excluded)).toBe(
+      "1 by built-in default list",
+    )
   })
 })

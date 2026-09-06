@@ -192,7 +192,7 @@ describe("buildContextNotes", () => {
     )
 
     expect(notes).toEqual([
-      "3 changed file(s) excluded from review: `package-lock.json` (default exclusion), `evals/run.json` (diff_exclude_paths), `gen/x.json` (linguist-generated)",
+      "3 changed file(s) excluded from review: `package-lock.json` (built-in default list), `evals/run.json` (diff_exclude_paths input), `gen/x.json` (linguist-generated attribute)",
     ])
   })
 
@@ -219,7 +219,7 @@ describe("buildContextNotes", () => {
       notIncludedNote("`MISSING.md`"),
       "1 related file(s) excluded by `max_related_files` cap: `src/extra-a.ts`",
       "1 related doc(s) excluded by `max_related_docs` cap: `docs/overflow.md`",
-      "1 changed file(s) excluded from review: `package-lock.json` (default exclusion)",
+      "1 changed file(s) excluded from review: `package-lock.json` (built-in default list)",
     ])
   })
 })

@@ -28,9 +28,11 @@ export type PartitionedDiffFiles = {
 export const describeExclusionSource = (
   source: DiffExclusionSource,
 ): string => {
-  if (source === "default_pattern") return "default exclusion"
-  if (source === "operator_pattern") return "diff_exclude_paths"
-  return "linguist-generated"
+  // One convention across labels: a lowercase noun phrase naming the layer,
+  // with the external identifier (input name, gitattributes attribute) verbatim
+  if (source === "default_pattern") return "built-in default list"
+  if (source === "operator_pattern") return "diff_exclude_paths input"
+  return "linguist-generated attribute"
 }
 
 /** A pattern hits as a root-anchored folder prefix (the exclude_paths rule)

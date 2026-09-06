@@ -638,7 +638,7 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       const skipReason =
-        "all 6 changed file(s) excluded from review (6 by diff_exclude_paths)"
+        "all 6 changed file(s) excluded from review (6 by diff_exclude_paths input)"
       expect(result).toEqual({
         findingsCount: 0,
         reviewUrl: "https://github.com/test/review/1",
@@ -657,12 +657,12 @@ describe("orchestrate", () => {
         body: buildSkipBody({
           reason: skipReason,
           detail: [
-            "- src/greeter.ts (+4/-1, diff_exclude_paths)",
-            "- src/added-file.ts (+3/-0, diff_exclude_paths)",
-            "- src/removed-file.ts (+0/-3, diff_exclude_paths)",
-            "- src/new-name.ts (+1/-1, diff_exclude_paths)",
-            "- assets/logo.png (+0/-0, diff_exclude_paths)",
-            "- src/no-trailing-newline.ts (+1/-1, diff_exclude_paths)",
+            "- src/greeter.ts (+4/-1, diff_exclude_paths input)",
+            "- src/added-file.ts (+3/-0, diff_exclude_paths input)",
+            "- src/removed-file.ts (+0/-3, diff_exclude_paths input)",
+            "- src/new-name.ts (+1/-1, diff_exclude_paths input)",
+            "- assets/logo.png (+0/-0, diff_exclude_paths input)",
+            "- src/no-trailing-newline.ts (+1/-1, diff_exclude_paths input)",
           ].join("\n"),
         }),
       })
@@ -682,7 +682,7 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.skippedReason).toBe(
-        "all 6 changed file(s) excluded from review (6 by default exclusion)",
+        "all 6 changed file(s) excluded from review (6 by built-in default list)",
       )
     })
 
@@ -704,7 +704,7 @@ describe("orchestrate", () => {
       )
       const expectedExcludedNote = [
         "1 changed file(s) excluded from review (content not shown):",
-        "- assets/logo.png (+0/-0, diff_exclude_paths)",
+        "- assets/logo.png (+0/-0, diff_exclude_paths input)",
       ].join("\n")
       const reviewContext = first(stubs.generateFindingsCalls)
       expect(reviewContext.annotatedDiff).toBe(
@@ -738,7 +738,7 @@ describe("orchestrate", () => {
           postedCount: expectedSelection.selected.length,
           totalCount: expectedSelection.selected.length,
           contextNotes: [
-            "1 changed file(s) excluded from review: `assets/logo.png` (diff_exclude_paths)",
+            "1 changed file(s) excluded from review: `assets/logo.png` (diff_exclude_paths input)",
           ],
         }),
       ])
@@ -766,12 +766,12 @@ describe("orchestrate", () => {
     })
 
     it("passes the budget check when the oversized files are all excluded", async () => {
-      // Budget 200 (half = 100) fails against the full fixture diff (341
+      // Budget 220 (half = 110) fails against the full fixture diff (341
       // tokens); with every src/ file excluded only the binary asset header
-      // and the excluded-files trailer remain (94 tokens), which fit
+      // and the excluded-files trailer remain (101 tokens), which fit
       const stubs = makeOrchestrateDeps({
         config: {
-          contextBudgetTokens: 200,
+          contextBudgetTokens: 220,
           diffExcludePaths: {
             defaultPatterns: [],
             operatorPatterns: ["src/**"],
@@ -784,7 +784,7 @@ describe("orchestrate", () => {
 
       // Guard for bar 2: the unfiltered fixture diff must exceed the half
       // budget, or this test would pass without the exclusion doing anything
-      expect(sampleDiffTokens).toBeGreaterThan(100)
+      expect(sampleDiffTokens).toBeGreaterThan(110)
       expect(result.skippedReason).toBe("")
       expect(stubs.generateFindingsCalls).toHaveLength(1)
     })
@@ -838,7 +838,7 @@ describe("orchestrate", () => {
       )
       const expectedExcludedNote = [
         "1 changed file(s) excluded from review (content not shown):",
-        "- assets/logo.png (+0/-0, linguist-generated)",
+        "- assets/logo.png (+0/-0, linguist-generated attribute)",
       ].join("\n")
       expect(first(stubs.generateFindingsCalls).annotatedDiff).toBe(
         `${annotateDiff(keptFiles)}\n\n${expectedExcludedNote}`,
