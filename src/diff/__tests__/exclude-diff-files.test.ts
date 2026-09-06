@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   partitionExcludedFiles,
   renderExcludedFilesNote,
+  summarizeExclusionSources,
   type ExcludedDiffFile,
 } from "../exclude-diff-files.js"
 
@@ -237,5 +238,53 @@ describe("renderExcludedFilesNote", () => {
         "- gen/x.json (+5/-5, linguist-generated)",
       ].join("\n"),
     )
+  })
+})
+
+describe("summarizeExclusionSources", () => {
+  it("counts each source with operator patterns first and defaults last", () => {
+    const excluded: ExcludedDiffFile[] = [
+      {
+        path: "package-lock.json",
+        additions: 1,
+        deletions: 1,
+        source: "default_pattern",
+      },
+      {
+        path: "yarn.lock",
+        additions: 1,
+        deletions: 1,
+        source: "default_pattern",
+      },
+      {
+        path: "evals/run.json",
+        additions: 1,
+        deletions: 1,
+        source: "operator_pattern",
+      },
+      {
+        path: "gen/x.json",
+        additions: 1,
+        deletions: 1,
+        source: "linguist_generated",
+      },
+    ]
+
+    expect(summarizeExclusionSources(excluded)).toBe(
+      "1 by diff_exclude_paths, 1 by linguist-generated, 2 by default exclusion",
+    )
+  })
+
+  it("omits sources that excluded nothing", () => {
+    const excluded: ExcludedDiffFile[] = [
+      {
+        path: "package-lock.json",
+        additions: 1,
+        deletions: 1,
+        source: "default_pattern",
+      },
+    ]
+
+    expect(summarizeExclusionSources(excluded)).toBe("1 by default exclusion")
   })
 })

@@ -40,6 +40,7 @@ export type ContextReader = {
   findRelatedFiles: (params: {
     changedPaths: string[]
     budgetTokens: number
+    excludePaths: string[]
   }) => Promise<RelatedFilesResult>
   readPriorityDocs: (params: {
     priorityDocs: string[]
@@ -468,19 +469,28 @@ export const createContextReader = (
   const scanWorkspaceSourceFiles = (): Promise<string[]> =>
     scanWorkspaceFiles(SCANNABLE_EXTENSIONS)
 
+  /** excludePaths carries the diff-excluded changed files: their content
+   *  must not re-enter the prompt through the import trace after the diff
+   *  partition removed them from the review subject. */
   const findRelatedFiles = async ({
     changedPaths,
     budgetTokens,
+    excludePaths,
   }: {
     changedPaths: string[]
     budgetTokens: number
+    excludePaths: string[]
   }): Promise<RelatedFilesResult> => {
     const changedPathSet = new Set(changedPaths)
+    const excludePathSet = new Set(
+      excludePaths.map((excludePath) => posix.normalize(excludePath)),
+    )
     const scannedPaths = await scanWorkspaceSourceFiles()
 
     const importers: ImporterCandidate[] = []
     for (const scannedPath of scannedPaths) {
       if (changedPathSet.has(scannedPath)) continue
+      if (excludePathSet.has(posix.normalize(scannedPath))) continue
       const content = await readScannedFileOrNull(scannedPath)
       if (!content) continue
       // A NUL byte marks binary content — the same exclusion readChangedFiles

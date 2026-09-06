@@ -131,6 +131,36 @@ export const partitionExcludedFiles = ({
   return { kept, excluded }
 }
 
+/** One line per excluded file with change counts and the source that
+ *  excluded it — shared by the prompt trailer and the all-excluded skip
+ *  review so both surfaces name the same facts identically. */
+export const renderExcludedFileLines = (
+  excluded: ExcludedDiffFile[],
+): string[] => {
+  return excluded.map((file) => {
+    const changeCounts = `+${file.additions}/-${file.deletions}`
+    return `- ${file.path} (${changeCounts}, ${describeExclusionSource(file.source)})`
+  })
+}
+
+const SOURCE_SUMMARY_ORDER: DiffExclusionSource[] = [
+  "operator_pattern",
+  "linguist_generated",
+  "default_pattern",
+]
+
+/** Per-source counts for one-line surfaces (check-run title, skip reason) —
+ *  attributes the exclusion to the layer that actually caused it instead of
+ *  naming an input the operator may never have set. */
+export const summarizeExclusionSources = (
+  excluded: ExcludedDiffFile[],
+): string => {
+  return SOURCE_SUMMARY_ORDER.flatMap((source) => {
+    const count = excluded.filter((file) => file.source === source).length
+    return count > 0 ? [`${count} by ${describeExclusionSource(source)}`] : []
+  }).join(", ")
+}
+
 /**
  * The changed-but-not-reviewed trailer appended after the annotated diff, so
  * the model knows these files changed without seeing their content. Lines
@@ -142,12 +172,8 @@ export const renderExcludedFilesNote = (
 ): string => {
   if (excluded.length === 0) return ""
 
-  const fileLines = excluded.map((file) => {
-    const changeCounts = `+${file.additions}/-${file.deletions}`
-    return `- ${file.path} (${changeCounts}, ${describeExclusionSource(file.source)})`
-  })
   return [
     `${excluded.length} changed file(s) excluded from review (content not shown):`,
-    ...fileLines,
+    ...renderExcludedFileLines(excluded),
   ].join("\n")
 }

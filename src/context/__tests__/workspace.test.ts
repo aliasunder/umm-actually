@@ -526,6 +526,7 @@ describe("findRelatedFiles", () => {
     const relatedFiles = await contextReader.findRelatedFiles({
       changedPaths: ["src/greeter.ts", "src/registry.ts"],
       budgetTokens: 100_000,
+      excludePaths: [],
     })
 
     expect(relatedFiles.files).toEqual([
@@ -556,6 +557,7 @@ describe("findRelatedFiles", () => {
     const relatedFiles = await contextReader.findRelatedFiles({
       changedPaths: ["src/lib/index.ts"],
       budgetTokens: 100_000,
+      excludePaths: [],
     })
 
     expect(relatedFiles.files).toEqual([
@@ -574,6 +576,7 @@ describe("findRelatedFiles", () => {
     const relatedFiles = await contextReader.findRelatedFiles({
       changedPaths: ["src/greeter.ts", "src/caller.ts"],
       budgetTokens: 100_000,
+      excludePaths: [],
     })
 
     expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual([
@@ -588,6 +591,7 @@ describe("findRelatedFiles", () => {
     const relatedFiles = await contextReader.findRelatedFiles({
       changedPaths: ["src/hub.ts"],
       budgetTokens: 100_000,
+      excludePaths: [],
     })
 
     expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual([
@@ -608,6 +612,7 @@ describe("findRelatedFiles", () => {
     const relatedFiles = await contextReader.findRelatedFiles({
       changedPaths: ["src/greeter.ts", "src/registry.ts"],
       budgetTokens: estimateTokens(consumerContent),
+      excludePaths: [],
     })
 
     expect(relatedFiles.files).toEqual([
@@ -634,6 +639,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 1_000_000,
+        excludePaths: [],
       })
 
       expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
@@ -662,6 +668,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
@@ -687,6 +694,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       // readable.ts still arriving proves the scan carried on past the failure
@@ -722,6 +730,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
@@ -747,6 +756,7 @@ describe("findRelatedFiles", () => {
       await contextReader.findRelatedFiles({
         changedPaths: ["filler-00000.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(logger.messages).toContainEqual({
@@ -777,6 +787,34 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
+      })
+
+      expect(relatedFiles.files.map((file) => file.path)).toEqual([
+        "src/legit.ts",
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("excludes importers whose exact paths are listed in the excludePaths param", async () => {
+    const importTarget = `import { target } from "../target.js"\nexport const found = target\n`
+    const { root, cleanup } = await makeTempWorkspace({
+      "target.ts": `export const target = "target"\n`,
+      "src/legit.ts": importTarget,
+      "generated/api-client.ts": importTarget,
+    })
+    const contextReader = createContextReader(
+      defaultConfig(root),
+      createTestLogger(),
+    )
+
+    try {
+      const relatedFiles = await contextReader.findRelatedFiles({
+        changedPaths: ["target.ts"],
+        budgetTokens: 100_000,
+        excludePaths: ["generated/api-client.ts"],
       })
 
       expect(relatedFiles.files.map((file) => file.path)).toEqual([
@@ -803,6 +841,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(relatedFiles.files.map((file) => file.path)).toEqual([
@@ -831,6 +870,7 @@ describe("findRelatedFiles", () => {
       const relatedFiles = await contextReader.findRelatedFiles({
         changedPaths: ["target.ts"],
         budgetTokens: 100_000,
+        excludePaths: [],
       })
 
       expect(relatedFiles.files.map((file) => file.path)).toEqual([

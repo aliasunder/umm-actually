@@ -209,8 +209,16 @@ const expectedStatus = ({
   }),
 })
 
-const buildSkipBody = (reason: string): string =>
-  `**umm-actually** — review skipped\n\n${reason}\n\n---\n*umm-actually*`
+const buildSkipBody = ({
+  reason,
+  detail,
+}: {
+  reason: string
+  detail?: string
+}): string => {
+  const detailSection = detail ? `\n\n${detail}` : ""
+  return `**umm-actually** — review skipped\n\n${reason}${detailSection}\n\n---\n*umm-actually*`
+}
 
 const baseConfig: ActionConfig = {
   githubToken: "ghp_test",
@@ -263,6 +271,7 @@ type ReadChangedFilesParams = {
 type FindRelatedFilesParams = {
   changedPaths: string[]
   budgetTokens: number
+  excludePaths: string[]
 }
 
 type RequestReviewParams = {
@@ -554,7 +563,7 @@ describe("orchestrate", () => {
       expect(first(stubs.submitReviewCalls)).toEqual({
         prNumber: fixturePrContext.prNumber,
         commitId: fixturePrContext.headSha,
-        body: buildSkipBody(skipReason),
+        body: buildSkipBody({ reason: skipReason }),
       })
     })
 
@@ -583,7 +592,7 @@ describe("orchestrate", () => {
       expect(first(stubs.submitReviewCalls)).toEqual({
         prNumber: fixturePrContext.prNumber,
         commitId: fixturePrContext.headSha,
-        body: buildSkipBody(skipReason),
+        body: buildSkipBody({ reason: skipReason }),
       })
     })
 
@@ -611,7 +620,7 @@ describe("orchestrate", () => {
       expect(first(stubs.submitReviewCalls)).toEqual({
         prNumber: fixturePrContext.prNumber,
         commitId: fixturePrContext.headSha,
-        body: buildSkipBody(skipReason),
+        body: buildSkipBody({ reason: skipReason }),
       })
     })
 
@@ -628,7 +637,8 @@ describe("orchestrate", () => {
 
       const result = await orchestrate(stubs.deps, logger)
 
-      const skipReason = "all 6 changed files match diff_exclude_paths"
+      const skipReason =
+        "all 6 changed file(s) excluded from review (6 by diff_exclude_paths)"
       expect(result).toEqual({
         findingsCount: 0,
         reviewUrl: "https://github.com/test/review/1",
@@ -644,8 +654,36 @@ describe("orchestrate", () => {
       expect(first(stubs.submitReviewCalls)).toEqual({
         prNumber: fixturePrContext.prNumber,
         commitId: fixturePrContext.headSha,
-        body: buildSkipBody(skipReason),
+        body: buildSkipBody({
+          reason: skipReason,
+          detail: [
+            "- src/greeter.ts (+4/-1, diff_exclude_paths)",
+            "- src/added-file.ts (+3/-0, diff_exclude_paths)",
+            "- src/removed-file.ts (+0/-3, diff_exclude_paths)",
+            "- src/new-name.ts (+1/-1, diff_exclude_paths)",
+            "- assets/logo.png (+0/-0, diff_exclude_paths)",
+            "- src/no-trailing-newline.ts (+1/-1, diff_exclude_paths)",
+          ].join("\n"),
+        }),
       })
+    })
+
+    it("attributes the all-excluded skip to the default list when no operator pattern is set", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          diffExcludePaths: {
+            defaultPatterns: ["src/**", "assets/**"],
+            operatorPatterns: [],
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.skippedReason).toBe(
+        "all 6 changed file(s) excluded from review (6 by default exclusion)",
+      )
     })
 
     it("removes an excluded file from the annotated diff, context reads, and changed paths", async () => {
@@ -703,6 +741,27 @@ describe("orchestrate", () => {
             "1 changed file(s) excluded from review: `assets/logo.png` (diff_exclude_paths)",
           ],
         }),
+      ])
+    })
+
+    it("passes diff-excluded paths to the related-file and doc scans as exclusions", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          diffExcludePaths: {
+            defaultPatterns: [],
+            operatorPatterns: ["assets/**"],
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.findRelatedFilesCalls).excludePaths).toEqual([
+        "assets/logo.png",
+      ])
+      expect(first(stubs.findRelatedDocsCalls).excludePaths).toEqual([
+        "assets/logo.png",
       ])
     })
 

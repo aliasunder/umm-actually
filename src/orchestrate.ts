@@ -8,7 +8,9 @@ import {
 import { annotateDiff } from "./diff/annotate-diff.js"
 import {
   partitionExcludedFiles,
+  renderExcludedFileLines,
   renderExcludedFilesNote,
+  summarizeExclusionSources,
 } from "./diff/exclude-diff-files.js"
 import { parseLinguistGeneratedRules } from "./diff/gitattributes.js"
 import { describeError, type Logger } from "./logger.js"
@@ -130,8 +132,18 @@ const PRIOR_COMMENT_CAP = 30
 const stripAnchorComment = (body: string): string =>
   body.replace(/\n*<!-- umm-actually:.+? -->\s*$/, "")
 
-const buildSkipBody = (reason: string): string =>
-  `**umm-actually** — review skipped\n\n${reason}\n\n---\n*umm-actually*`
+/** detail carries multi-line context (e.g. the excluded-file list) that
+ *  belongs in the review body but not in the one-line check-run title. */
+const buildSkipBody = ({
+  reason,
+  detail,
+}: {
+  reason: string
+  detail?: string | undefined
+}): string => {
+  const detailSection = detail ? `\n\n${detail}` : ""
+  return `**umm-actually** — review skipped\n\n${reason}${detailSection}\n\n---\n*umm-actually*`
+}
 
 type InlineCommentState = {
   anchors: AnchorEntry[]
@@ -499,8 +511,14 @@ const runReviewPipeline = async (
 ): Promise<OrchestrateResult> => {
   const { config, githubClient, contextReader, generateFindings } = deps
 
-  const postSkipReview = async (reason: string): Promise<OrchestrateResult> => {
-    const body = buildSkipBody(reason)
+  const postSkipReview = async ({
+    reason,
+    detail,
+  }: {
+    reason: string
+    detail?: string | undefined
+  }): Promise<OrchestrateResult> => {
+    const body = buildSkipBody({ reason, detail })
     const { url } = await githubClient.submitReview({
       prNumber: prContext.prNumber,
       commitId: prContext.headSha,
@@ -515,13 +533,13 @@ const runReviewPipeline = async (
     prNumber: prContext.prNumber,
   })
   if (diffResult.kind === "too_large") {
-    return postSkipReview("diff exceeds GitHub's diff API limits")
+    return postSkipReview({ reason: "diff exceeds GitHub's diff API limits" })
   }
 
   // Step 5: parse diff
   const files = parseDiff(diffResult.diff)
   if (files.length === 0) {
-    return postSkipReview("empty diff")
+    return postSkipReview({ reason: "empty diff" })
   }
 
   // Step 5.5: diff-level exclusion — generated files leave the review
@@ -549,9 +567,12 @@ const runReviewPipeline = async (
     })
   }
   if (reviewableFiles.length === 0) {
-    return postSkipReview(
-      `all ${files.length} changed files match diff_exclude_paths`,
-    )
+    // Reason names the layers that actually excluded (an operator on default
+    // inputs never set diff_exclude_paths); the body names every file.
+    return postSkipReview({
+      reason: `all ${excludedDiffFiles.length} changed file(s) excluded from review (${summarizeExclusionSources(excludedDiffFiles)})`,
+      detail: renderExcludedFileLines(excludedDiffFiles).join("\n"),
+    })
   }
 
   // Step 6: annotate + token check. The excluded-files trailer sits inside
@@ -563,13 +584,18 @@ const runReviewPipeline = async (
   const diffTokens = estimateTokens(annotatedDiff)
   const budgetHalf = Math.floor(config.contextBudgetTokens / 2)
   if (diffTokens > budgetHalf) {
-    return postSkipReview(
-      `diff too large for context budget (${diffTokens} tokens, limit ${budgetHalf} of ${config.contextBudgetTokens})`,
-    )
+    return postSkipReview({
+      reason: `diff too large for context budget (${diffTokens} tokens, limit ${budgetHalf} of ${config.contextBudgetTokens})`,
+    })
   }
 
   // Step 7: commentable lines
   const commentableByPath = computeCommentableLines(reviewableFiles)
+
+  // Diff-excluded files must stay out of every context channel: the trailer
+  // told the model their content is not shown, so the related-file and doc
+  // scans may not pull that content back into the prompt.
+  const diffExcludedPaths = excludedDiffFiles.map((file) => file.path)
 
   // Step 8: extract changed paths (includes old path for renames so the
   // import scanner finds callers that still reference the pre-rename path)
@@ -639,6 +665,7 @@ const runReviewPipeline = async (
     ? await contextReader.findRelatedFiles({
         changedPaths,
         budgetTokens: relatedFilesBudgetTokens,
+        excludePaths: diffExcludedPaths,
       })
     : { files: [], excludedByCapPaths: [] }
 
@@ -700,7 +727,7 @@ const runReviewPipeline = async (
         changedPaths,
         budgetTokens: docRemainingTokens,
         conventionsFile: config.conventionsFile,
-        excludePaths: config.priorityDocs,
+        excludePaths: [...config.priorityDocs, ...diffExcludedPaths],
       })
     : { files: [], excludedByCapPaths: [] }
 
