@@ -34,7 +34,7 @@ const GENERATED_ATTRIBUTE_STATES = new Map<string, boolean>([
 const UNESCAPED_WHITESPACE = /(?<!\\)\s+/
 
 const splitAttributeLine = (line: string): string[] => {
-  return line.split(UNESCAPED_WHITESPACE).filter((token) => token !== "")
+  return line.split(UNESCAPED_WHITESPACE).filter(Boolean)
 }
 
 /**
@@ -51,7 +51,7 @@ export const parseLinguistGeneratedRules = (
 
   for (const rawLine of content.split("\n")) {
     const line = rawLine.trim()
-    if (line === "" || line.startsWith("#")) continue
+    if (!line || line.startsWith("#")) continue
 
     const [pattern, ...attributes] = splitAttributeLine(line)
     if (!pattern) continue

@@ -223,7 +223,7 @@ export const createContextReader = (
       // failures instead of being pulled into memory whole. A failed stat
       // falls through to the read path, which already logs per error kind.
       const fileStats = await stat(safePath).catch(() => null)
-      if (fileStats !== null && fileStats.size > config.maxScanBytes) {
+      if (fileStats && fileStats.size > config.maxScanBytes) {
         logger.warn(
           ".gitattributes exceeds the scan size cap — linguist-generated rules unavailable",
           { bytes: fileStats.size, maxScanBytes: config.maxScanBytes },
@@ -323,7 +323,7 @@ export const createContextReader = (
       // skip it without pulling it into memory. A failed stat falls through to
       // the read path, which already logs and degrades per error kind.
       const fileStats = await stat(safePath).catch(() => null)
-      if (fileStats !== null && fileStats.size > maxBytes) {
+      if (fileStats && fileStats.size > maxBytes) {
         logger.warn(
           "priority doc exceeds remaining context budget — skipping",
           {
@@ -388,10 +388,7 @@ export const createContextReader = (
       // A failed stat (e.g. deleted file) falls through to the read path,
       // which already logs and degrades per error kind.
       const fileStats = await stat(absolutePath).catch(() => null)
-      if (
-        fileStats !== null &&
-        fileStats.size > remainingTokens * CHARS_PER_TOKEN
-      ) {
+      if (fileStats && fileStats.size > remainingTokens * CHARS_PER_TOKEN) {
         files.push({ path: changedPath, content: "", includedAs: "diff-only" })
         continue
       }

@@ -106,7 +106,7 @@ export const partitionExcludedFiles = ({
 
   for (const file of files) {
     const filePath = exclusionPath(file)
-    if (filePath === null) {
+    if (!filePath) {
       kept.push(file)
       continue
     }
@@ -117,7 +117,7 @@ export const partitionExcludedFiles = ({
       operatorPatterns,
       compiledRules,
     })
-    if (source === null) {
+    if (!source) {
       kept.push(file)
       continue
     }

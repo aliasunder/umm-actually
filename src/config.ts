@@ -88,7 +88,7 @@ const diffExcludePathsInput = z.string().transform((value, ctx) => {
   const entries = value
     .split(",")
     .map((entry) => entry.trim())
-    .filter((entry) => entry !== "")
+    .filter(Boolean)
 
   const defaultsDisabled = entries[0] === "none"
   const patternEntries = defaultsDisabled ? entries.slice(1) : entries

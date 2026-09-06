@@ -602,14 +602,15 @@ const runReviewPipeline = async (
   const changedPaths = reviewableFiles
     .flatMap((file) => {
       const toPath = newFilePath(file)
+      const fromPath = file.from
       const isRename =
         toPath !== null &&
-        file.from !== undefined &&
-        file.from !== "/dev/null" &&
-        file.from !== file.to
-      return isRename ? [toPath, file.from] : [toPath]
+        fromPath !== undefined &&
+        fromPath !== "/dev/null" &&
+        fromPath !== file.to
+      return isRename ? [toPath, fromPath] : [toPath]
     })
-    .filter((path): path is string => path !== null)
+    .filter((path) => path !== null)
 
   // Step 9: context reads
   const conventions = await contextReader.readConventions({
