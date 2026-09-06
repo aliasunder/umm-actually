@@ -1,5 +1,6 @@
 import type { File } from "parse-diff"
 import { describe, expect, it } from "vitest"
+import { DEFAULT_DIFF_EXCLUDE_PATTERNS } from "../../config.js"
 import {
   partitionExcludedFiles,
   renderExcludedFilesNote,
@@ -61,6 +62,30 @@ describe("partitionExcludedFiles", () => {
         additions: 3,
         deletions: 1,
         source: "operator_pattern",
+      },
+    ])
+  })
+
+  it("excludes a root-level lockfile via the shipped **/ default patterns", () => {
+    // Pins matchesGlob's "**/ matches zero directories" semantics: the
+    // shipped defaults must catch the standard npm layout's root lockfile
+    const lockfile = makeFile({
+      from: "package-lock.json",
+      to: "package-lock.json",
+    })
+    const source = makeFile()
+
+    const result = partition([lockfile, source], {
+      defaultPatterns: DEFAULT_DIFF_EXCLUDE_PATTERNS,
+    })
+
+    expect(result.kept).toEqual([source])
+    expect(result.excluded).toEqual([
+      {
+        path: "package-lock.json",
+        additions: 3,
+        deletions: 1,
+        source: "default_pattern",
       },
     ])
   })
