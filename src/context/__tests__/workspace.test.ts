@@ -176,6 +176,32 @@ describe("readGitAttributes", () => {
     expect(logger.messages).toEqual([])
   })
 
+  it("warns and returns null when .gitattributes exceeds the scan size cap", async () => {
+    const oversizedContent = "*.snap linguist-generated=true\n".repeat(4)
+    const { root, cleanup } = await makeTempWorkspace({
+      ".gitattributes": oversizedContent,
+    })
+    const logger = createTestLogger()
+    const contextReader = createContextReader(
+      { ...defaultConfig(root), maxScanBytes: 16 },
+      logger,
+    )
+
+    try {
+      const content = await contextReader.readGitAttributes()
+
+      expect(content).toBeNull()
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message:
+          ".gitattributes exceeds the scan size cap — linguist-generated rules unavailable",
+        data: { bytes: oversizedContent.length, maxScanBytes: 16 },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
   it("warns and returns null when .gitattributes symlinks outside the workspace", async () => {
     // The outside target must exist: a dangling link would reject with ENOENT
     // (the silent missing-file path) and pass this test without the guard

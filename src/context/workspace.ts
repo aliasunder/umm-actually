@@ -218,6 +218,18 @@ export const createContextReader = (
         )
         return null
       }
+      // Stat before reading: the file is PR-author-controlled and read on
+      // every run, so an oversized commit must degrade like the other
+      // failures instead of being pulled into memory whole. A failed stat
+      // falls through to the read path, which already logs per error kind.
+      const fileStats = await stat(safePath).catch(() => null)
+      if (fileStats !== null && fileStats.size > config.maxScanBytes) {
+        logger.warn(
+          ".gitattributes exceeds the scan size cap — linguist-generated rules unavailable",
+          { bytes: fileStats.size, maxScanBytes: config.maxScanBytes },
+        )
+        return null
+      }
       return await readFile(safePath, "utf8")
     } catch (readError) {
       if (isMissingFileError(readError)) return null

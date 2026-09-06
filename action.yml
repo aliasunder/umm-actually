@@ -86,8 +86,10 @@ inputs:
       vetted). Supplied patterns EXTEND a built-in default list of
       generated artifacts (ecosystem lockfiles, *.min.js, *.min.css,
       *.map — the classes GitHub's linguist auto-collapses); a leading
-      "none" drops the defaults, so "none" alone disables exclusion and
-      "none, evals/**" replaces the list outright. Empty = the default
+      "none" drops the defaults, so "none" alone disables the built-in
+      list (linguist-generated exclusions are governed separately by
+      respect_linguist_generated) and "none, evals/**" replaces the list
+      outright. Empty = the default
       list (unlike exclude_paths, where empty means no exclusions), so
       workflows can wire an unset repo variable directly. Patterns with
       more than 2 "*" in one path segment are rejected ("**" segments are
