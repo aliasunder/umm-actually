@@ -23,8 +23,8 @@ src/
   logger.ts                # structured JSON logger — levels, child contexts, lazy props
   github/                  # GitHub I/O: event payload → PrContext, octokit wrappers (diff fetch, review posting)
   openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, per-attempt deadline, structured-output retry ladder, cost summary
-  diff/                    # pure transforms over parse-diff output
-  context/                 # workspace I/O: conventions file, changed files, import-trace scan, doc-mention scan, priority docs
+  diff/                    # pure transforms over parse-diff output + diff-level exclusion (patterns, gitattributes linguist rules, wildcard safety cap)
+  context/                 # workspace I/O: conventions file, root .gitattributes, changed files, import-trace scan, doc-mention scan, priority docs
   review/                  # pure review logic: finding schema, phases + stage dispatch, prompt, non-finding filter, unknown-file filter, cross-phase merge, path normalization, selection, comment mapping, title similarity, context notes, summary
   orchestrate.ts           # pipeline + createPromptedGenerateFindings — fully testable with stub clients
 ```

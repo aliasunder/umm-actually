@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { parseConfig, type RawInputs } from "../config.js"
+import {
+  DEFAULT_DIFF_EXCLUDE_PATTERNS,
+  parseConfig,
+  type RawInputs,
+} from "../config.js"
 
 const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   githubToken: "ghs_testtoken",
@@ -19,6 +23,8 @@ const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   maxRelatedDocs: "4",
   priorityDocs: "README.md",
   excludePaths: "",
+  diffExcludePaths: "",
+  respectLinguistGenerated: true,
   costSummary: true,
   prNumberOverride: "",
   ...overrides,
@@ -46,6 +52,28 @@ describe("parseConfig", () => {
       maxRelatedDocs: 4,
       priorityDocs: ["README.md"],
       excludePaths: [],
+      diffExcludePaths: {
+        defaultPatterns: [
+          "**/package-lock.json",
+          "**/npm-shrinkwrap.json",
+          "**/yarn.lock",
+          "**/pnpm-lock.yaml",
+          "**/bun.lock",
+          "**/bun.lockb",
+          "**/deno.lock",
+          "**/composer.lock",
+          "**/Cargo.lock",
+          "**/Gemfile.lock",
+          "**/poetry.lock",
+          "**/uv.lock",
+          "**/go.sum",
+          "**/*.min.js",
+          "**/*.min.css",
+          "**/*.map",
+        ],
+        operatorPatterns: [],
+      },
+      respectLinguistGenerated: true,
       costSummary: true,
       prNumberOverride: undefined,
     })
@@ -228,6 +256,78 @@ describe("parseConfig", () => {
     )
 
     expect(config.excludePaths).toEqual(["evals", "fixtures", "nested/deep"])
+  })
+
+  it("extends the default diff_exclude_paths list with supplied patterns", () => {
+    const config = parseConfig(
+      makeRawInputs({ diffExcludePaths: "evals/**, **/*.snap" }),
+    )
+
+    expect(config.diffExcludePaths.operatorPatterns).toEqual([
+      "evals/**",
+      "**/*.snap",
+    ])
+    // The behavioral claim is tier preservation — supplied patterns must not
+    // replace the built-in list, so identity with the constant is the spec
+    expect(config.diffExcludePaths.defaultPatterns).toEqual(
+      DEFAULT_DIFF_EXCLUDE_PATTERNS,
+    )
+  })
+
+  it("disables the default list with a leading none", () => {
+    const config = parseConfig(makeRawInputs({ diffExcludePaths: "none" }))
+
+    expect(config.diffExcludePaths).toEqual({
+      defaultPatterns: [],
+      operatorPatterns: [],
+    })
+  })
+
+  it("replaces the default list via none followed by patterns", () => {
+    const config = parseConfig(
+      makeRawInputs({ diffExcludePaths: "none, evals/**" }),
+    )
+
+    expect(config.diffExcludePaths).toEqual({
+      defaultPatterns: [],
+      operatorPatterns: ["evals/**"],
+    })
+  })
+
+  it("rejects a non-leading none in diff_exclude_paths", () => {
+    expect(() =>
+      parseConfig(makeRawInputs({ diffExcludePaths: "evals/**, none" })),
+    ).toThrow(
+      'diffExcludePaths: "none" disables the default list only in leading position — move it first or remove it',
+    )
+  })
+
+  it("normalizes diff_exclude_paths pattern spellings", () => {
+    const config = parseConfig(
+      makeRawInputs({ diffExcludePaths: "/evals, ./fixtures/, generated//" }),
+    )
+
+    expect(config.diffExcludePaths.operatorPatterns).toEqual([
+      "evals",
+      "fixtures",
+      "generated",
+    ])
+  })
+
+  it("rejects a diff_exclude_paths pattern over the wildcard cap", () => {
+    expect(() =>
+      parseConfig(makeRawInputs({ diffExcludePaths: "*a*a*a*b" })),
+    ).toThrow(
+      'diffExcludePaths: pattern(s) exceed the wildcard cap (at most 2 "*" per path segment; "**" segments exempt): *a*a*a*b',
+    )
+  })
+
+  it("passes a false respect_linguist_generated through unchanged", () => {
+    const config = parseConfig(
+      makeRawInputs({ respectLinguistGenerated: false }),
+    )
+
+    expect(config.respectLinguistGenerated).toBe(false)
   })
 
   it("rejects a zero max_related_files", () => {

@@ -1,6 +1,6 @@
 import { readFile, readdir, realpath, stat } from "node:fs/promises"
 import path, { posix } from "node:path"
-import type { Logger } from "../logger.js"
+import { describeError, type Logger } from "../logger.js"
 import {
   CHARS_PER_TOKEN,
   estimateTokens,
@@ -29,6 +29,9 @@ export type ContextReader = {
   readConventions: (params: {
     conventionsFile: string
   }) => Promise<string | null>
+  /** Raw root .gitattributes content, or null when the repo has none;
+   *  parsing stays in the pure diff layer. */
+  readGitAttributes: () => Promise<string | null>
   readChangedFiles: (params: {
     changedPaths: string[]
     budgetTokens: number
@@ -198,6 +201,30 @@ export const createContextReader = (
         return null
       }
       throw readError
+    }
+  }
+
+  /** The file is repo-committed and PR-author-controlled, so every failure
+   *  degrades to "no rules" instead of failing the run; only a missing file
+   *  is silent — the other cases warn so the degradation is auditable. */
+  const readGitAttributes = async (): Promise<string | null> => {
+    const absolutePath = resolveUnderRoot(".gitattributes")
+    try {
+      const safePath = await realPathIfSafe(absolutePath)
+      if (!safePath) {
+        logger.warn(
+          ".gitattributes resolves outside the reviewable workspace — linguist-generated rules unavailable",
+        )
+        return null
+      }
+      return await readFile(safePath, "utf8")
+    } catch (readError) {
+      if (isMissingFileError(readError)) return null
+      logger.warn(
+        "failed reading .gitattributes — linguist-generated rules unavailable",
+        { error: describeError(readError) },
+      )
+      return null
     }
   }
 
@@ -672,6 +699,7 @@ export const createContextReader = (
 
   return {
     readConventions,
+    readGitAttributes,
     readChangedFiles,
     findRelatedFiles,
     readPriorityDocs,

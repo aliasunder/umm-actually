@@ -230,6 +230,8 @@ const baseConfig: ActionConfig = {
   maxRelatedDocs: 4,
   priorityDocs: [],
   excludePaths: [],
+  diffExcludePaths: { defaultPatterns: [], operatorPatterns: [] },
+  respectLinguistGenerated: true,
   costSummary: true,
   prNumberOverride: undefined,
 }
@@ -409,6 +411,7 @@ const makeOrchestrateDeps = (
       readConventionsCalls.push(params)
       return "# Test conventions"
     },
+    readGitAttributes: async () => null,
     readChangedFiles: async (params) => {
       readChangedFilesCalls.push(params)
       return { files: [fixtureChangedFile], remainingTokens: 40_000 }
@@ -610,6 +613,198 @@ describe("orchestrate", () => {
         commitId: fixturePrContext.headSha,
         body: buildSkipBody(skipReason),
       })
+    })
+
+    it("posts skip review when every changed file matches diff_exclude_paths", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          diffExcludePaths: {
+            defaultPatterns: [],
+            operatorPatterns: ["src/**", "assets/**"],
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      const skipReason = "all 6 changed files match diff_exclude_paths"
+      expect(result).toEqual({
+        findingsCount: 0,
+        reviewUrl: "https://github.com/test/review/1",
+        modelUsed: "",
+        skippedReason: skipReason,
+        phases: [],
+        reviewSummaryMarkdown: null,
+        costSummaryMarkdown: null,
+      })
+      expect(stubs.generateFindingsCalls).toHaveLength(0)
+      expect(stubs.readChangedFilesCalls).toHaveLength(0)
+      expect(stubs.submitReviewCalls).toHaveLength(1)
+      expect(first(stubs.submitReviewCalls)).toEqual({
+        prNumber: fixturePrContext.prNumber,
+        commitId: fixturePrContext.headSha,
+        body: buildSkipBody(skipReason),
+      })
+    })
+
+    it("removes an excluded file from the annotated diff, context reads, and changed paths", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          diffExcludePaths: {
+            defaultPatterns: [],
+            operatorPatterns: ["assets/**"],
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const keptFiles = fixtureFiles.filter(
+        (file) => (file.to ?? file.from) !== "assets/logo.png",
+      )
+      const expectedExcludedNote = [
+        "1 changed file(s) excluded from review (content not shown):",
+        "- assets/logo.png (+0/-0, diff_exclude_paths)",
+      ].join("\n")
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.annotatedDiff).toBe(
+        `${annotateDiff(keptFiles)}\n\n${expectedExcludedNote}`,
+      )
+      expect(first(stubs.readChangedFilesCalls).changedPaths).toEqual([
+        "src/greeter.ts",
+        "src/added-file.ts",
+        "src/new-name.ts",
+        "src/old-name.ts",
+        "src/no-trailing-newline.ts",
+      ])
+    })
+
+    it("adds a context note naming diff-excluded files and their source", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          diffExcludePaths: {
+            defaultPatterns: [],
+            operatorPatterns: ["assets/**"],
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+          contextNotes: [
+            "1 changed file(s) excluded from review: `assets/logo.png` (diff_exclude_paths)",
+          ],
+        }),
+      ])
+    })
+
+    it("passes the budget check when the oversized files are all excluded", async () => {
+      // Budget 200 (half = 100) fails against the full fixture diff (341
+      // tokens); with every src/ file excluded only the binary asset header
+      // and the excluded-files trailer remain (94 tokens), which fit
+      const stubs = makeOrchestrateDeps({
+        config: {
+          contextBudgetTokens: 200,
+          diffExcludePaths: {
+            defaultPatterns: [],
+            operatorPatterns: ["src/**"],
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      // Guard for bar 2: the unfiltered fixture diff must exceed the half
+      // budget, or this test would pass without the exclusion doing anything
+      expect(sampleDiffTokens).toBeGreaterThan(100)
+      expect(result.skippedReason).toBe("")
+      expect(stubs.generateFindingsCalls).toHaveLength(1)
+    })
+
+    it("drops a finding naming an excluded file via the unknown-file filter", async () => {
+      const excludedFileFinding = makeFinding({
+        file: "assets/logo.png",
+        line: 1,
+      })
+      const stubs = makeOrchestrateDeps({
+        config: {
+          diffExcludePaths: {
+            defaultPatterns: [],
+            operatorPatterns: ["assets/**"],
+          },
+        },
+        fixtureResult: {
+          review: { ...fixtureReviewResponse, findings: [excludedFileFinding] },
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(0)
+      expect(stubs.postFindingsReviewCalls).toHaveLength(0)
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message: "dropping finding: file not in prompt context",
+        data: {
+          phase: "combined",
+          file: "assets/logo.png",
+          line: 1,
+          category: excludedFileFinding.category,
+        },
+      })
+    })
+
+    it("excludes files the repo marks linguist-generated", async () => {
+      const stubs = makeOrchestrateDeps({
+        contextReader: {
+          readGitAttributes: async () => "assets/* linguist-generated=true\n",
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const keptFiles = fixtureFiles.filter(
+        (file) => (file.to ?? file.from) !== "assets/logo.png",
+      )
+      const expectedExcludedNote = [
+        "1 changed file(s) excluded from review (content not shown):",
+        "- assets/logo.png (+0/-0, linguist-generated)",
+      ].join("\n")
+      expect(first(stubs.generateFindingsCalls).annotatedDiff).toBe(
+        `${annotateDiff(keptFiles)}\n\n${expectedExcludedNote}`,
+      )
+    })
+
+    it("does not read gitattributes when respect_linguist_generated is off", async () => {
+      const readGitAttributesCalls: unknown[] = []
+      const stubs = makeOrchestrateDeps({
+        config: { respectLinguistGenerated: false },
+        contextReader: {
+          readGitAttributes: async () => {
+            readGitAttributesCalls.push({})
+            return "assets/* linguist-generated=true\n"
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(readGitAttributesCalls).toHaveLength(0)
+      expect(first(stubs.generateFindingsCalls).annotatedDiff).toBe(
+        annotateDiff(fixtureFiles),
+      )
     })
 
     it("passes correct prNumber and commitId in skip reviews", async () => {

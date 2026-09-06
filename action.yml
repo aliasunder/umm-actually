@@ -78,6 +78,34 @@ inputs:
       __snapshots__
     required: false
     default: ""
+  diff_exclude_paths:
+    description: >-
+      Comma-separated folder prefixes or globs removed from the review diff
+      before the token budget check — excluded files are listed by name in
+      the review output but their content is not reviewed (excluded is not
+      vetted). Supplied patterns EXTEND a built-in default list of
+      generated artifacts (ecosystem lockfiles, *.min.js, *.min.css,
+      *.map — the classes GitHub's linguist auto-collapses); a leading
+      "none" drops the defaults, so "none" alone disables exclusion and
+      "none, evals/**" replaces the list outright. Empty = the default
+      list (unlike exclude_paths, where empty means no exclusions), so
+      workflows can wire an unset repo variable directly. Patterns with
+      more than 2 "*" in one path segment are rejected ("**" segments are
+      exempt) — glob matching backtracks exponentially on such shapes.
+      Example: none, **/__snapshots__/**
+    required: false
+    default: ""
+  respect_linguist_generated:
+    description: >-
+      Also exclude changed files the repo's root .gitattributes marks
+      linguist-generated=true (nested .gitattributes files are not read).
+      Negated entries (-linguist-generated) keep a file reviewable even
+      when the default diff_exclude_paths list matches it; explicitly
+      supplied diff_exclude_paths patterns always win. Rules are read from
+      the PR head, so a PR changing .gitattributes reviews under its own
+      rules — exclusions are always named in the review output
+    required: false
+    default: "true"
   cost_summary:
     description: Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow step summary
     required: false

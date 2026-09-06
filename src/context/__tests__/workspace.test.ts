@@ -148,6 +148,72 @@ describe("readConventions", () => {
   })
 })
 
+describe("readGitAttributes", () => {
+  it("returns the root .gitattributes content", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      ".gitattributes": "*.snap linguist-generated=true\n",
+    })
+    const contextReader = createContextReader(
+      defaultConfig(root),
+      createTestLogger(),
+    )
+
+    try {
+      const content = await contextReader.readGitAttributes()
+
+      expect(content).toBe("*.snap linguist-generated=true\n")
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("returns null when the repo has no .gitattributes", async () => {
+    const { contextReader, logger } = makeReader()
+
+    const content = await contextReader.readGitAttributes()
+
+    expect(content).toBeNull()
+    expect(logger.messages).toEqual([])
+  })
+
+  it("warns and returns null when .gitattributes symlinks outside the workspace", async () => {
+    // The outside target must exist: a dangling link would reject with ENOENT
+    // (the silent missing-file path) and pass this test without the guard
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), "umm-outside-"))
+    await writeFile(
+      path.join(outsideRoot, "attrs"),
+      "* linguist-generated=true\n",
+      "utf8",
+    )
+    const { root, cleanup } = await makeTempWorkspace({
+      "README.md": "# fixture\n",
+    })
+    await symlink(
+      path.join(outsideRoot, "attrs"),
+      path.join(root, ".gitattributes"),
+    )
+    const logger = createTestLogger()
+    const contextReader = createContextReader(defaultConfig(root), logger)
+
+    try {
+      const content = await contextReader.readGitAttributes()
+
+      expect(content).toBeNull()
+      expect(logger.messages).toEqual([
+        {
+          level: "warn",
+          message:
+            ".gitattributes resolves outside the reviewable workspace — linguist-generated rules unavailable",
+          data: {},
+        },
+      ])
+    } finally {
+      await cleanup()
+      await rm(outsideRoot, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("readChangedFiles", () => {
   it("includes files in full and subtracts their tokens from the budget", async () => {
     const { contextReader } = makeReader()

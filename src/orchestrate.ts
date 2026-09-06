@@ -6,6 +6,11 @@ import {
   newFilePath,
 } from "./diff/commentable-lines.js"
 import { annotateDiff } from "./diff/annotate-diff.js"
+import {
+  partitionExcludedFiles,
+  renderExcludedFilesNote,
+} from "./diff/exclude-diff-files.js"
+import { parseLinguistGeneratedRules } from "./diff/gitattributes.js"
 import { describeError, type Logger } from "./logger.js"
 import type {
   CheckRunConclusion,
@@ -519,8 +524,42 @@ const runReviewPipeline = async (
     return postSkipReview("empty diff")
   }
 
-  // Step 6: annotate + token check
-  const annotatedDiff = annotateDiff(files)
+  // Step 5.5: diff-level exclusion — generated files leave the review
+  // subject before the budget check so one oversized artifact cannot
+  // starve the reviewable rest of the PR
+  const gitAttributesContent = config.respectLinguistGenerated
+    ? await contextReader.readGitAttributes()
+    : null
+  const linguistRules = gitAttributesContent
+    ? parseLinguistGeneratedRules(gitAttributesContent, logger)
+    : []
+  const { kept: reviewableFiles, excluded: excludedDiffFiles } =
+    partitionExcludedFiles({
+      files,
+      defaultPatterns: config.diffExcludePaths.defaultPatterns,
+      operatorPatterns: config.diffExcludePaths.operatorPatterns,
+      linguistRules,
+    })
+  if (excludedDiffFiles.length > 0) {
+    logger.info("changed files excluded from the review diff", {
+      excludedCount: excludedDiffFiles.length,
+      excludedPaths: excludedDiffFiles
+        .map((file) => `${file.path} (${file.source})`)
+        .join(", "),
+    })
+  }
+  if (reviewableFiles.length === 0) {
+    return postSkipReview(
+      `all ${files.length} changed files match diff_exclude_paths`,
+    )
+  }
+
+  // Step 6: annotate + token check. The excluded-files trailer sits inside
+  // the annotated diff string, so its (few) tokens debit the diff budget.
+  const excludedFilesNote = renderExcludedFilesNote(excludedDiffFiles)
+  const annotatedDiff = excludedFilesNote
+    ? `${annotateDiff(reviewableFiles)}\n\n${excludedFilesNote}`
+    : annotateDiff(reviewableFiles)
   const diffTokens = estimateTokens(annotatedDiff)
   const budgetHalf = Math.floor(config.contextBudgetTokens / 2)
   if (diffTokens > budgetHalf) {
@@ -530,11 +569,11 @@ const runReviewPipeline = async (
   }
 
   // Step 7: commentable lines
-  const commentableByPath = computeCommentableLines(files)
+  const commentableByPath = computeCommentableLines(reviewableFiles)
 
   // Step 8: extract changed paths (includes old path for renames so the
   // import scanner finds callers that still reference the pre-rename path)
-  const changedPaths = files
+  const changedPaths = reviewableFiles
     .flatMap((file) => {
       const toPath = newFilePath(file)
       const isRename =
@@ -670,7 +709,7 @@ const runReviewPipeline = async (
   // Every path the model can see: diff headers (deleted files render a
   // header but have no new path, so they are added here), file blocks, and
   // the conventions section when the file was found.
-  const deletedPaths = files.flatMap((file) => {
+  const deletedPaths = reviewableFiles.flatMap((file) => {
     return file.deleted && file.from ? [file.from] : []
   })
   const promptFilePaths = [
@@ -728,6 +767,7 @@ const runReviewPipeline = async (
     priorityDocsRead: priorityDocFiles,
     relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
     docsExcludedPaths: mentionMatchedDocsResult.excludedByCapPaths,
+    diffExcludedFiles: excludedDiffFiles,
   })
 
   // Step 9.5: fetch prior bot comments — needed both for the prompt (the
