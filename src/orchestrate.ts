@@ -589,9 +589,15 @@ const runReviewPipeline = async (
   const commentableByPath = computeCommentableLines(reviewableFiles)
 
   // Diff-excluded files must stay out of every context channel: the trailer
-  // told the model their content is not shown, so the related-file and doc
-  // scans may not pull that content back into the prompt.
+  // told the model their content is not shown, so neither the related-file
+  // and doc scans nor the priority-doc read may pull that content back in.
   const diffExcludedPaths = excludedDiffFiles.map((file) => file.path)
+  const diffExcludedPathSet = new Set(
+    diffExcludedPaths.map((excludedPath) => posix.normalize(excludedPath)),
+  )
+  const reviewablePriorityDocs = config.priorityDocs.filter(
+    (docPath) => !diffExcludedPathSet.has(posix.normalize(docPath)),
+  )
 
   // Step 8: extract changed paths (includes old path for renames so the
   // import scanner finds callers that still reference the pre-rename path)
@@ -643,8 +649,8 @@ const runReviewPipeline = async (
       : []),
   ])
   const needsPriorityDocFloor =
-    config.priorityDocs.length > 0 &&
-    config.priorityDocs.some(
+    reviewablePriorityDocs.length > 0 &&
+    reviewablePriorityDocs.some(
       (docPath) => !preFloorInContext.has(posix.normalize(docPath)),
     )
   const rawFloor = Math.floor(
@@ -688,7 +694,7 @@ const runReviewPipeline = async (
 
   const { files: priorityDocFiles, remainingTokens: docRemainingTokens } =
     await contextReader.readPriorityDocs({
-      priorityDocs: config.priorityDocs,
+      priorityDocs: reviewablePriorityDocs,
       budgetTokens: docBudgetTokens,
       excludePaths: priorityDocsInContext,
     })

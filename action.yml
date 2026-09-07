@@ -49,7 +49,11 @@ inputs:
     required: false
     default: "true"
   priority_docs:
-    description: Comma-separated repo-relative paths always included in review context. Docs already present in full from other context channels are not re-read (empty = disabled)
+    description: >-
+      Comma-separated repo-relative paths always included in review context.
+      Docs already present in full from other context channels are not
+      re-read; a changed file excluded from the review diff stays excluded
+      (empty = disabled)
     required: false
     default: "README.md"
   max_scan_files:

@@ -176,6 +176,30 @@ describe("readGitAttributes", () => {
     expect(logger.messages).toEqual([])
   })
 
+  it("warns and returns null when .gitattributes exists but cannot be read", async () => {
+    // A directory named .gitattributes makes readFile fail deterministically
+    // (EISDIR) in every environment — permission bits are ignored under root
+    const { root, cleanup } = await makeTempWorkspace({
+      ".gitattributes/placeholder": "",
+    })
+    const logger = createTestLogger()
+    const contextReader = createContextReader(defaultConfig(root), logger)
+
+    try {
+      const content = await contextReader.readGitAttributes()
+
+      expect(content).toBeNull()
+      expect(logger.messages).toContainEqual({
+        level: "warn",
+        message:
+          "failed reading .gitattributes — linguist-generated rules unavailable",
+        data: { error: expect.stringContaining("EISDIR") },
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
   it("warns and returns null when .gitattributes exceeds the scan size cap", async () => {
     const oversizedContent = "*.snap linguist-generated=true\n".repeat(4)
     const { root, cleanup } = await makeTempWorkspace({

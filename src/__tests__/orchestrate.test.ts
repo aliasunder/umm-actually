@@ -744,6 +744,25 @@ describe("orchestrate", () => {
       ])
     })
 
+    it("drops a diff-excluded priority doc from the priority-doc read", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          priorityDocs: ["assets/logo.png", "docs/guide.md"],
+          diffExcludePaths: {
+            defaultPatterns: [],
+            operatorPatterns: ["assets/**"],
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readPriorityDocsCalls).priorityDocs).toEqual([
+        "docs/guide.md",
+      ])
+    })
+
     it("passes diff-excluded paths to the related-file and doc scans as exclusions", async () => {
       const stubs = makeOrchestrateDeps({
         config: {
