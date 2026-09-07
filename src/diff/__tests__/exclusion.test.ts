@@ -69,6 +69,14 @@ describe("hasExcessiveWildcards", () => {
   it("flags a multi-star segment at any depth", () => {
     expect(hasExcessiveWildcards("src/**/*a*a*a.json")).toBe(true)
   })
+
+  it("does not count escaped stars toward the cap", () => {
+    expect(hasExcessiveWildcards("a\\*b\\*c\\*d.json")).toBe(false)
+  })
+
+  it("still flags unescaped stars alongside escaped ones", () => {
+    expect(hasExcessiveWildcards("\\*a*a*a*b")).toBe(true)
+  })
 })
 
 describe("createExclusionMatcher — gitattributes rules", () => {

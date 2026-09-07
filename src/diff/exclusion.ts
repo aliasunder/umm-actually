@@ -39,7 +39,10 @@ export type ExclusionMatcher = {
 export const hasExcessiveWildcards = (pattern: string): boolean => {
   return pattern.split("/").some((segment) => {
     if (segment === "**") return false
-    const starCount = (segment.match(/\*/g) ?? []).length
+    // An escaped character is a literal to every matcher — an escaped star
+    // cannot backtrack, so it must not count toward the cap
+    const unescapedSegment = segment.replace(/\\./g, "")
+    const starCount = (unescapedSegment.match(/\*/g) ?? []).length
     return starCount > 2
   })
 }
