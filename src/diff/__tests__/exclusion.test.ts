@@ -1,12 +1,15 @@
 import type { File } from "parse-diff"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_DIFF_EXCLUDE_PATTERNS } from "../../config.js"
+import { createTestLogger } from "../../__tests__/test-logger.js"
 import {
+  createExclusionMatcher,
+  hasExcessiveWildcards,
   partitionExcludedFiles,
   renderExcludedFilesNote,
   summarizeExclusionSources,
   type ExcludedDiffFile,
-} from "../exclude-diff-files.js"
+} from "../exclusion.js"
 
 const makeFile = (overrides: Partial<File> = {}): File => ({
   chunks: [],
@@ -17,25 +20,178 @@ const makeFile = (overrides: Partial<File> = {}): File => ({
   ...overrides,
 })
 
-const partition = (
-  files: File[],
-  overrides: {
-    defaultPatterns?: string[]
-    operatorPatterns?: string[]
-    linguistRules?: { pattern: string; generated: boolean }[]
-  } = {},
-) => {
-  return partitionExcludedFiles({
-    files,
-    defaultPatterns: overrides.defaultPatterns ?? [],
-    operatorPatterns: overrides.operatorPatterns ?? [],
-    linguistRules: overrides.linguistRules ?? [],
-  })
+type MatcherOverrides = {
+  defaultPatterns?: string[]
+  operatorPatterns?: string[]
+  gitAttributesContent?: string
+}
+
+const makeMatcher = (overrides: MatcherOverrides = {}) => {
+  return createExclusionMatcher(
+    {
+      defaultPatterns: overrides.defaultPatterns ?? [],
+      operatorPatterns: overrides.operatorPatterns ?? [],
+      gitAttributesContent: overrides.gitAttributesContent ?? null,
+    },
+    createTestLogger(),
+  )
+}
+
+const partition = (files: File[], overrides: MatcherOverrides = {}) => {
+  return partitionExcludedFiles({ files, matcher: makeMatcher(overrides) })
 }
 
 const keptPaths = (result: { kept: File[] }): (string | undefined)[] => {
   return result.kept.map((file) => file.to ?? file.from)
 }
+
+describe("hasExcessiveWildcards", () => {
+  it("accepts every shipped default pattern", () => {
+    // Production-consistency check across two constants, not a drift test:
+    // a default the cap itself would reject could never match anything
+    expect(DEFAULT_DIFF_EXCLUDE_PATTERNS.filter(hasExcessiveWildcards)).toEqual(
+      [],
+    )
+  })
+
+  it("accepts globstar segments regardless of how many appear", () => {
+    expect(hasExcessiveWildcards("**/__snapshots__/**")).toBe(false)
+  })
+
+  it("accepts up to two stars in one segment", () => {
+    expect(hasExcessiveWildcards("*.min.*")).toBe(false)
+  })
+
+  it("flags a segment with more than two stars", () => {
+    expect(hasExcessiveWildcards("*a*a*b")).toBe(true)
+  })
+
+  it("flags a multi-star segment at any depth", () => {
+    expect(hasExcessiveWildcards("src/**/*a*a*a.json")).toBe(true)
+  })
+})
+
+describe("createExclusionMatcher — gitattributes rules", () => {
+  it("honors all four attribute spellings", () => {
+    const matcher = makeMatcher({
+      // c.json and d.json also sit on the default list so the negative
+      // spellings are observable as exemptions, not merely as no-rule
+      defaultPatterns: ["**/c.json", "**/d.json"],
+      gitAttributesContent: [
+        "a.json linguist-generated",
+        "b.json linguist-generated=true",
+        "c.json linguist-generated=false",
+        "d.json -linguist-generated",
+      ].join("\n"),
+    })
+
+    expect(matcher.classify("a.json")).toBe("linguist_generated")
+    expect(matcher.classify("b.json")).toBe("linguist_generated")
+    expect(matcher.classify("c.json")).toBeNull()
+    expect(matcher.classify("d.json")).toBeNull()
+  })
+
+  it("ignores comments, blank lines, and lines without the attribute", () => {
+    const matcher = makeMatcher({
+      gitAttributesContent: [
+        "# generated artifacts",
+        "",
+        "*.pdf binary",
+        "*.snap linguist-generated=true",
+      ].join("\n"),
+    })
+
+    expect(matcher.classify("x.pdf")).toBeNull()
+    expect(matcher.classify("x.snap")).toBe("linguist_generated")
+  })
+
+  it("ignores gitignore-style negation patterns, which gitattributes forbids", () => {
+    const matcher = makeMatcher({
+      gitAttributesContent: "!*.snap linguist-generated=true",
+    })
+
+    expect(matcher.classify("x.snap")).toBeNull()
+  })
+
+  it("drops a wildcard-cap-violating rule with a warn and keeps the rest", () => {
+    const logger = createTestLogger()
+    const matcher = createExclusionMatcher(
+      {
+        defaultPatterns: [],
+        operatorPatterns: [],
+        gitAttributesContent: [
+          "*a*a*a*b linguist-generated=true",
+          "*.snap linguist-generated=true",
+        ].join("\n"),
+      },
+      logger,
+    )
+
+    expect(matcher.classify("aaaab")).toBeNull()
+    expect(matcher.classify("x.snap")).toBe("linguist_generated")
+    expect(logger.messages).toEqual([
+      {
+        level: "warn",
+        message:
+          "gitattributes pattern exceeds the wildcard cap — rule ignored",
+        data: { pattern: "*a*a*a*b" },
+      },
+    ])
+  })
+
+  it("matches a backslash-escaped space as a literal space in the path", () => {
+    const matcher = makeMatcher({
+      gitAttributesContent: "a\\ b.json linguist-generated=true",
+    })
+
+    expect(matcher.classify("a b.json")).toBe("linguist_generated")
+  })
+
+  it("returns null when no rule matches", () => {
+    const matcher = makeMatcher({
+      gitAttributesContent: "*.snap linguist-generated=true",
+    })
+
+    expect(matcher.classify("src/app.ts")).toBeNull()
+  })
+
+  it("matches a slash-less pattern against basenames at any depth", () => {
+    const matcher = makeMatcher({
+      gitAttributesContent: "*.snap linguist-generated=true",
+    })
+
+    expect(matcher.classify("deep/nested/x.snap")).toBe("linguist_generated")
+  })
+
+  it("applies the last matching rule when rules overlap", () => {
+    const matcher = makeMatcher({
+      gitAttributesContent: [
+        "snapshots/*.json linguist-generated=true",
+        "snapshots/keep.json -linguist-generated",
+      ].join("\n"),
+    })
+
+    expect(matcher.classify("snapshots/keep.json")).toBeNull()
+    expect(matcher.classify("snapshots/other.json")).toBe("linguist_generated")
+  })
+
+  it("matches directory-style patterns against contained files", () => {
+    // Deliberate over-approximation: gitattributes itself would not apply a
+    // "dir/" pattern to contained paths, but excluding more than GitHub
+    // collapses is visible in the review output and off-switchable
+    const trailingSlash = makeMatcher({
+      gitAttributesContent: "__snapshots__/ linguist-generated=true",
+    })
+    const bareName = makeMatcher({
+      gitAttributesContent: "__snapshots__ linguist-generated=true",
+    })
+
+    expect(trailingSlash.classify("__snapshots__/x.json")).toBe(
+      "linguist_generated",
+    )
+    expect(bareName.classify("__snapshots__/x.json")).toBe("linguist_generated")
+  })
+})
 
 describe("partitionExcludedFiles", () => {
   it("keeps every file when no patterns or rules are configured", () => {
@@ -119,7 +275,7 @@ describe("partitionExcludedFiles", () => {
     const marked = makeFile({ from: "gen/x.json", to: "gen/x.json" })
 
     const result = partition([marked, makeFile()], {
-      linguistRules: [{ pattern: "gen/*.json", generated: true }],
+      gitAttributesContent: "gen/*.json linguist-generated=true",
     })
 
     expect(keptPaths(result)).toEqual(["src/app.ts"])
@@ -141,7 +297,7 @@ describe("partitionExcludedFiles", () => {
 
     const result = partition([lockfile], {
       defaultPatterns: ["**/package-lock.json"],
-      linguistRules: [{ pattern: "package-lock.json", generated: false }],
+      gitAttributesContent: "package-lock.json -linguist-generated",
     })
 
     expect(result).toEqual({ kept: [lockfile], excluded: [] })
@@ -155,7 +311,7 @@ describe("partitionExcludedFiles", () => {
 
     const result = partition([lockfile], {
       operatorPatterns: ["**/package-lock.json"],
-      linguistRules: [{ pattern: "package-lock.json", generated: false }],
+      gitAttributesContent: "package-lock.json -linguist-generated",
     })
 
     expect(result.kept).toEqual([])

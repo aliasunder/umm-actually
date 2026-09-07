@@ -7,12 +7,12 @@ import {
 } from "./diff/commentable-lines.js"
 import { annotateDiff } from "./diff/annotate-diff.js"
 import {
+  createExclusionMatcher,
   partitionExcludedFiles,
   renderExcludedFileLines,
   renderExcludedFilesNote,
   summarizeExclusionSources,
-} from "./diff/exclude-diff-files.js"
-import { parseLinguistGeneratedRules } from "./diff/gitattributes.js"
+} from "./diff/exclusion.js"
 import { describeError, type Logger } from "./logger.js"
 import type {
   CheckRunConclusion,
@@ -548,16 +548,12 @@ const runReviewPipeline = async (
   const gitAttributesContent = config.respectLinguistGenerated
     ? await contextReader.readGitAttributes()
     : null
-  const linguistRules = gitAttributesContent
-    ? parseLinguistGeneratedRules(gitAttributesContent, logger)
-    : []
+  const exclusionMatcher = createExclusionMatcher(
+    { ...config.diffExcludePaths, gitAttributesContent },
+    logger,
+  )
   const { kept: reviewableFiles, excluded: excludedDiffFiles } =
-    partitionExcludedFiles({
-      files,
-      defaultPatterns: config.diffExcludePaths.defaultPatterns,
-      operatorPatterns: config.diffExcludePaths.operatorPatterns,
-      linguistRules,
-    })
+    partitionExcludedFiles({ files, matcher: exclusionMatcher })
   if (excludedDiffFiles.length > 0) {
     logger.info("changed files excluded from the review diff", {
       excludedCount: excludedDiffFiles.length,

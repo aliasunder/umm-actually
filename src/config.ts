@@ -1,4 +1,4 @@
-import { hasExcessiveWildcards } from "./diff/pattern-safety.js"
+import { hasExcessiveWildcards } from "./diff/exclusion.js"
 import { normalizeWorkspacePath } from "./review/workspace-path.js"
 import { z } from "zod"
 

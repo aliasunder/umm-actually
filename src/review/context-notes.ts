@@ -2,7 +2,7 @@ import { posix } from "node:path"
 import {
   describeExclusionSource,
   type ExcludedDiffFile,
-} from "../diff/exclude-diff-files.js"
+} from "../diff/exclusion.js"
 import type { PromptFile } from "./prompt.js"
 
 export type ContextNotesInput = {
