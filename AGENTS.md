@@ -100,6 +100,14 @@ files. Prefer SDK-provided types over redefining shapes.
   visibility when only one function needs the value.
 - A boolean mode param means the function does two things — split into
   two single-responsibility functions; the caller owns the gating.
+- Decomposition must earn its seams. A function whose body is one
+  expression with one call site is misdirection — inline it; extract only
+  for a second call site or a decision worth naming. A parameter a
+  function only forwards means the seam is wrong — compile configuration
+  once into a factory/closure and pass the resulting collaborator, never
+  thread config through layers that don't read it. One concern stays in
+  one module: files that only ever import each other are fragmentation,
+  not separation — a module boundary needs an independent consumer.
 - Type-only imports over structural duplication — don't clone interfaces
   for "module purity"; type imports are erased at compile time.
 - Extract multi-step `.map()`/`.reduce()` callbacks into named functions
