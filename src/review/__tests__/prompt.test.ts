@@ -180,6 +180,16 @@ describe("buildSystemPrompt", () => {
     expect(outputDisciplineIndex).toBeGreaterThan(severityIndex)
     expect(anchoringIndex).toBeGreaterThan(outputDisciplineIndex)
   })
+
+  it("instructs the model not to report findings on excluded file paths", () => {
+    const systemPrompt = buildSystemPrompt({ phase: combinedPhase }).replace(
+      /\s+/g,
+      " ",
+    )
+    expect(systemPrompt).toContain(
+      "Do not report findings on excluded file paths",
+    )
+  })
 })
 
 describe("buildUserPrompt", () => {

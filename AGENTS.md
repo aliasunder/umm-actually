@@ -23,8 +23,8 @@ src/
   logger.ts                # structured JSON logger — levels, child contexts, lazy props
   github/                  # GitHub I/O: event payload → PrContext, octokit wrappers (diff fetch, review posting)
   openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, per-attempt deadline, structured-output retry ladder, cost summary
-  diff/                    # pure transforms over parse-diff output
-  context/                 # workspace I/O: conventions file, changed files, import-trace scan, doc-mention scan, priority docs
+  diff/                    # pure transforms over parse-diff output + diff-level exclusion (patterns, gitattributes linguist rules, wildcard safety cap)
+  context/                 # workspace I/O: conventions file, root .gitattributes, changed files, import-trace scan, doc-mention scan, priority docs
   review/                  # pure review logic: finding schema, phases + stage dispatch, prompt, non-finding filter, unknown-file filter, cross-phase merge, path normalization, selection, comment mapping, title similarity, context notes, summary
   orchestrate.ts           # pipeline + createPromptedGenerateFindings — fully testable with stub clients
 ```
@@ -100,6 +100,14 @@ files. Prefer SDK-provided types over redefining shapes.
   visibility when only one function needs the value.
 - A boolean mode param means the function does two things — split into
   two single-responsibility functions; the caller owns the gating.
+- Decomposition must earn its seams. A function whose body is one
+  expression with one call site is misdirection — inline it; extract only
+  for a second call site or a decision worth naming. A parameter a
+  function only forwards means the seam is wrong — compile configuration
+  once into a factory/closure and pass the resulting collaborator, never
+  thread config through layers that don't read it. One concern stays in
+  one module: files that only ever import each other are fragmentation,
+  not separation — a module boundary needs an independent consumer.
 - Type-only imports over structural duplication — don't clone interfaces
   for "module purity"; type imports are erased at compile time.
 - Extract multi-step `.map()`/`.reduce()` callbacks into named functions

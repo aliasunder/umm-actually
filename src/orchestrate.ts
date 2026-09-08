@@ -6,6 +6,13 @@ import {
   newFilePath,
 } from "./diff/commentable-lines.js"
 import { annotateDiff } from "./diff/annotate-diff.js"
+import {
+  createExclusionMatcher,
+  partitionExcludedFiles,
+  renderExcludedFileLines,
+  renderExcludedFilesNote,
+  summarizeExclusionSources,
+} from "./diff/exclusion.js"
 import { describeError, type Logger } from "./logger.js"
 import type {
   CheckRunConclusion,
@@ -125,8 +132,18 @@ const PRIOR_COMMENT_CAP = 30
 const stripAnchorComment = (body: string): string =>
   body.replace(/\n*<!-- umm-actually:.+? -->\s*$/, "")
 
-const buildSkipBody = (reason: string): string =>
-  `**umm-actually** — review skipped\n\n${reason}\n\n---\n*umm-actually*`
+/** detail carries multi-line context (e.g. the excluded-file list) that
+ *  belongs in the review body but not in the one-line check-run title. */
+const buildSkipBody = ({
+  reason,
+  detail,
+}: {
+  reason: string
+  detail?: string | undefined
+}): string => {
+  const detailSection = detail ? `\n\n${detail}` : ""
+  return `**umm-actually** — review skipped\n\n${reason}${detailSection}\n\n---\n*umm-actually*`
+}
 
 type InlineCommentState = {
   anchors: AnchorEntry[]
@@ -494,8 +511,14 @@ const runReviewPipeline = async (
 ): Promise<OrchestrateResult> => {
   const { config, githubClient, contextReader, generateFindings } = deps
 
-  const postSkipReview = async (reason: string): Promise<OrchestrateResult> => {
-    const body = buildSkipBody(reason)
+  const postSkipReview = async ({
+    reason,
+    detail,
+  }: {
+    reason: string
+    detail?: string | undefined
+  }): Promise<OrchestrateResult> => {
+    const body = buildSkipBody({ reason, detail })
     const { url } = await githubClient.submitReview({
       prNumber: prContext.prNumber,
       commitId: prContext.headSha,
@@ -510,41 +533,86 @@ const runReviewPipeline = async (
     prNumber: prContext.prNumber,
   })
   if (diffResult.kind === "too_large") {
-    return postSkipReview("diff exceeds GitHub's diff API limits")
+    return postSkipReview({ reason: "diff exceeds GitHub's diff API limits" })
   }
 
   // Step 5: parse diff
   const files = parseDiff(diffResult.diff)
   if (files.length === 0) {
-    return postSkipReview("empty diff")
+    return postSkipReview({ reason: "empty diff" })
   }
 
-  // Step 6: annotate + token check
-  const annotatedDiff = annotateDiff(files)
+  // Step 5.5: diff-level exclusion — generated files leave the review
+  // subject before the budget check so one oversized artifact cannot
+  // starve the reviewable rest of the PR
+  const gitAttributesContent = config.respectLinguistGenerated
+    ? await contextReader.readGitAttributes()
+    : null
+  const exclusionMatcher = createExclusionMatcher(
+    { ...config.diffExcludePaths, gitAttributesContent },
+    logger,
+  )
+  const { kept: reviewableFiles, excluded: excludedDiffFiles } =
+    partitionExcludedFiles({ files, matcher: exclusionMatcher })
+  if (excludedDiffFiles.length > 0) {
+    logger.info("changed files excluded from the review diff", {
+      excludedCount: excludedDiffFiles.length,
+      excludedPaths: excludedDiffFiles
+        .map((file) => `${file.path} (${file.source})`)
+        .join(", "),
+    })
+  }
+  if (reviewableFiles.length === 0) {
+    // Reason names the layers that actually excluded (an operator on default
+    // inputs never set diff_exclude_paths); the body names every file.
+    return postSkipReview({
+      reason: `all ${excludedDiffFiles.length} changed file(s) excluded from review (${summarizeExclusionSources(excludedDiffFiles)})`,
+      detail: renderExcludedFileLines(excludedDiffFiles).join("\n"),
+    })
+  }
+
+  // Step 6: annotate + token check. The excluded-files trailer sits inside
+  // the annotated diff string, so its (few) tokens debit the diff budget.
+  const excludedFilesNote = renderExcludedFilesNote(excludedDiffFiles)
+  const annotatedDiff = excludedFilesNote
+    ? `${annotateDiff(reviewableFiles)}\n\n${excludedFilesNote}`
+    : annotateDiff(reviewableFiles)
   const diffTokens = estimateTokens(annotatedDiff)
   const budgetHalf = Math.floor(config.contextBudgetTokens / 2)
   if (diffTokens > budgetHalf) {
-    return postSkipReview(
-      `diff too large for context budget (${diffTokens} tokens, limit ${budgetHalf} of ${config.contextBudgetTokens})`,
-    )
+    return postSkipReview({
+      reason: `diff too large for context budget (${diffTokens} tokens, limit ${budgetHalf} of ${config.contextBudgetTokens})`,
+    })
   }
 
   // Step 7: commentable lines
-  const commentableByPath = computeCommentableLines(files)
+  const commentableByPath = computeCommentableLines(reviewableFiles)
+
+  // Diff-excluded files must stay out of every context channel: the trailer
+  // told the model their content is not shown, so neither the related-file
+  // and doc scans nor the priority-doc read may pull that content back in.
+  const diffExcludedPaths = excludedDiffFiles.map((file) => file.path)
+  const diffExcludedPathSet = new Set(
+    diffExcludedPaths.map((excludedPath) => posix.normalize(excludedPath)),
+  )
+  const reviewablePriorityDocs = config.priorityDocs.filter(
+    (docPath) => !diffExcludedPathSet.has(posix.normalize(docPath)),
+  )
 
   // Step 8: extract changed paths (includes old path for renames so the
   // import scanner finds callers that still reference the pre-rename path)
-  const changedPaths = files
+  const changedPaths = reviewableFiles
     .flatMap((file) => {
       const toPath = newFilePath(file)
+      const fromPath = file.from
       const isRename =
         toPath !== null &&
-        file.from !== undefined &&
-        file.from !== "/dev/null" &&
-        file.from !== file.to
-      return isRename ? [toPath, file.from] : [toPath]
+        fromPath !== undefined &&
+        fromPath !== "/dev/null" &&
+        fromPath !== file.to
+      return isRename ? [toPath, fromPath] : [toPath]
     })
-    .filter((path): path is string => path !== null)
+    .filter((path) => path !== null)
 
   // Step 9: context reads
   const conventions = await contextReader.readConventions({
@@ -581,8 +649,8 @@ const runReviewPipeline = async (
       : []),
   ])
   const needsPriorityDocFloor =
-    config.priorityDocs.length > 0 &&
-    config.priorityDocs.some(
+    reviewablePriorityDocs.length > 0 &&
+    reviewablePriorityDocs.some(
       (docPath) => !preFloorInContext.has(posix.normalize(docPath)),
     )
   const rawFloor = Math.floor(
@@ -600,6 +668,7 @@ const runReviewPipeline = async (
     ? await contextReader.findRelatedFiles({
         changedPaths,
         budgetTokens: relatedFilesBudgetTokens,
+        excludePaths: diffExcludedPaths,
       })
     : { files: [], excludedByCapPaths: [] }
 
@@ -625,7 +694,7 @@ const runReviewPipeline = async (
 
   const { files: priorityDocFiles, remainingTokens: docRemainingTokens } =
     await contextReader.readPriorityDocs({
-      priorityDocs: config.priorityDocs,
+      priorityDocs: reviewablePriorityDocs,
       budgetTokens: docBudgetTokens,
       excludePaths: priorityDocsInContext,
     })
@@ -661,7 +730,7 @@ const runReviewPipeline = async (
         changedPaths,
         budgetTokens: docRemainingTokens,
         conventionsFile: config.conventionsFile,
-        excludePaths: config.priorityDocs,
+        excludePaths: [...config.priorityDocs, ...diffExcludedPaths],
       })
     : { files: [], excludedByCapPaths: [] }
 
@@ -670,7 +739,7 @@ const runReviewPipeline = async (
   // Every path the model can see: diff headers (deleted files render a
   // header but have no new path, so they are added here), file blocks, and
   // the conventions section when the file was found.
-  const deletedPaths = files.flatMap((file) => {
+  const deletedPaths = reviewableFiles.flatMap((file) => {
     return file.deleted && file.from ? [file.from] : []
   })
   const promptFilePaths = [
@@ -713,21 +782,22 @@ const runReviewPipeline = async (
   })
 
   const priorityDocsInContextPaths = findInContextPriorityDocs({
-    priorityDocs: config.priorityDocs,
+    priorityDocs: reviewablePriorityDocs,
     priorityDocsInContext,
   })
   const priorityDocsAbsentPaths = findAbsentPriorityDocs({
-    priorityDocs: config.priorityDocs,
+    priorityDocs: reviewablePriorityDocs,
     priorityDocsInContext,
     priorityDocsRead: priorityDocFiles,
   })
 
   const contextNotes = buildContextNotes({
-    priorityDocs: config.priorityDocs,
+    priorityDocs: reviewablePriorityDocs,
     priorityDocsInContext,
     priorityDocsRead: priorityDocFiles,
     relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
     docsExcludedPaths: mentionMatchedDocsResult.excludedByCapPaths,
+    diffExcludedFiles: excludedDiffFiles,
   })
 
   // Step 9.5: fetch prior bot comments — needed both for the prompt (the
@@ -1007,6 +1077,8 @@ export const orchestrate = async (
     maxScanBytes: config.maxScanBytes,
     priorityDocs: config.priorityDocs,
     excludePaths: config.excludePaths.length > 0 ? config.excludePaths : "none",
+    diffExcludePaths: config.diffExcludePaths,
+    respectLinguistGenerated: config.respectLinguistGenerated,
     contextBudgetTokens: config.contextBudgetTokens,
     conventionsFile: config.conventionsFile,
     costSummary: config.costSummary,

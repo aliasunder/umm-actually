@@ -44,6 +44,8 @@ const collectRawInputs = (): RawInputs => ({
   maxRelatedDocs: core.getInput("max_related_docs"),
   priorityDocs: core.getInput("priority_docs"),
   excludePaths: core.getInput("exclude_paths"),
+  diffExcludePaths: core.getInput("diff_exclude_paths"),
+  respectLinguistGenerated: core.getBooleanInput("respect_linguist_generated"),
   costSummary: core.getBooleanInput("cost_summary"),
   prNumberOverride: core.getInput("pr_number"),
 })

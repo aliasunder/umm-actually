@@ -98,7 +98,11 @@ File anchoring: when you fill "file", copy the exact path="…" attribute of one
 file block or the path in one "=== path ===" diff header — nothing appended,
 nothing paraphrased. Boundary: a finding on a path that has no file block and
 no diff header is dropped before posting, so when the defect lives in a file
-you were not given, report it against the provided file that calls into it.`
+you were not given, report it against the provided file that calls into it.
+
+Excluded files: files listed in the "changed file(s) excluded from review"
+trailer at the end of the diff are not in context — their content was not
+provided. Do not report findings on excluded file paths.`
 
 export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string =>
   [

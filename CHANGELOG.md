@@ -1,6 +1,5 @@
 # Changelog
 
-
 ## [0.4.0] — 2026-09-05
 
 ### Features

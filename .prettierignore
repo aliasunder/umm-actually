@@ -1,0 +1,7 @@
+# Written by the release flow's update-changelog.sh, not by hand — its
+# formatting is the generator's business, and checking it turns every PR
+# red when a release commit lands unformatted on main
+CHANGELOG.md
+# npm's output format is the source of truth; reformatting a lockfile
+# invites churn against what the tool regenerates
+package-lock.json
