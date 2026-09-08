@@ -1,5 +1,16 @@
 # Changelog
 
+
+## [0.4.1] — 2026-09-08
+
+### Features
+
+- Exclude generated files from the review diff by default (#88)
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.0
+
 ## [0.4.0] — 2026-09-05
 
 ### Features
