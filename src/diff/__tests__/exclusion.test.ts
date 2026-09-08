@@ -388,6 +388,26 @@ describe("partitionExcludedFiles", () => {
       },
     ])
   })
+
+  it("strips leading slashes before classification", () => {
+    const leadingSlash = makeFile({
+      from: "/generated/api.ts",
+      to: "/generated/api.ts",
+    })
+
+    const result = partition([leadingSlash], {
+      operatorPatterns: ["generated"],
+    })
+
+    expect(result.excluded).toEqual([
+      {
+        path: "generated/api.ts",
+        additions: 3,
+        deletions: 1,
+        source: "operator_pattern",
+      },
+    ])
+  })
 })
 
 describe("renderExcludedFilesNote", () => {

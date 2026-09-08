@@ -71,8 +71,9 @@ const UNESCAPED_WHITESPACE = /(?<!\\)\s+/
 /**
  * Extracts the linguist-generated rules from .gitattributes content. The
  * file arrives from the PR head checkout, so it is untrusted input: a
- * malformed or wildcard-cap-violating line drops that rule with a warn and
- * never fails the run.
+ * wildcard-cap-violating line drops that rule with a warn; lines with no
+ * recognized linguist-generated attribute are ignored — and neither ever
+ * fails the run.
  */
 const parseLinguistGeneratedRules = (
   content: string,
@@ -164,9 +165,9 @@ export const createExclusionMatcher = (
     }
 
     // Last matching rule wins, per gitattributes semantics
-    const generated = compiledLinguistRules
-      .filter((rule) => rule.matchesPath(filePath))
-      .at(-1)?.generated
+    const generated = compiledLinguistRules.findLast((rule) =>
+      rule.matchesPath(filePath),
+    )?.generated
     if (generated === false) return null
     if (generated === true) return "linguist_generated"
 
@@ -183,10 +184,10 @@ export const createExclusionMatcher = (
   return { classify }
 }
 
-/** The path a file is judged by: the new path, or the old path for
+/** The path a file is classified by: the new path, or the old path for
  *  deletions — a rename out of an excluded folder into reviewable source is
  *  reviewed, while a rename into one is excluded. */
-const exclusionPath = (file: File): string | null => {
+const classificationPath = (file: File): string | null => {
   const filePath = newFilePath(file) ?? file.from
   if (!filePath || filePath === "/dev/null") return null
   // Leading slashes are stripped because ignore().ignores() throws on
@@ -210,7 +211,7 @@ export const partitionExcludedFiles = ({
   const excluded: ExcludedDiffFile[] = []
 
   for (const file of files) {
-    const filePath = exclusionPath(file)
+    const filePath = classificationPath(file)
     const source = filePath ? matcher.classify(filePath) : null
     if (filePath && source) {
       excluded.push({

@@ -782,17 +782,17 @@ const runReviewPipeline = async (
   })
 
   const priorityDocsInContextPaths = findInContextPriorityDocs({
-    priorityDocs: config.priorityDocs,
+    priorityDocs: reviewablePriorityDocs,
     priorityDocsInContext,
   })
   const priorityDocsAbsentPaths = findAbsentPriorityDocs({
-    priorityDocs: config.priorityDocs,
+    priorityDocs: reviewablePriorityDocs,
     priorityDocsInContext,
     priorityDocsRead: priorityDocFiles,
   })
 
   const contextNotes = buildContextNotes({
-    priorityDocs: config.priorityDocs,
+    priorityDocs: reviewablePriorityDocs,
     priorityDocsInContext,
     priorityDocsRead: priorityDocFiles,
     relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
@@ -1077,6 +1077,8 @@ export const orchestrate = async (
     maxScanBytes: config.maxScanBytes,
     priorityDocs: config.priorityDocs,
     excludePaths: config.excludePaths.length > 0 ? config.excludePaths : "none",
+    diffExcludePaths: config.diffExcludePaths,
+    respectLinguistGenerated: config.respectLinguistGenerated,
     contextBudgetTokens: config.contextBudgetTokens,
     conventionsFile: config.conventionsFile,
     costSummary: config.costSummary,
