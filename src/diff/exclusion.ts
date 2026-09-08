@@ -94,6 +94,7 @@ const parseLinguistGeneratedRules = (
     // ignores such lines, and so does this parser
     if (pattern.startsWith("!")) continue
 
+    // A line can carry multiple attributes; the last recognized one wins
     const generatedState = attributes
       .map((attribute) => GENERATED_ATTRIBUTE_STATES.get(attribute))
       .findLast((state) => state !== undefined)
@@ -113,8 +114,8 @@ const parseLinguistGeneratedRules = (
   return rules
 }
 
-/** A pattern hits as a root-anchored folder prefix (the exclude_paths rule)
- *  or as a glob — the union keeps both mental models valid. */
+/** Exact match, folder prefix ("generated" matches "generated/x.ts"),
+ *  or glob — the union lets operators write either bare names or globs. */
 const matchesExcludePattern = (filePath: string, pattern: string): boolean => {
   return (
     filePath === pattern ||
@@ -127,13 +128,64 @@ const matchesAnyPattern = (filePath: string, patterns: string[]): boolean => {
   return patterns.some((pattern) => matchesExcludePattern(filePath, pattern))
 }
 
-/**
- * Compiles all three exclusion tiers into one classifier so per-file
- * evaluation carries no configuration. Gitattributes patterns get one
- * ignore() instance each — load-bearing: a shared instance would apply
- * gitignore "!" negation semantics across rules, which the gitattributes
- * format forbids; per-pattern instances keep last-match-wins a plain fold.
- */
+type CompiledLinguistRule = {
+  matchesPath: (filePath: string) => boolean
+  generated: boolean
+}
+
+/** Precedence: diff_exclude_paths patterns are the most intentional layer
+ *  and beat a repo's negated gitattributes entry; a negated entry in turn
+ *  exempts the file from the built-in default list. */
+const classifyExclusion = (
+  filePath: string,
+  {
+    operatorPatterns,
+    linguistRules,
+    defaultPatterns,
+  }: {
+    operatorPatterns: string[]
+    linguistRules: CompiledLinguistRule[]
+    defaultPatterns: string[]
+  },
+): DiffExclusionSource | null => {
+  if (matchesAnyPattern(filePath, operatorPatterns)) {
+    return "diff_exclude_paths"
+  }
+
+  // Last matching rule wins, per gitattributes semantics.
+  // Three states: true (generated), false (explicitly not generated —
+  // exempts from defaults), undefined (no rule matched — fall through).
+  const linguistGenerated = linguistRules.findLast((rule) => {
+    return rule.matchesPath(filePath)
+  })?.generated
+  if (linguistGenerated === false) return null
+  if (linguistGenerated === true) return "linguist_generated"
+
+  if (matchesAnyPattern(filePath, defaultPatterns)) return "default_list"
+  return null
+}
+
+/** Compiles gitattributes patterns into per-pattern ignore() instances —
+ *  load-bearing: a shared instance would apply gitignore "!" negation
+ *  semantics across rules, which the gitattributes format forbids;
+ *  per-pattern instances keep last-match-wins a plain fold. */
+const compileLinguistRules = (
+  gitAttributesContent: string | null,
+  logger: Logger,
+): CompiledLinguistRule[] => {
+  if (!gitAttributesContent) return []
+
+  return parseLinguistGeneratedRules(gitAttributesContent, logger).map(
+    (rule) => {
+      const patternMatcher = createIgnoreMatcher().add(rule.pattern)
+      return {
+        matchesPath: (filePath: string) => patternMatcher.ignores(filePath),
+        generated: rule.generated,
+      }
+    },
+  )
+}
+
 export const createExclusionMatcher = (
   {
     defaultPatterns,
@@ -146,38 +198,17 @@ export const createExclusionMatcher = (
   },
   logger: Logger,
 ): ExclusionMatcher => {
-  const linguistRules = gitAttributesContent
-    ? parseLinguistGeneratedRules(gitAttributesContent, logger)
-    : []
-  const compiledLinguistRules = linguistRules.map((rule) => {
-    const patternMatcher = createIgnoreMatcher().add(rule.pattern)
-    return {
-      matchesPath: (filePath: string) => patternMatcher.ignores(filePath),
-      generated: rule.generated,
-    }
-  })
+  const linguistRules = compileLinguistRules(gitAttributesContent, logger)
 
-  const classify = (filePath: string): DiffExclusionSource | null => {
-    // Precedence: input patterns (diff_exclude_paths) are the most
-    // intentional layer and beat a repo's negated gitattributes entry; a
-    // negated entry in turn exempts the file from the built-in default list.
-    if (matchesAnyPattern(filePath, operatorPatterns))
-      return "diff_exclude_paths"
-
-    // Last matching rule wins, per gitattributes semantics.
-    // Three states: true (generated), false (explicitly not generated —
-    // exempts from defaults), undefined (no rule matched — fall through).
-    const linguistGenerated = compiledLinguistRules.findLast((rule) => {
-      return rule.matchesPath(filePath)
-    })?.generated
-    if (linguistGenerated === false) return null
-    if (linguistGenerated === true) return "linguist_generated"
-
-    if (matchesAnyPattern(filePath, defaultPatterns)) return "default_list"
-    return null
+  return {
+    classify: (filePath) => {
+      return classifyExclusion(filePath, {
+        operatorPatterns,
+        linguistRules,
+        defaultPatterns,
+      })
+    },
   }
-
-  return { classify }
 }
 
 /** The path a file is classified by: the new path, or the old path for
