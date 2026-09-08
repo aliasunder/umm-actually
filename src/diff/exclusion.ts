@@ -165,9 +165,9 @@ export const createExclusionMatcher = (
     }
 
     // Last matching rule wins, per gitattributes semantics
-    const generated = compiledLinguistRules.findLast((rule) =>
-      rule.matchesPath(filePath),
-    )?.generated
+    const generated = compiledLinguistRules.findLast((rule) => {
+      return rule.matchesPath(filePath)
+    })?.generated
     if (generated === false) return null
     if (generated === true) return "linguist_generated"
 
