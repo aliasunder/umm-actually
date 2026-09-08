@@ -231,8 +231,11 @@ const SOURCE_LABELS: Record<DiffExclusionSource, string> = {
 
 /** Human-readable label for each exclusion source, shown in the excluded-
  *  files trailer and the status comment's context notes. */
-export const describeExclusionSource = (source: DiffExclusionSource): string =>
-  SOURCE_LABELS[source]
+export const describeExclusionSource = (
+  source: DiffExclusionSource,
+): string => {
+  return SOURCE_LABELS[source]
+}
 
 /** One line per excluded file with change counts and the source that
  *  excluded it — shared by the prompt trailer and the all-excluded skip
