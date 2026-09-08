@@ -478,9 +478,8 @@ export const createContextReader = (
   const scanWorkspaceSourceFiles = (): Promise<string[]> =>
     scanWorkspaceFiles(SCANNABLE_EXTENSIONS)
 
-  /** excludePaths carries the diff-excluded changed files: their content
-   *  must not re-enter the prompt through the import trace after the diff
-   *  partition removed them from the review subject. */
+  /** Paths in excludePaths are skipped during the import-trace scan so
+   *  their content cannot re-enter the prompt after being excluded. */
   const findRelatedFiles = async ({
     changedPaths,
     budgetTokens,

@@ -71,7 +71,7 @@ describe("parseConfig", () => {
           "**/*.min.css",
           "**/*.map",
         ],
-        operatorPatterns: [],
+        diffExcludePathPatterns: [],
       },
       respectLinguistGenerated: true,
       costSummary: true,
@@ -263,7 +263,7 @@ describe("parseConfig", () => {
       makeRawInputs({ diffExcludePaths: "evals/**, **/*.snap" }),
     )
 
-    expect(config.diffExcludePaths.operatorPatterns).toEqual([
+    expect(config.diffExcludePaths.diffExcludePathPatterns).toEqual([
       "evals/**",
       "**/*.snap",
     ])
@@ -279,7 +279,7 @@ describe("parseConfig", () => {
 
     expect(config.diffExcludePaths).toEqual({
       defaultPatterns: [],
-      operatorPatterns: [],
+      diffExcludePathPatterns: [],
     })
   })
 
@@ -290,7 +290,7 @@ describe("parseConfig", () => {
 
     expect(config.diffExcludePaths).toEqual({
       defaultPatterns: [],
-      operatorPatterns: ["evals/**"],
+      diffExcludePathPatterns: ["evals/**"],
     })
   })
 
@@ -307,7 +307,7 @@ describe("parseConfig", () => {
       makeRawInputs({ diffExcludePaths: "/evals, ./fixtures/, generated//" }),
     )
 
-    expect(config.diffExcludePaths.operatorPatterns).toEqual([
+    expect(config.diffExcludePaths.diffExcludePathPatterns).toEqual([
       "evals",
       "fixtures",
       "generated",

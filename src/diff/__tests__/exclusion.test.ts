@@ -22,7 +22,7 @@ const makeFile = (overrides: Partial<File> = {}): File => ({
 
 type MatcherOverrides = {
   defaultPatterns?: string[]
-  operatorPatterns?: string[]
+  diffExcludePathPatterns?: string[]
   gitAttributesContent?: string
 }
 
@@ -30,7 +30,7 @@ const makeMatcher = (overrides: MatcherOverrides = {}) => {
   return createExclusionMatcher(
     {
       defaultPatterns: overrides.defaultPatterns ?? [],
-      operatorPatterns: overrides.operatorPatterns ?? [],
+      diffExcludePathPatterns: overrides.diffExcludePathPatterns ?? [],
       gitAttributesContent: overrides.gitAttributesContent ?? null,
     },
     createTestLogger(),
@@ -126,7 +126,7 @@ describe("createExclusionMatcher — gitattributes rules", () => {
     const matcher = createExclusionMatcher(
       {
         defaultPatterns: [],
-        operatorPatterns: [],
+        diffExcludePathPatterns: [],
         gitAttributesContent: [
           "*a*a*a*b linguist-generated=true",
           "*.snap linguist-generated=true",
@@ -216,7 +216,7 @@ describe("partitionExcludedFiles", () => {
     const source = makeFile()
 
     const result = partition([generated, source], {
-      operatorPatterns: ["generated"],
+      diffExcludePathPatterns: ["generated"],
     })
 
     expect(result.kept).toEqual([source])
@@ -318,7 +318,7 @@ describe("partitionExcludedFiles", () => {
     })
 
     const result = partition([lockfile], {
-      operatorPatterns: ["**/package-lock.json"],
+      diffExcludePathPatterns: ["**/package-lock.json"],
       gitAttributesContent: "package-lock.json -linguist-generated",
     })
 
@@ -341,7 +341,7 @@ describe("partitionExcludedFiles", () => {
     })
 
     const result = partition([deleted, makeFile()], {
-      operatorPatterns: ["generated"],
+      diffExcludePathPatterns: ["generated"],
     })
 
     expect(keptPaths(result)).toEqual(["src/app.ts"])
@@ -362,7 +362,7 @@ describe("partitionExcludedFiles", () => {
     })
 
     const result = partition([renamedOut], {
-      operatorPatterns: ["generated"],
+      diffExcludePathPatterns: ["generated"],
     })
 
     expect(result).toEqual({ kept: [renamedOut], excluded: [] })
@@ -375,7 +375,7 @@ describe("partitionExcludedFiles", () => {
     })
 
     const result = partition([renamedIn], {
-      operatorPatterns: ["generated"],
+      diffExcludePathPatterns: ["generated"],
     })
 
     expect(result.kept).toEqual([])
@@ -396,7 +396,7 @@ describe("partitionExcludedFiles", () => {
     })
 
     const result = partition([leadingSlash], {
-      operatorPatterns: ["generated"],
+      diffExcludePathPatterns: ["generated"],
     })
 
     expect(result.excluded).toEqual([

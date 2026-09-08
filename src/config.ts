@@ -74,16 +74,15 @@ export const DEFAULT_DIFF_EXCLUDE_PATTERNS = [
 
 export type DiffExcludeConfig = {
   /** The built-in list, or empty when a leading "none" disabled it. Kept
-   *  separate from operatorPatterns: a repo's negated gitattributes entry
-   *  exempts a file from this tier but never from operator patterns. */
+   *  separate: a negated gitattributes entry exempts a file from this tier
+   *  but never from diff_exclude_paths patterns. */
   defaultPatterns: string[]
-  operatorPatterns: string[]
+  diffExcludePathPatterns: string[]
 }
 
-/** "" = the built-in default list (bare repo-variable wiring); a leading
- *  "none" disables the defaults — with a non-empty default, the empty string
- *  cannot mean both "default" and "off", so this input carries the action's
- *  only off sentinel. Supplied patterns extend whichever base survives. */
+/** Parses the diff_exclude_paths action input. A leading "none" disables
+ *  the built-in default list; additional patterns extend whatever base
+ *  survives. An empty input keeps the full default list. */
 const diffExcludePathsInput = z.string().transform((value, ctx) => {
   const entries = value
     .split(",")
@@ -102,11 +101,11 @@ const diffExcludePathsInput = z.string().transform((value, ctx) => {
     return z.NEVER
   }
 
-  const operatorPatterns = patternEntries
+  const diffExcludePathPatterns = patternEntries
     .map(normalizeWorkspacePath)
     .filter((pattern) => pattern !== "" && pattern !== ".")
 
-  const unsafePatterns = operatorPatterns.filter(hasExcessiveWildcards)
+  const unsafePatterns = diffExcludePathPatterns.filter(hasExcessiveWildcards)
   if (unsafePatterns.length > 0) {
     ctx.addIssue({
       code: "custom",
@@ -117,7 +116,7 @@ const diffExcludePathsInput = z.string().transform((value, ctx) => {
 
   return {
     defaultPatterns: defaultsDisabled ? [] : DEFAULT_DIFF_EXCLUDE_PATTERNS,
-    operatorPatterns,
+    diffExcludePathPatterns,
   }
 })
 

@@ -1,3 +1,19 @@
+/**
+ * Classifies diff files into "excluded from review" or "kept for review"
+ * based on three pattern tiers, checked in precedence order:
+ *
+ * 1. diff_exclude_paths — operator-configured patterns (action input)
+ * 2. linguist_generated — .gitattributes linguist-generated rules
+ * 3. default_list — built-in patterns (lockfiles, snapshots, etc.)
+ *
+ * A negated gitattributes rule (linguist-generated=false) exempts a file
+ * from the default list but not from diff_exclude_paths.
+ *
+ * Entry points:
+ * - createExclusionMatcher — compiles patterns into a reusable classifier
+ * - partitionExcludedFiles — splits a parsed diff into kept and excluded
+ * - renderExcludedFilesNote — formats the excluded-files trailer for the prompt
+ */
 import { posix } from "node:path"
 import ignoreModule from "ignore"
 import type { File } from "parse-diff"
@@ -142,16 +158,16 @@ type CompiledLinguistRule = {
 const classifyExclusion = (
   filePath: string,
   {
-    operatorPatterns,
+    diffExcludePathPatterns,
     linguistRules,
     defaultPatterns,
   }: {
-    operatorPatterns: string[]
+    diffExcludePathPatterns: string[]
     linguistRules: CompiledLinguistRule[]
     defaultPatterns: string[]
   },
 ): DiffExclusionSource | null => {
-  if (matchesAnyExcludePattern(filePath, operatorPatterns)) {
+  if (matchesAnyExcludePattern(filePath, diffExcludePathPatterns)) {
     return "diff_exclude_paths"
   }
 
@@ -192,11 +208,11 @@ const compileLinguistRules = (
 export const createExclusionMatcher = (
   {
     defaultPatterns,
-    operatorPatterns,
+    diffExcludePathPatterns,
     gitAttributesContent,
   }: {
     defaultPatterns: string[]
-    operatorPatterns: string[]
+    diffExcludePathPatterns: string[]
     gitAttributesContent: string | null
   },
   logger: Logger,
@@ -206,7 +222,7 @@ export const createExclusionMatcher = (
   return {
     classify: (filePath) => {
       return classifyExclusion(filePath, {
-        operatorPatterns,
+        diffExcludePathPatterns,
         linguistRules,
         defaultPatterns,
       })

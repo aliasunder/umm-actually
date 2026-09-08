@@ -238,7 +238,7 @@ const baseConfig: ActionConfig = {
   maxRelatedDocs: 4,
   priorityDocs: [],
   excludePaths: [],
-  diffExcludePaths: { defaultPatterns: [], operatorPatterns: [] },
+  diffExcludePaths: { defaultPatterns: [], diffExcludePathPatterns: [] },
   respectLinguistGenerated: true,
   costSummary: true,
   prNumberOverride: undefined,
@@ -629,7 +629,7 @@ describe("orchestrate", () => {
         config: {
           diffExcludePaths: {
             defaultPatterns: [],
-            operatorPatterns: ["src/**", "assets/**"],
+            diffExcludePathPatterns: ["src/**", "assets/**"],
           },
         },
       })
@@ -673,7 +673,7 @@ describe("orchestrate", () => {
         config: {
           diffExcludePaths: {
             defaultPatterns: ["src/**", "assets/**"],
-            operatorPatterns: [],
+            diffExcludePathPatterns: [],
           },
         },
       })
@@ -691,7 +691,7 @@ describe("orchestrate", () => {
         config: {
           diffExcludePaths: {
             defaultPatterns: [],
-            operatorPatterns: ["assets/**"],
+            diffExcludePathPatterns: ["assets/**"],
           },
         },
       })
@@ -724,7 +724,7 @@ describe("orchestrate", () => {
         config: {
           diffExcludePaths: {
             defaultPatterns: [],
-            operatorPatterns: ["assets/**"],
+            diffExcludePathPatterns: ["assets/**"],
           },
         },
       })
@@ -750,7 +750,7 @@ describe("orchestrate", () => {
           priorityDocs: ["assets/logo.png", "docs/guide.md"],
           diffExcludePaths: {
             defaultPatterns: [],
-            operatorPatterns: ["assets/**"],
+            diffExcludePathPatterns: ["assets/**"],
           },
         },
       })
@@ -768,7 +768,7 @@ describe("orchestrate", () => {
         config: {
           diffExcludePaths: {
             defaultPatterns: [],
-            operatorPatterns: ["assets/**"],
+            diffExcludePathPatterns: ["assets/**"],
           },
         },
       })
@@ -793,7 +793,7 @@ describe("orchestrate", () => {
           contextBudgetTokens: 220,
           diffExcludePaths: {
             defaultPatterns: [],
-            operatorPatterns: ["src/**"],
+            diffExcludePathPatterns: ["src/**"],
           },
         },
       })
@@ -817,7 +817,7 @@ describe("orchestrate", () => {
         config: {
           diffExcludePaths: {
             defaultPatterns: [],
-            operatorPatterns: ["assets/**"],
+            diffExcludePathPatterns: ["assets/**"],
           },
         },
         fixtureResult: {
