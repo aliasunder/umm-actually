@@ -9,8 +9,8 @@ import { newFilePath } from "./commentable-lines.js"
  *  and the runtime interop (the package sets module.exports.default itself). */
 const createIgnoreMatcher = ignoreModule.default
 
-/** Which exclusion layer matched — each names the surface the user sees. */
-export type DiffExclusionSource = "builtin" | "input" | "gitattributes"
+export type DiffExclusionSource =
+  "diff_exclude_paths" | "linguist_generated" | "default_list"
 
 export type ExcludedDiffFile = {
   path: string
@@ -161,7 +161,8 @@ export const createExclusionMatcher = (
     // Precedence: input patterns (diff_exclude_paths) are the most
     // intentional layer and beat a repo's negated gitattributes entry; a
     // negated entry in turn exempts the file from the built-in default list.
-    if (matchesAnyPattern(filePath, operatorPatterns)) return "input"
+    if (matchesAnyPattern(filePath, operatorPatterns))
+      return "diff_exclude_paths"
 
     // Last matching rule wins, per gitattributes semantics.
     // Three states: true (generated), false (explicitly not generated —
@@ -170,9 +171,9 @@ export const createExclusionMatcher = (
       return rule.matchesPath(filePath)
     })?.generated
     if (linguistGenerated === false) return null
-    if (linguistGenerated === true) return "gitattributes"
+    if (linguistGenerated === true) return "linguist_generated"
 
-    if (matchesAnyPattern(filePath, defaultPatterns)) return "builtin"
+    if (matchesAnyPattern(filePath, defaultPatterns)) return "default_list"
     return null
   }
 
@@ -224,9 +225,9 @@ export const partitionExcludedFiles = ({
 }
 
 const SOURCE_LABELS: Record<DiffExclusionSource, string> = {
-  builtin: "built-in default list",
-  input: "diff_exclude_paths input",
-  gitattributes: "linguist-generated attribute",
+  diff_exclude_paths: "diff_exclude_paths input",
+  linguist_generated: "linguist-generated attribute",
+  default_list: "built-in default list",
 }
 
 /** Human-readable label for each exclusion source, shown in the excluded-
@@ -250,9 +251,9 @@ export const renderExcludedFileLines = (
 }
 
 const SOURCE_SUMMARY_ORDER: DiffExclusionSource[] = [
-  "input",
-  "gitattributes",
-  "builtin",
+  "diff_exclude_paths",
+  "linguist_generated",
+  "default_list",
 ]
 
 /** Per-source counts for one-line surfaces (check-run title, skip reason). */

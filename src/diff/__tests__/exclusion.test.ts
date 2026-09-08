@@ -93,8 +93,8 @@ describe("createExclusionMatcher — gitattributes rules", () => {
       ].join("\n"),
     })
 
-    expect(matcher.classify("a.json")).toBe("gitattributes")
-    expect(matcher.classify("b.json")).toBe("gitattributes")
+    expect(matcher.classify("a.json")).toBe("linguist_generated")
+    expect(matcher.classify("b.json")).toBe("linguist_generated")
     expect(matcher.classify("c.json")).toBeNull()
     expect(matcher.classify("d.json")).toBeNull()
   })
@@ -110,7 +110,7 @@ describe("createExclusionMatcher — gitattributes rules", () => {
     })
 
     expect(matcher.classify("x.pdf")).toBeNull()
-    expect(matcher.classify("x.snap")).toBe("gitattributes")
+    expect(matcher.classify("x.snap")).toBe("linguist_generated")
   })
 
   it("ignores gitignore-style negation patterns, which gitattributes forbids", () => {
@@ -136,7 +136,7 @@ describe("createExclusionMatcher — gitattributes rules", () => {
     )
 
     expect(matcher.classify("aaaab")).toBeNull()
-    expect(matcher.classify("x.snap")).toBe("gitattributes")
+    expect(matcher.classify("x.snap")).toBe("linguist_generated")
     expect(logger.messages).toEqual([
       {
         level: "warn",
@@ -152,7 +152,7 @@ describe("createExclusionMatcher — gitattributes rules", () => {
       gitAttributesContent: "a\\ b.json linguist-generated=true",
     })
 
-    expect(matcher.classify("a b.json")).toBe("gitattributes")
+    expect(matcher.classify("a b.json")).toBe("linguist_generated")
   })
 
   it("returns null when no rule matches", () => {
@@ -168,7 +168,7 @@ describe("createExclusionMatcher — gitattributes rules", () => {
       gitAttributesContent: "*.snap linguist-generated=true",
     })
 
-    expect(matcher.classify("deep/nested/x.snap")).toBe("gitattributes")
+    expect(matcher.classify("deep/nested/x.snap")).toBe("linguist_generated")
   })
 
   it("applies the last matching rule when rules overlap", () => {
@@ -180,7 +180,7 @@ describe("createExclusionMatcher — gitattributes rules", () => {
     })
 
     expect(matcher.classify("snapshots/keep.json")).toBeNull()
-    expect(matcher.classify("snapshots/other.json")).toBe("gitattributes")
+    expect(matcher.classify("snapshots/other.json")).toBe("linguist_generated")
   })
 
   it("matches directory-style patterns against contained files", () => {
@@ -194,8 +194,10 @@ describe("createExclusionMatcher — gitattributes rules", () => {
       gitAttributesContent: "__snapshots__ linguist-generated=true",
     })
 
-    expect(trailingSlash.classify("__snapshots__/x.json")).toBe("gitattributes")
-    expect(bareName.classify("__snapshots__/x.json")).toBe("gitattributes")
+    expect(trailingSlash.classify("__snapshots__/x.json")).toBe(
+      "linguist_generated",
+    )
+    expect(bareName.classify("__snapshots__/x.json")).toBe("linguist_generated")
   })
 })
 
@@ -223,7 +225,7 @@ describe("partitionExcludedFiles", () => {
         path: "generated/api.ts",
         additions: 3,
         deletions: 1,
-        source: "input",
+        source: "diff_exclude_paths",
       },
     ])
   })
@@ -247,7 +249,7 @@ describe("partitionExcludedFiles", () => {
         path: "package-lock.json",
         additions: 3,
         deletions: 1,
-        source: "builtin",
+        source: "default_list",
       },
     ])
   })
@@ -272,7 +274,7 @@ describe("partitionExcludedFiles", () => {
         path: "src/a/__tests__/x.snap",
         additions: 3,
         deletions: 1,
-        source: "builtin",
+        source: "default_list",
       },
     ])
   })
@@ -290,7 +292,7 @@ describe("partitionExcludedFiles", () => {
         path: "gen/x.json",
         additions: 3,
         deletions: 1,
-        source: "gitattributes",
+        source: "linguist_generated",
       },
     ])
   })
@@ -326,7 +328,7 @@ describe("partitionExcludedFiles", () => {
         path: "package-lock.json",
         additions: 3,
         deletions: 1,
-        source: "input",
+        source: "diff_exclude_paths",
       },
     ])
   })
@@ -348,7 +350,7 @@ describe("partitionExcludedFiles", () => {
         path: "generated/old.ts",
         additions: 3,
         deletions: 1,
-        source: "input",
+        source: "diff_exclude_paths",
       },
     ])
   })
@@ -382,7 +384,7 @@ describe("partitionExcludedFiles", () => {
         path: "generated/api.ts",
         additions: 3,
         deletions: 1,
-        source: "input",
+        source: "diff_exclude_paths",
       },
     ])
   })
@@ -402,7 +404,7 @@ describe("partitionExcludedFiles", () => {
         path: "generated/api.ts",
         additions: 3,
         deletions: 1,
-        source: "input",
+        source: "diff_exclude_paths",
       },
     ])
   })
@@ -419,19 +421,19 @@ describe("renderExcludedFilesNote", () => {
         path: "package-lock.json",
         additions: 1200,
         deletions: 800,
-        source: "builtin",
+        source: "default_list",
       },
       {
         path: "evals/run.json",
         additions: 10,
         deletions: 0,
-        source: "input",
+        source: "diff_exclude_paths",
       },
       {
         path: "gen/x.json",
         additions: 5,
         deletions: 5,
-        source: "gitattributes",
+        source: "linguist_generated",
       },
     ]
 
@@ -455,25 +457,25 @@ describe("summarizeExclusionSources", () => {
         path: "package-lock.json",
         additions: 1,
         deletions: 1,
-        source: "builtin",
+        source: "default_list",
       },
       {
         path: "yarn.lock",
         additions: 1,
         deletions: 1,
-        source: "builtin",
+        source: "default_list",
       },
       {
         path: "evals/run.json",
         additions: 1,
         deletions: 1,
-        source: "input",
+        source: "diff_exclude_paths",
       },
       {
         path: "gen/x.json",
         additions: 1,
         deletions: 1,
-        source: "gitattributes",
+        source: "linguist_generated",
       },
     ]
 
@@ -488,7 +490,7 @@ describe("summarizeExclusionSources", () => {
         path: "package-lock.json",
         additions: 1,
         deletions: 1,
-        source: "builtin",
+        source: "default_list",
       },
     ]
 
