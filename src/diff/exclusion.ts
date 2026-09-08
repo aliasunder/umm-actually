@@ -124,7 +124,10 @@ const matchesExcludePattern = (filePath: string, pattern: string): boolean => {
   )
 }
 
-const matchesAnyPattern = (filePath: string, patterns: string[]): boolean => {
+const matchesAnyExcludePattern = (
+  filePath: string,
+  patterns: string[],
+): boolean => {
   return patterns.some((pattern) => matchesExcludePattern(filePath, pattern))
 }
 
@@ -148,7 +151,7 @@ const classifyExclusion = (
     defaultPatterns: string[]
   },
 ): DiffExclusionSource | null => {
-  if (matchesAnyPattern(filePath, operatorPatterns)) {
+  if (matchesAnyExcludePattern(filePath, operatorPatterns)) {
     return "diff_exclude_paths"
   }
 
@@ -161,7 +164,7 @@ const classifyExclusion = (
   if (linguistGenerated === false) return null
   if (linguistGenerated === true) return "linguist_generated"
 
-  if (matchesAnyPattern(filePath, defaultPatterns)) return "default_list"
+  if (matchesAnyExcludePattern(filePath, defaultPatterns)) return "default_list"
   return null
 }
 
