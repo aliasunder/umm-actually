@@ -15,15 +15,9 @@
  * - renderExcludedFilesNote — formats the excluded-files trailer for the prompt
  */
 import { posix } from "node:path"
-import ignoreModule from "ignore"
 import type { File } from "parse-diff"
 import type { Logger } from "../logger.js"
 import { newFilePath } from "./commentable-lines.js"
-
-/** ignore ships CommonJS with an ESM-style "export default" declaration, so
- *  under NodeNext the callable factory sits behind .default in both the type
- *  and the runtime interop (the package sets module.exports.default itself). */
-const createIgnoreMatcher = ignoreModule.default
 
 export type DiffExclusionSource =
   "diff_exclude_paths" | "linguist_generated" | "default_list"
@@ -44,25 +38,71 @@ export type ExclusionMatcher = {
   classify: (filePath: string) => DiffExclusionSource | null
 }
 
+// ---------------------------------------------------------------------------
+// Pattern matching
+// ---------------------------------------------------------------------------
+
 /**
- * Matching engines (path.matchesGlob, the ignore package) backtrack
- * exponentially when one segment interleaves several "*" wildcards with
- * literals — a crafted 40+-char filename hangs a single synchronous,
- * unabortable match call for minutes. Both pattern channels (the
- * diff_exclude_paths input and repo .gitattributes) are bounded by this
- * cap; "**" globstar segments are exempt because globstar traversal does
- * not backtrack.
+ * Matching engines backtrack exponentially when one segment interleaves
+ * several "*" wildcards with literals — a crafted 40+-char filename hangs
+ * a synchronous match call for minutes. Both pattern channels
+ * (diff_exclude_paths input and .gitattributes) are bounded by this cap;
+ * "**" globstar segments are exempt because globstar traversal does not
+ * backtrack.
  */
 export const hasExcessiveWildcards = (pattern: string): boolean => {
   return pattern.split("/").some((segment) => {
     if (segment === "**") return false
-    // An escaped character is a literal to every matcher — an escaped star
-    // cannot backtrack, so it must not count toward the cap
+    // Escaped characters are literals — escaped stars cannot backtrack
     const unescapedSegment = segment.replace(/\\./g, "")
     const starCount = (unescapedSegment.match(/\*/g) ?? []).length
     return starCount > 2
   })
 }
+
+/** Exact match, folder prefix ("generated" matches "generated/x.ts"),
+ *  or glob — the union lets operators write either bare names or globs. */
+const matchesExcludePattern = (filePath: string, pattern: string): boolean => {
+  return (
+    filePath === pattern ||
+    filePath.startsWith(pattern + "/") ||
+    posix.matchesGlob(filePath, pattern)
+  )
+}
+
+const matchesAnyExcludePattern = (
+  filePath: string,
+  patterns: string[],
+): boolean => {
+  return patterns.some((pattern) => matchesExcludePattern(filePath, pattern))
+}
+
+/** Gitattributes patterns follow gitignore syntax: a slash-less pattern
+ *  matches basenames at any depth; a trailing slash matches directory
+ *  contents. Normalizes to a glob that matchesGlob understands. */
+const matchesGitattributesPattern = (
+  filePath: string,
+  pattern: string,
+): boolean => {
+  // Gitattributes escapes spaces with backslash; matchesGlob expects literals
+  const unescaped = pattern.replace(/\\ /g, " ")
+
+  if (unescaped.endsWith("/")) {
+    return posix.matchesGlob(filePath, `${unescaped}**`)
+  }
+  if (!unescaped.includes("/")) {
+    // Bare name: matches as a file at any depth, or as a directory's contents
+    return (
+      posix.matchesGlob(filePath, `**/${unescaped}`) ||
+      posix.matchesGlob(filePath, `**/${unescaped}/**`)
+    )
+  }
+  return posix.matchesGlob(filePath, unescaped)
+}
+
+// ---------------------------------------------------------------------------
+// Gitattributes parsing
+// ---------------------------------------------------------------------------
 
 type LinguistRule = {
   pattern: string
@@ -86,8 +126,8 @@ const GENERATED_ATTRIBUTE_STATES = new Map<string, boolean>([
 const UNESCAPED_WHITESPACE = /(?<!\\)\s+/
 
 /**
- * Extracts the linguist-generated rules from .gitattributes content. The
- * file arrives from the PR head checkout, so it is untrusted input: a
+ * Extracts linguist-generated rules from .gitattributes content. The file
+ * arrives from the PR head checkout, so it is untrusted input: a
  * wildcard-cap-violating line drops that rule with a warn; lines with no
  * recognized linguist-generated attribute are ignored — and neither ever
  * fails the run.
@@ -106,8 +146,7 @@ const parseLinguistGeneratedRules = (
       .split(UNESCAPED_WHITESPACE)
       .filter(Boolean)
     if (!pattern) continue
-    // gitattributes forbids gitignore-style "!" negation patterns — git
-    // ignores such lines, and so does this parser
+    // Gitattributes forbids gitignore-style "!" negation patterns
     if (pattern.startsWith("!")) continue
 
     // A line can carry multiple attributes; the last recognized one wins
@@ -130,27 +169,9 @@ const parseLinguistGeneratedRules = (
   return rules
 }
 
-/** Exact match, folder prefix ("generated" matches "generated/x.ts"),
- *  or glob — the union lets operators write either bare names or globs. */
-const matchesExcludePattern = (filePath: string, pattern: string): boolean => {
-  return (
-    filePath === pattern ||
-    filePath.startsWith(pattern + "/") ||
-    posix.matchesGlob(filePath, pattern)
-  )
-}
-
-const matchesAnyExcludePattern = (
-  filePath: string,
-  patterns: string[],
-): boolean => {
-  return patterns.some((pattern) => matchesExcludePattern(filePath, pattern))
-}
-
-type CompiledLinguistRule = {
-  matchesPath: (filePath: string) => boolean
-  generated: boolean
-}
+// ---------------------------------------------------------------------------
+// Classification
+// ---------------------------------------------------------------------------
 
 /** Precedence: diff_exclude_paths patterns are the most intentional layer
  *  and beat a repo's negated gitattributes entry; a negated entry in turn
@@ -163,7 +184,7 @@ const classifyExclusion = (
     defaultPatterns,
   }: {
     diffExcludePathPatterns: string[]
-    linguistRules: CompiledLinguistRule[]
+    linguistRules: LinguistRule[]
     defaultPatterns: string[]
   },
 ): DiffExclusionSource | null => {
@@ -175,34 +196,13 @@ const classifyExclusion = (
   // Three states: true (generated), false (explicitly not generated —
   // exempts from defaults), undefined (no rule matched — fall through).
   const linguistGenerated = linguistRules.findLast((rule) => {
-    return rule.matchesPath(filePath)
+    return matchesGitattributesPattern(filePath, rule.pattern)
   })?.generated
   if (linguistGenerated === false) return null
   if (linguistGenerated === true) return "linguist_generated"
 
   if (matchesAnyExcludePattern(filePath, defaultPatterns)) return "default_list"
   return null
-}
-
-/** Compiles gitattributes patterns into per-pattern ignore() instances —
- *  load-bearing: a shared instance would apply gitignore "!" negation
- *  semantics across rules, which the gitattributes format forbids;
- *  per-pattern instances keep last-match-wins a plain fold. */
-const compileLinguistRules = (
-  gitAttributesContent: string | null,
-  logger: Logger,
-): CompiledLinguistRule[] => {
-  if (!gitAttributesContent) return []
-
-  return parseLinguistGeneratedRules(gitAttributesContent, logger).map(
-    (rule) => {
-      const patternMatcher = createIgnoreMatcher().add(rule.pattern)
-      return {
-        matchesPath: (filePath: string) => patternMatcher.ignores(filePath),
-        generated: rule.generated,
-      }
-    },
-  )
 }
 
 export const createExclusionMatcher = (
@@ -217,7 +217,9 @@ export const createExclusionMatcher = (
   },
   logger: Logger,
 ): ExclusionMatcher => {
-  const linguistRules = compileLinguistRules(gitAttributesContent, logger)
+  const linguistRules = gitAttributesContent
+    ? parseLinguistGeneratedRules(gitAttributesContent, logger)
+    : []
 
   return {
     classify: (filePath) => {
@@ -230,14 +232,18 @@ export const createExclusionMatcher = (
   }
 }
 
+// ---------------------------------------------------------------------------
+// File partitioning
+// ---------------------------------------------------------------------------
+
 /** The path a file is classified by: the new path, or the old path for
  *  deletions — a rename out of an excluded folder into reviewable source is
  *  reviewed, while a rename into one is excluded. */
 const classificationPath = (file: File): string | null => {
   const filePath = newFilePath(file) ?? file.from
   if (!filePath || filePath === "/dev/null") return null
-  // Leading slashes are stripped because ignore().ignores() throws on
-  // absolute paths, and diff paths are PR-author-influenced
+  // ignore().ignores() threw on absolute paths; matchesGlob doesn't, but
+  // diff paths are PR-author-influenced so normalize defensively
   return posix.normalize(filePath).replace(/^\/+/, "")
 }
 
@@ -274,14 +280,17 @@ export const partitionExcludedFiles = ({
   return { kept, excluded }
 }
 
+// ---------------------------------------------------------------------------
+// Rendering (status comments, prompt trailer, check-run title)
+// ---------------------------------------------------------------------------
+
 const SOURCE_LABELS: Record<DiffExclusionSource, string> = {
   diff_exclude_paths: "diff_exclude_paths input",
   linguist_generated: "linguist-generated attribute",
   default_list: "built-in default list",
 }
 
-/** Human-readable label for each exclusion source, shown in the excluded-
- *  files trailer and the status comment's context notes. */
+/** Human-readable label for each exclusion source. */
 export const describeExclusionSource = (
   source: DiffExclusionSource,
 ): string => {
