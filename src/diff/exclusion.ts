@@ -9,8 +9,8 @@ import { newFilePath } from "./commentable-lines.js"
  *  and the runtime interop (the package sets module.exports.default itself). */
 const createIgnoreMatcher = ignoreModule.default
 
-export type DiffExclusionSource =
-  "default_pattern" | "operator_pattern" | "linguist_generated"
+/** Which exclusion layer matched — each names the surface the user sees. */
+export type DiffExclusionSource = "builtin" | "input" | "gitattributes"
 
 export type ExcludedDiffFile = {
   path: string
@@ -32,9 +32,10 @@ export type ExclusionMatcher = {
  * Matching engines (path.matchesGlob, the ignore package) backtrack
  * exponentially when one segment interleaves several "*" wildcards with
  * literals — a crafted 40+-char filename hangs a single synchronous,
- * unabortable match call for minutes. Both pattern channels (operator
- * input and repo .gitattributes) are bounded by this cap; "**" globstar
- * segments are exempt because globstar traversal does not backtrack.
+ * unabortable match call for minutes. Both pattern channels (the
+ * diff_exclude_paths input and repo .gitattributes) are bounded by this
+ * cap; "**" globstar segments are exempt because globstar traversal does
+ * not backtrack.
  */
 export const hasExcessiveWildcards = (pattern: string): boolean => {
   return pattern.split("/").some((segment) => {
@@ -113,13 +114,17 @@ const parseLinguistGeneratedRules = (
 }
 
 /** A pattern hits as a root-anchored folder prefix (the exclude_paths rule)
- *  or as a glob — the union keeps both operator mental models valid. */
+ *  or as a glob — the union keeps both mental models valid. */
 const matchesExcludePattern = (filePath: string, pattern: string): boolean => {
   return (
     filePath === pattern ||
     filePath.startsWith(pattern + "/") ||
     posix.matchesGlob(filePath, pattern)
   )
+}
+
+const matchesAnyPattern = (filePath: string, patterns: string[]): boolean => {
+  return patterns.some((pattern) => matchesExcludePattern(filePath, pattern))
 }
 
 /**
@@ -153,31 +158,21 @@ export const createExclusionMatcher = (
   })
 
   const classify = (filePath: string): DiffExclusionSource | null => {
-    // Precedence: operator patterns are the most intentional layer and beat
-    // a repo's negated gitattributes entry; a negated entry in turn exempts
-    // the file from the built-in default list.
-    if (
-      operatorPatterns.some((pattern) =>
-        matchesExcludePattern(filePath, pattern),
-      )
-    ) {
-      return "operator_pattern"
-    }
+    // Precedence: input patterns (diff_exclude_paths) are the most
+    // intentional layer and beat a repo's negated gitattributes entry; a
+    // negated entry in turn exempts the file from the built-in default list.
+    if (matchesAnyPattern(filePath, operatorPatterns)) return "input"
 
-    // Last matching rule wins, per gitattributes semantics
-    const generated = compiledLinguistRules.findLast((rule) => {
+    // Last matching rule wins, per gitattributes semantics.
+    // Three states: true (generated), false (explicitly not generated —
+    // exempts from defaults), undefined (no rule matched — fall through).
+    const linguistGenerated = compiledLinguistRules.findLast((rule) => {
       return rule.matchesPath(filePath)
     })?.generated
-    if (generated === false) return null
-    if (generated === true) return "linguist_generated"
+    if (linguistGenerated === false) return null
+    if (linguistGenerated === true) return "gitattributes"
 
-    if (
-      defaultPatterns.some((pattern) =>
-        matchesExcludePattern(filePath, pattern),
-      )
-    ) {
-      return "default_pattern"
-    }
+    if (matchesAnyPattern(filePath, defaultPatterns)) return "builtin"
     return null
   }
 
@@ -228,17 +223,16 @@ export const partitionExcludedFiles = ({
   return { kept, excluded }
 }
 
-/** Operator-facing label for each exclusion source, shown in the excluded-
- *  files trailer and the status comment's context notes. One convention
- *  across labels: a lowercase noun phrase naming the layer, with the
- *  external identifier (input name, gitattributes attribute) verbatim. */
-export const describeExclusionSource = (
-  source: DiffExclusionSource,
-): string => {
-  if (source === "default_pattern") return "built-in default list"
-  if (source === "operator_pattern") return "diff_exclude_paths input"
-  return "linguist-generated attribute"
+const SOURCE_LABELS: Record<DiffExclusionSource, string> = {
+  builtin: "built-in default list",
+  input: "diff_exclude_paths input",
+  gitattributes: "linguist-generated attribute",
 }
+
+/** Human-readable label for each exclusion source, shown in the excluded-
+ *  files trailer and the status comment's context notes. */
+export const describeExclusionSource = (source: DiffExclusionSource): string =>
+  SOURCE_LABELS[source]
 
 /** One line per excluded file with change counts and the source that
  *  excluded it — shared by the prompt trailer and the all-excluded skip
@@ -253,14 +247,12 @@ export const renderExcludedFileLines = (
 }
 
 const SOURCE_SUMMARY_ORDER: DiffExclusionSource[] = [
-  "operator_pattern",
-  "linguist_generated",
-  "default_pattern",
+  "input",
+  "gitattributes",
+  "builtin",
 ]
 
-/** Per-source counts for one-line surfaces (check-run title, skip reason) —
- *  attributes the exclusion to the layer that actually caused it instead of
- *  naming an input the operator may never have set. */
+/** Per-source counts for one-line surfaces (check-run title, skip reason). */
 export const summarizeExclusionSources = (
   excluded: ExcludedDiffFile[],
 ): string => {
