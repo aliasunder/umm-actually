@@ -1,6 +1,19 @@
 # Changelog
 
 
+
+## [0.4.2] — 2026-09-11
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.1
+
+### Maintenance
+
+- **deps:** Bump @openrouter/sdk in the production group (#90)
+- **deps:** Bump node from `ba849c6` to `2fe369e` (#89)
+- **deps-dev:** Bump the development group with 5 updates (#91)
+
 ## [0.4.1] — 2026-09-08
 
 ### Features
