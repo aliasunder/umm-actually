@@ -133,4 +133,4 @@ outputs:
 
 runs:
   using: docker
-  image: Dockerfile
+  image: docker://ghcr.io/aliasunder/umm-actually@sha256:a66214f99a3d484df7eea0119d7b923355511d4cee14c0366892ab81b100857c
