@@ -122,6 +122,10 @@ export type OrchestrateDeps = {
   githubClient: GithubClient
   contextReader: ContextReader
   generateFindings: GenerateFindings
+  /** Hooks the check-run cancellation cleanup into the process's signal
+   *  handling (main.ts wires it to SIGINT/SIGTERM); returns an unregister.
+   *  Optional so the pipeline stays runnable without process wiring. */
+  registerCancellationCleanup?: (cleanup: () => Promise<void>) => () => void
 }
 
 /** Bounds token cost of prior bot comments in the prompt (~200 tokens each). */
@@ -1117,6 +1121,28 @@ export const orchestrate = async (
     logger,
   )
 
+  // A cancelled job stops the container before the completions below run,
+  // which would leave the check in progress forever — the registered
+  // cleanup closes it as `cancelled` inside the runner's stop-grace window
+  const unregisterCancellationCleanup =
+    checkRun && deps.registerCancellationCleanup
+      ? deps.registerCancellationCleanup(() => {
+          return completeCheckRunSafely(
+            {
+              githubClient,
+              checkRun,
+              conclusion: "cancelled",
+              output: {
+                title: "Cancelled — review did not finish",
+                summary:
+                  "The workflow run was cancelled before the review completed — a job timeout, or a newer run superseding this one.",
+              },
+            },
+            logger,
+          )
+        })
+      : null
+
   try {
     const result = await runReviewPipeline(
       { deps, prContext, severityThreshold, stages },
@@ -1128,12 +1154,14 @@ export const orchestrate = async (
         ? result.costSummaryMarkdown
         : null,
     })
+    unregisterCancellationCleanup?.()
     await completeCheckRunSafely(
       { githubClient, checkRun, ...completion },
       logger,
     )
     return result
   } catch (pipelineError) {
+    unregisterCancellationCleanup?.()
     await completeCheckRunSafely(
       {
         githubClient,

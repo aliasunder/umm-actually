@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import parseDiff from "parse-diff"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { ActionConfig } from "../config.js"
 import type {
   CheckRunConclusion,
@@ -2829,6 +2829,99 @@ describe("orchestrate", () => {
           },
         },
       ])
+    })
+
+    it("registers a cancellation cleanup that completes the check as cancelled", async () => {
+      const stubs = makeOrchestrateDeps()
+      const registeredCleanups: (() => Promise<void>)[] = []
+      const logger = createTestLogger()
+
+      await orchestrate(
+        {
+          ...stubs.deps,
+          registerCancellationCleanup: (cleanup) => {
+            registeredCleanups.push(cleanup)
+            return () => undefined
+          },
+        },
+        logger,
+      )
+      await registeredCleanups[0]?.()
+
+      expect(registeredCleanups).toHaveLength(1)
+      expect(stubs.updateCheckRunCalls).toEqual([
+        {
+          checkRunId: 555,
+          conclusion: "success",
+          output: {
+            title: `${expectedSelection.selected.length} findings`,
+            summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.\n\n${expectedCostSummary}`,
+          },
+        },
+        {
+          checkRunId: 555,
+          conclusion: "cancelled",
+          output: {
+            title: "Cancelled — review did not finish",
+            summary:
+              "The workflow run was cancelled before the review completed — a job timeout, or a newer run superseding this one.",
+          },
+        },
+      ])
+    })
+
+    it("unregisters the cancellation cleanup after the normal completion", async () => {
+      const stubs = makeOrchestrateDeps()
+      const unregister = vi.fn()
+      const logger = createTestLogger()
+
+      await orchestrate(
+        {
+          ...stubs.deps,
+          registerCancellationCleanup: () => unregister,
+        },
+        logger,
+      )
+
+      expect(unregister).toHaveBeenCalledTimes(1)
+    })
+
+    it("unregisters the cancellation cleanup when the pipeline errors", async () => {
+      const stubs = makeOrchestrateDeps({
+        generateFindings: async () => {
+          throw new Error("model exploded")
+        },
+      })
+      const unregister = vi.fn()
+      const logger = createTestLogger()
+
+      await expect(
+        orchestrate(
+          {
+            ...stubs.deps,
+            registerCancellationCleanup: () => unregister,
+          },
+          logger,
+        ),
+      ).rejects.toThrow("model exploded")
+
+      expect(unregister).toHaveBeenCalledTimes(1)
+    })
+
+    it("registers no cancellation cleanup when the check run could not be created", async () => {
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          createCheckRun: async () => {
+            throw new Error("HTTP 403")
+          },
+        },
+      })
+      const registerCancellationCleanup = vi.fn(() => () => undefined)
+      const logger = createTestLogger()
+
+      await orchestrate({ ...stubs.deps, registerCancellationCleanup }, logger)
+
+      expect(registerCancellationCleanup).not.toHaveBeenCalled()
     })
 
     it("continues the review without a check run when creation fails", async () => {

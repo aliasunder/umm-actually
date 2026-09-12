@@ -83,9 +83,10 @@ export type OctokitLike = {
 }
 
 /** The conclusion grades the run, not the code: a completed review is
- *  `success` regardless of findings, a skip is `neutral`, and `failure`
- *  is reserved for the pipeline itself erroring. */
-export type CheckRunConclusion = "success" | "neutral" | "failure"
+ *  `success` regardless of findings, a skip is `neutral`, `failure` is
+ *  reserved for the pipeline itself erroring, and `cancelled` closes the
+ *  check when the workflow run is cancelled mid-review. */
+export type CheckRunConclusion = "success" | "neutral" | "failure" | "cancelled"
 
 export type CheckRunOutput = { title: string; summary: string }
 
