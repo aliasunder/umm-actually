@@ -18,7 +18,7 @@ action.yml                 # action metadata — inputs/outputs, runs.using: doc
 Dockerfile                 # multi-stage: build (tsc) → slim runtime
 fixtures/                  # test fixtures (event payloads, sample diff, LLM responses)
 src/
-  main.ts                  # entrypoint — collects/validates inputs, wires clients into orchestrate, sets outputs, exits explicitly
+  main.ts                  # entrypoint — collects/validates inputs, wires clients into orchestrate, sets outputs, closes the check run on cancellation signals, exits explicitly
   config.ts                # action inputs → validated ActionConfig
   logger.ts                # structured JSON logger — levels, child contexts, lazy props
   github/                  # GitHub I/O: event payload → PrContext, octokit wrappers (diff fetch, review posting)

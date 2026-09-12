@@ -20,6 +20,40 @@ process.on("unhandledRejection", (error) => {
   })
 })
 
+// Cleanups to run when the job is cancelled, registered while a check run
+// is open — typically one entry, the open check run's completion call.
+// Mutable on purpose — signal handlers can only reach shared state
+const cancellationCleanups = new Set<() => Promise<void>>()
+
+// First signal wins — Actions sends SIGINT and then SIGTERM seconds apart,
+// and the second handler must not exit while the first's API call is in
+// flight. Mutable because signal handlers can only share state
+let cancellationExitStarted = false
+
+// A cancelled job stops the container with SIGINT/SIGTERM and only a short
+// grace window before SIGKILL, so each cleanup must be one quick API call.
+// Node runs as PID 1 in the action container and PID 1 ignores unhandled
+// signals — without these handlers a cancellation never reaches this process
+const exitOnCancellationSignal = (signalName: NodeJS.Signals): void => {
+  if (cancellationExitStarted) return
+  cancellationExitStarted = true
+  // Observed, not awaited — a signal handler cannot await, and the cleanups
+  // never throw
+  void (async () => {
+    logger.warn("cancellation signal received — closing the check run", {
+      signal: signalName,
+    })
+    const pendingCleanups = [...cancellationCleanups]
+    cancellationCleanups.clear()
+    for (const pendingCleanup of pendingCleanups) {
+      await pendingCleanup()
+    }
+    process.exit(1)
+  })()
+}
+process.on("SIGINT", exitOnCancellationSignal)
+process.on("SIGTERM", exitOnCancellationSignal)
+
 /**
  * Collects raw inputs at the SDK boundary. Strings come from getInput;
  * booleans come pre-parsed from getBooleanInput, which enforces the strict
@@ -95,6 +129,12 @@ try {
         },
         logger,
       ),
+      registerCancellationCleanup: (cleanup) => {
+        cancellationCleanups.add(cleanup)
+        return () => {
+          cancellationCleanups.delete(cleanup)
+        }
+      },
     },
     logger,
   )

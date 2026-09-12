@@ -122,6 +122,10 @@ export type OrchestrateDeps = {
   githubClient: GithubClient
   contextReader: ContextReader
   generateFindings: GenerateFindings
+  /** Hooks the check-run cancellation cleanup into the process's signal
+   *  handling (main.ts wires it to SIGINT/SIGTERM); returns an unregister.
+   *  Optional so the pipeline stays runnable without process wiring. */
+  registerCancellationCleanup?: (cleanup: () => Promise<void>) => () => void
 }
 
 /** Bounds token cost of prior bot comments in the prompt (~200 tokens each). */
@@ -457,8 +461,6 @@ const filterPhaseFindings = (
   }
 }
 
-/** A run where every phase failed still billed its attempts; the failure
- *  summary carries the cost table so they are not lost with the findings. */
 /** Renders the check-run summary when the pipeline throws. Appends
  *  a cost table when every phase failed — the operator still pays. */
 const describePipelineFailure = ({
@@ -1117,6 +1119,30 @@ export const orchestrate = async (
     logger,
   )
 
+  // A cancelled job stops the container before the completions below run,
+  // which would leave the check in progress forever — the registered
+  // cleanup closes it as `cancelled` inside the runner's stop-grace window.
+  // Registered only when a check run exists (creation can fail) and the
+  // caller wired signal handling (the dep is optional)
+  const unregisterCancellationCleanup =
+    checkRun && deps.registerCancellationCleanup
+      ? deps.registerCancellationCleanup(() => {
+          return completeCheckRunSafely(
+            {
+              githubClient,
+              checkRun,
+              conclusion: "cancelled",
+              output: {
+                title: "Cancelled — review did not finish",
+                summary:
+                  "The workflow run was cancelled before the review completed — a job timeout, or a newer run superseding this one.",
+              },
+            },
+            logger,
+          )
+        })
+      : null
+
   try {
     const result = await runReviewPipeline(
       { deps, prContext, severityThreshold, stages },
@@ -1132,6 +1158,10 @@ export const orchestrate = async (
       { githubClient, checkRun, ...completion },
       logger,
     )
+    // Unregistered only after the terminal update settles — a signal during
+    // the request must still find the cleanup registered, or the check could
+    // stay in progress forever
+    unregisterCancellationCleanup?.()
     return result
   } catch (pipelineError) {
     await completeCheckRunSafely(
@@ -1149,6 +1179,9 @@ export const orchestrate = async (
       },
       logger,
     )
+    // Same ordering as the success path: unregister only after the terminal
+    // update settles
+    unregisterCancellationCleanup?.()
     throw pipelineError
   }
 }
