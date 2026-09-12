@@ -105,14 +105,15 @@ const generationResponseSchema = z.object({
 /** Auth/credit failures abort the ladder — the fallback model shares the key. */
 const ABORT_STATUSES = new Set([401, 402, 403])
 
-/** Transient by nature: HTTP request timeout (408), rate limit (429). 5xx and
+/** The only transient 4xx statuses: HTTP request timeout (408), rate limit
+ *  (429). The full retry decision lives where this is read — 5xx and
  *  status-less network errors are retryable too; any other 4xx is structural
  *  and skips the retry. */
-const RETRYABLE_STATUSES = new Set([408, 429])
+const RETRYABLE_4XX_STATUSES = new Set([408, 429])
 
-/** Same-model retry cap for failures that settle quickly (HTTP errors,
- *  validation failures) and for a timeout on the last ladder model — a
- *  timeout with a fallback still available advances the ladder instead. */
+/** Cap on same-model attempts for failures that settle quickly (HTTP errors,
+ *  validation failures) and for timeouts on the last ladder model. A timeout
+ *  with a fallback still available advances the ladder instead of retrying. */
 const MAX_ATTEMPTS_PER_MODEL = 2
 
 /** Fixed delay before a same-model retry. The SDK's backoff is disabled
@@ -231,6 +232,7 @@ const withDeadline = async <T>(
   return bounded
 }
 
+/** Wraps the value so JSON `null` parses distinguishably from a parse failure. */
 const parseJsonOrNull = (text: string): { parsed: unknown } | null => {
   try {
     const parsed: unknown = JSON.parse(text)
@@ -373,7 +375,7 @@ export const createOpenRouterClient = (
       const retryable =
         statusCode === undefined ||
         statusCode >= 500 ||
-        RETRYABLE_STATUSES.has(statusCode)
+        RETRYABLE_4XX_STATUSES.has(statusCode)
       return {
         kind: "failed",
         attempt: {
@@ -560,8 +562,9 @@ export const createOpenRouterClient = (
         }
         // A timeout consumed a full deadline window and signals live provider
         // degradation — a same-model retry would double the time to fallback,
-        // keeping it beyond consumer job timeouts. Advance the ladder instead;
-        // a last-rung timeout still retries because no other model remains.
+        // keeping it beyond consumer job timeouts. The break skips the retry
+        // and its delay, advancing to the next model; a last-rung timeout
+        // still retries because no other model remains.
         if (attemptResult.attempt.outcome === "timeout" && nextLadderModel) {
           logger.info("advancing to fallback model without same-model retry", {
             from: ladderModel,
