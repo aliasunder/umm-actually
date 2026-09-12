@@ -1154,14 +1154,16 @@ export const orchestrate = async (
         ? result.costSummaryMarkdown
         : null,
     })
-    unregisterCancellationCleanup?.()
     await completeCheckRunSafely(
       { githubClient, checkRun, ...completion },
       logger,
     )
+    // Unregistered only after the terminal update settles — a signal during
+    // the request must still find the cleanup registered, or the check could
+    // stay in progress forever
+    unregisterCancellationCleanup?.()
     return result
   } catch (pipelineError) {
-    unregisterCancellationCleanup?.()
     await completeCheckRunSafely(
       {
         githubClient,
@@ -1177,6 +1179,9 @@ export const orchestrate = async (
       },
       logger,
     )
+    // Same ordering as the success path: unregister only after the terminal
+    // update settles
+    unregisterCancellationCleanup?.()
     throw pipelineError
   }
 }

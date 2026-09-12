@@ -25,11 +25,18 @@ process.on("unhandledRejection", (error) => {
 // Mutable on purpose — signal handlers can only reach shared state
 const cancellationCleanups = new Set<() => Promise<void>>()
 
+// First signal wins — Actions sends SIGINT and then SIGTERM seconds apart,
+// and the second handler must not exit while the first's API call is in
+// flight. Mutable because signal handlers can only share state
+let cancellationExitStarted = false
+
 // A cancelled job stops the container with SIGINT/SIGTERM and only a short
 // grace window before SIGKILL, so each cleanup must be one quick API call.
 // Node runs as PID 1 in the action container and PID 1 ignores unhandled
 // signals — without these handlers a cancellation never reaches this process
 const exitOnCancellationSignal = (signalName: NodeJS.Signals): void => {
+  if (cancellationExitStarted) return
+  cancellationExitStarted = true
   // Observed, not awaited — a signal handler cannot await, and the cleanups
   // never throw
   void (async () => {
@@ -44,8 +51,8 @@ const exitOnCancellationSignal = (signalName: NodeJS.Signals): void => {
     process.exit(1)
   })()
 }
-process.once("SIGINT", exitOnCancellationSignal)
-process.once("SIGTERM", exitOnCancellationSignal)
+process.on("SIGINT", exitOnCancellationSignal)
+process.on("SIGTERM", exitOnCancellationSignal)
 
 /**
  * Collects raw inputs at the SDK boundary. Strings come from getInput;

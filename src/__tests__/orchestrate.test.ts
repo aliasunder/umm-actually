@@ -2872,9 +2872,12 @@ describe("orchestrate", () => {
       ])
     })
 
-    it("unregisters the cancellation cleanup after the normal completion", async () => {
+    it("unregisters the cancellation cleanup only after the normal completion settles", async () => {
       const stubs = makeOrchestrateDeps()
-      const unregister = vi.fn()
+      const updateCallCountsAtUnregister: number[] = []
+      const unregister = vi.fn(() => {
+        updateCallCountsAtUnregister.push(stubs.updateCheckRunCalls.length)
+      })
       const logger = createTestLogger()
 
       await orchestrate(
@@ -2885,16 +2888,21 @@ describe("orchestrate", () => {
         logger,
       )
 
-      expect(unregister).toHaveBeenCalledTimes(1)
+      // One unregister call, made after the completing update was already
+      // recorded — a signal during the update must still find the cleanup
+      expect(updateCallCountsAtUnregister).toEqual([1])
     })
 
-    it("unregisters the cancellation cleanup when the pipeline errors", async () => {
+    it("unregisters the cancellation cleanup only after the failure completion settles", async () => {
       const stubs = makeOrchestrateDeps({
         generateFindings: async () => {
           throw new Error("model exploded")
         },
       })
-      const unregister = vi.fn()
+      const updateCallCountsAtUnregister: number[] = []
+      const unregister = vi.fn(() => {
+        updateCallCountsAtUnregister.push(stubs.updateCheckRunCalls.length)
+      })
       const logger = createTestLogger()
 
       await expect(
@@ -2907,7 +2915,7 @@ describe("orchestrate", () => {
         ),
       ).rejects.toThrow("model exploded")
 
-      expect(unregister).toHaveBeenCalledTimes(1)
+      expect(updateCallCountsAtUnregister).toEqual([1])
     })
 
     it("registers no cancellation cleanup when the check run could not be created", async () => {
