@@ -439,7 +439,7 @@ describe("requestReview", () => {
     }
   })
 
-  it("fails the attempt at the deadline as a retryable timeout even when the SDK ignores the abort signal", async () => {
+  it("advances to the fallback model at the deadline even when the SDK ignores the abort signal", async () => {
     vi.useFakeTimers()
     try {
       const stub = makeSdkStub({
@@ -460,7 +460,7 @@ describe("requestReview", () => {
 
       expect(
         stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
-      ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
+      ).toEqual(["openai/gpt-5-mini", "anthropic/claude-haiku-4.5"])
       expect(result.attempts).toEqual([
         {
           model: "openai/gpt-5-mini",
@@ -471,7 +471,7 @@ describe("requestReview", () => {
           errorSummary: "no response within 45s",
         },
         {
-          model: "openai/gpt-5-mini",
+          model: "anthropic/claude-haiku-4.5",
           outcome: "accepted",
           promptTokens: 12000,
           completionTokens: 800,
@@ -479,6 +479,14 @@ describe("requestReview", () => {
           errorSummary: null,
         },
       ])
+      expect(logger.messages).toContainEqual({
+        level: "info",
+        message: "advancing to fallback model without same-model retry",
+        data: {
+          from: "openai/gpt-5-mini",
+          to: "anthropic/claude-haiku-4.5",
+        },
+      })
       expect(logger.messages).toContainEqual({
         level: "warn",
         message: "request deadline elapsed",
@@ -526,9 +534,11 @@ describe("requestReview", () => {
       const reviewPromise = client.requestReview(requestParams)
       await vi.advanceTimersByTimeAsync(45_000)
       const result = await reviewPromise
-      expect(result.attempts.map((attempt) => attempt.outcome)).toEqual([
-        "timeout",
-        "accepted",
+      expect(
+        result.attempts.map((attempt) => [attempt.model, attempt.outcome]),
+      ).toEqual([
+        ["openai/gpt-5-mini", "timeout"],
+        ["anthropic/claude-haiku-4.5", "accepted"],
       ])
 
       await vi.advanceTimersByTimeAsync(75_000)
@@ -568,7 +578,13 @@ describe("requestReview", () => {
 
       const reviewPromise = client.requestReview(requestParams)
       await vi.advanceTimersByTimeAsync(45_000)
-      await reviewPromise
+      const result = await reviewPromise
+      expect(
+        result.attempts.map((attempt) => [attempt.model, attempt.outcome]),
+      ).toEqual([
+        ["openai/gpt-5-mini", "timeout"],
+        ["anthropic/claude-haiku-4.5", "accepted"],
+      ])
       await vi.advanceTimersByTimeAsync(75_000)
 
       expect(logger.messages).toContainEqual({
@@ -583,6 +599,129 @@ describe("requestReview", () => {
           error: "socket hang up",
         },
       })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("retries a timeout on the same model when no fallback is configured", async () => {
+    vi.useFakeTimers()
+    try {
+      const stub = makeSdkStub({
+        sendResponses: [
+          { pending: () => new Promise(() => undefined) },
+          { value: acceptedChatResult },
+        ],
+      })
+      const logger = createTestLogger()
+      const client = createOpenRouterClient(
+        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        logger,
+      )
+
+      const reviewPromise = client.requestReview({
+        ...requestParams,
+        fallbackModel: null,
+      })
+      await vi.advanceTimersByTimeAsync(45_000)
+      const result = await reviewPromise
+
+      expect(result.attempts).toEqual([
+        {
+          model: "openai/gpt-5-mini",
+          outcome: "timeout",
+          promptTokens: null,
+          completionTokens: null,
+          costUsd: null,
+          errorSummary: "no response within 45s",
+        },
+        {
+          model: "openai/gpt-5-mini",
+          outcome: "accepted",
+          promptTokens: 12000,
+          completionTokens: 800,
+          costUsd: 0.0421,
+          errorSummary: null,
+        },
+      ])
+      // The partial matcher is deliberate — the negative must reject the
+      // advance log with any payload; an exact object would pass on a mismatch
+      expect(logger.messages).not.toContainEqual(
+        expect.objectContaining({
+          message: "advancing to fallback model without same-model retry",
+        }),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("exhausts the ladder in order when the fallback also times out, retrying only the last rung", async () => {
+    vi.useFakeTimers()
+    try {
+      const neverSettle = (): Promise<unknown> => new Promise(() => undefined)
+      const stub = makeSdkStub({
+        sendResponses: [
+          { pending: neverSettle },
+          { pending: neverSettle },
+          { pending: neverSettle },
+        ],
+      })
+      const logger = createTestLogger()
+      const client = createOpenRouterClient(
+        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        logger,
+      )
+
+      const reviewPromise = client.requestReview(requestParams)
+      void reviewPromise.catch(() => undefined)
+      // One primary deadline, then two fallback deadlines (last-rung retry)
+      await vi.advanceTimersByTimeAsync(135_000)
+
+      await expect(reviewPromise).rejects.toThrow(
+        "review request failed after 3 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); anthropic/claude-haiku-4.5: timeout (no response within 45s); anthropic/claude-haiku-4.5: timeout (no response within 45s)",
+      )
+      expect(
+        stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
+      ).toEqual([
+        "openai/gpt-5-mini",
+        "anthropic/claude-haiku-4.5",
+        "anthropic/claude-haiku-4.5",
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not sleep the retry delay when a timeout advances the ladder", async () => {
+    vi.useFakeTimers()
+    try {
+      const retryDelayMs = 50
+      const stub = makeSdkStub({
+        sendResponses: [
+          { pending: () => new Promise(() => undefined) },
+          { value: acceptedChatResult },
+        ],
+      })
+      const logger = createTestLogger()
+      const client = createOpenRouterClient(
+        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs },
+        logger,
+      )
+
+      const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
+      try {
+        const reviewPromise = client.requestReview(requestParams)
+        await vi.advanceTimersByTimeAsync(45_000)
+        await reviewPromise
+
+        const retrySleepCalls = setTimeoutSpy.mock.calls.filter(
+          (call) => call[1] === retryDelayMs,
+        )
+        expect(retrySleepCalls).toHaveLength(0)
+      } finally {
+        setTimeoutSpy.mockRestore()
+      }
     } finally {
       vi.useRealTimers()
     }
