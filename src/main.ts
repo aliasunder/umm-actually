@@ -21,7 +21,8 @@ process.on("unhandledRejection", (error) => {
 })
 
 // Cleanups to run when the job is cancelled, registered while a check run
-// is open. Mutable on purpose — signal handlers can only reach shared state
+// is open — typically one entry, the open check run's completion call.
+// Mutable on purpose — signal handlers can only reach shared state
 const cancellationCleanups = new Set<() => Promise<void>>()
 
 // A cancelled job stops the container with SIGINT/SIGTERM and only a short

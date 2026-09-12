@@ -1121,7 +1121,9 @@ export const orchestrate = async (
 
   // A cancelled job stops the container before the completions below run,
   // which would leave the check in progress forever — the registered
-  // cleanup closes it as `cancelled` inside the runner's stop-grace window
+  // cleanup closes it as `cancelled` inside the runner's stop-grace window.
+  // Registered only when a check run exists (creation can fail) and the
+  // caller wired signal handling (the dep is optional)
   const unregisterCancellationCleanup =
     checkRun && deps.registerCancellationCleanup
       ? deps.registerCancellationCleanup(() => {

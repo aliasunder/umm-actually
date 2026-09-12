@@ -2846,6 +2846,8 @@ describe("orchestrate", () => {
         },
         logger,
       )
+      // Invoked after the run completes to verify the registered function
+      // itself — not to simulate mid-pipeline cancellation timing
       await registeredCleanups[0]?.()
 
       expect(registeredCleanups).toHaveLength(1)
