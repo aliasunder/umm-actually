@@ -105,15 +105,19 @@ const generationResponseSchema = z.object({
 /** Auth/credit failures abort the ladder — the fallback model shares the key. */
 const ABORT_STATUSES = new Set([401, 402, 403])
 
-/** Transient by nature: timeout, rate limit. 5xx and status-less network
- *  errors are retryable too; any other 4xx is structural and skips the retry. */
+/** Transient by nature: HTTP request timeout (408), rate limit (429). 5xx and
+ *  status-less network errors are retryable too; any other 4xx is structural
+ *  and skips the retry. */
 const RETRYABLE_STATUSES = new Set([408, 429])
 
+/** Same-model retry cap for failures that settle quickly (HTTP errors,
+ *  validation failures) and for a timeout on the last ladder model — a
+ *  timeout with a fallback still available advances the ladder instead. */
 const MAX_ATTEMPTS_PER_MODEL = 2
 
-/** Fixed delay before retrying a transient failure (429, 5xx, timeout).
- *  The SDK's backoff is disabled (`retries: { strategy: "none" }`); this
- *  replaces it so a brief rate-limit burst has a recovery window. */
+/** Fixed delay before a same-model retry. The SDK's backoff is disabled
+ *  (`retries: { strategy: "none" }`); this replaces it so a brief
+ *  rate-limit burst has a recovery window. */
 const RETRY_DELAY_MS = 1_000
 
 /** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs
@@ -318,8 +322,9 @@ export const createOpenRouterClient = (
   }: {
     sdk: OpenRouterLike
     /** Per-attempt deadline — when it elapses the attempt records outcome
-     *  `timeout` and the retry/fallback ladder advances whether or not the
-     *  provider connection closes; the HTTP call is aborted best-effort. */
+     *  `timeout` and the ladder advances to the next model when one exists
+     *  (the last model may retry once), whether or not the provider
+     *  connection closes; the HTTP call is aborted best-effort. */
     requestTimeoutMs: number
     retryDelayMs?: number
   },
@@ -506,12 +511,13 @@ export const createOpenRouterClient = (
       fallbackModel === null ? [model] : [model, fallbackModel]
     const attempts: ModelAttempt[] = []
 
-    for (const ladderModel of modelLadder) {
+    for (const [ladderIndex, ladderModel] of modelLadder.entries()) {
       const chatRequest = buildChatRequest({
         systemPrompt,
         userPrompt,
         model: ladderModel,
       })
+      const nextLadderModel = modelLadder[ladderIndex + 1]
 
       let attemptNumber = 1
       while (attemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
@@ -551,6 +557,17 @@ export const createOpenRouterClient = (
             attempts,
             aborted: true,
           })
+        }
+        // A timeout consumed a full deadline window and signals live provider
+        // degradation — a same-model retry would double the time to fallback,
+        // keeping it beyond consumer job timeouts. Advance the ladder instead;
+        // a last-rung timeout still retries because no other model remains.
+        if (attemptResult.attempt.outcome === "timeout" && nextLadderModel) {
+          logger.info("advancing to fallback model without same-model retry", {
+            from: ladderModel,
+            to: nextLadderModel,
+          })
+          break
         }
         if (!attemptResult.retryable) break
         attemptNumber++

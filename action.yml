@@ -17,11 +17,11 @@ inputs:
     required: false
     default: anthropic/claude-sonnet-4-6
   fallback_model:
-    description: Model to retry with if the primary model fails the structured-output ladder
+    description: Model tried next when the primary model fails the structured-output ladder. A timed-out primary attempt moves here immediately, without a same-model retry
     required: false
     default: ""
   request_timeout_seconds:
-    description: Per-attempt deadline for a single model request, in seconds. When it elapses the attempt is recorded as `timeout` and the retry/fallback ladder advances whether or not the provider connection closes; the HTTP call is aborted best-effort. Empty = the 900 default, so workflows can wire an unset repo variable directly
+    description: Per-attempt deadline for a single model request, in seconds. When it elapses the attempt is recorded as `timeout` and the ladder advances to the fallback model when one is configured (the last ladder model may retry once), whether or not the provider connection closes; the HTTP call is aborted best-effort. Empty = the 900 default, so workflows can wire an unset repo variable directly
     required: false
     default: "900"
   max_findings:
