@@ -2,6 +2,18 @@
 
 
 
+
+## [0.4.3] — 2026-09-12
+
+### Bug Fixes
+
+- Close the branded check run as cancelled when the job is cancelled (#93)
+- Advance to the fallback model on a timed-out attempt instead of retrying the primary (#92)
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.2
+
 ## [0.4.2] — 2026-09-11
 
 ### Documentation
