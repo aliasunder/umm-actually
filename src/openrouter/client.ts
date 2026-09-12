@@ -105,10 +105,9 @@ const generationResponseSchema = z.object({
 /** Auth/credit failures abort the ladder — the fallback model shares the key. */
 const ABORT_STATUSES = new Set([401, 402, 403])
 
-/** The only transient 4xx statuses: HTTP request timeout (408), rate limit
- *  (429). The full retry decision lives where this is read — 5xx and
- *  status-less network errors are retryable too; any other 4xx is structural
- *  and skips the retry. */
+/** The transient 4xx statuses — HTTP request timeout (408) and rate limit
+ *  (429). attemptOnce also retries 5xx and status-less network errors;
+ *  any other 4xx is structural and skips the retry. */
 const RETRYABLE_4XX_STATUSES = new Set([408, 429])
 
 /** Cap on same-model attempts for failures that settle quickly (HTTP errors,
@@ -232,7 +231,7 @@ const withDeadline = async <T>(
   return bounded
 }
 
-/** Wraps the value so JSON `null` parses distinguishably from a parse failure. */
+/** Wraps the parsed value so a JSON `null` is distinguishable from a parse failure. */
 const parseJsonOrNull = (text: string): { parsed: unknown } | null => {
   try {
     const parsed: unknown = JSON.parse(text)
@@ -323,10 +322,11 @@ export const createOpenRouterClient = (
     retryDelayMs = RETRY_DELAY_MS,
   }: {
     sdk: OpenRouterLike
-    /** Per-attempt deadline — when it elapses the attempt records outcome
-     *  `timeout` and the ladder advances to the next model when one exists
-     *  (the last model may retry once), whether or not the provider
-     *  connection closes; the HTTP call is aborted best-effort. */
+    /** Per-attempt deadline. When it elapses the attempt records outcome
+     *  `timeout` and the ladder moves on — to the next model when one
+     *  exists, otherwise a same-model retry while attempts remain — whether
+     *  or not the provider connection closes. The HTTP call is aborted
+     *  best-effort. */
     requestTimeoutMs: number
     retryDelayMs?: number
   },
@@ -561,10 +561,11 @@ export const createOpenRouterClient = (
           })
         }
         // A timeout consumed a full deadline window and signals live provider
-        // degradation — a same-model retry would double the time to fallback,
-        // keeping it beyond consumer job timeouts. The break skips the retry
-        // and its delay, advancing to the next model; a last-rung timeout
-        // still retries because no other model remains.
+        // degradation. Retrying the same model would double the wait before
+        // the fallback runs — past a typical workflow job timeout — so the
+        // break skips the retry and its delay and the outer loop moves to the
+        // next model. A last-rung timeout still retries because no other
+        // model remains.
         if (attemptResult.attempt.outcome === "timeout" && nextLadderModel) {
           logger.info("advancing to fallback model without same-model retry", {
             from: ladderModel,

@@ -644,8 +644,8 @@ describe("requestReview", () => {
           errorSummary: null,
         },
       ])
-      // Partial matcher on purpose: the negative must reject the advance log
-      // with ANY payload — an exact object would pass on a payload mismatch
+      // The partial matcher is deliberate — the negative must reject the
+      // advance log with any payload; an exact object would pass on a mismatch
       expect(logger.messages).not.toContainEqual(
         expect.objectContaining({
           message: "advancing to fallback model without same-model retry",
