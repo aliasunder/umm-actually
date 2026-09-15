@@ -54,6 +54,16 @@ const CONTENT_SIMILARITY_THRESHOLD = 0.5
  *  to absorb code motion between pushes, not conceptual proximity. */
 const CONTENT_LINE_PROXIMITY = 50
 
+/** Jaccard floor for the title-only dedup tier. Higher than the content tier
+ *  because no file/line gating narrows the match — title similarity alone
+ *  carries the decision. 0.85 catches near-identical rewording while letting
+ *  genuinely distinct findings survive. */
+const TITLE_SIMILARITY_THRESHOLD = 0.85
+
+/** Titles with fewer than this many content words (after stop-word removal)
+ *  skip the title tier — Jaccard on tiny vocabularies is unreliable. */
+const MIN_TITLE_TOKENS = 3
+
 /** Extracts the bold title from the first line of a rendered finding comment. */
 const TITLE_PATTERN = /^\*\*(.+?)\*\*/m
 
@@ -79,10 +89,10 @@ export const computeAnchorKey = (
   finding: Pick<Finding, "file" | "category" | "line">,
 ): string => `${finding.file}:${finding.category}:${finding.line}`
 
-/** Splits a `file:category:line` key from the right: the file segment may
- *  itself contain colons, categories never do, and the line must be a
- *  positive integer — old-format keys (title-hash) fail that last
- *  requirement and are rejected. */
+/** Splits a `file:category:line` key from the right (greedy `.+` captures
+ *  all colons except the final two): the file segment may itself contain
+ *  colons, categories never do, and the line must be a positive integer —
+ *  old-format keys (title-hash) fail that last requirement and are rejected. */
 const ANCHOR_KEY_PATTERN = /^(?<file>.+):(?<category>[^:]+):(?<line>[1-9]\d*)$/
 
 /** Parses one `file:category:line` anchor key out of a comment body.
@@ -130,7 +140,8 @@ const isPositionalDuplicate = ({
   )
 }
 
-/** Fails open to positional-only when either side lacks a title. */
+/** Returns false when either side lacks a title, leaving dedup to the
+ *  positional tier. */
 const isContentDuplicate = ({
   finding,
   anchor,
@@ -150,18 +161,48 @@ const isContentDuplicate = ({
   )
 }
 
-export type DuplicateTier = "positional" | "content"
+/** Catches re-anchored duplicates that drifted cross-file or beyond the
+ *  content tier's 50-line window. No file/line/category constraint — title
+ *  similarity alone carries the decision, gated by a higher threshold and
+ *  a minimum token count to keep Jaccard reliable. */
+const isTitleDuplicate = ({
+  finding,
+  anchor,
+}: {
+  finding: AnchorEntry
+  anchor: AnchorEntry
+}): boolean => {
+  if (!finding.title || !anchor.title) return false
+  const findingTokens = normalizeTitle(finding.title)
+  const anchorTokens = normalizeTitle(anchor.title)
+  if (findingTokens.length < MIN_TITLE_TOKENS) return false
+  if (anchorTokens.length < MIN_TITLE_TOKENS) return false
+  return (
+    titleSimilarity({ leftTokens: findingTokens, rightTokens: anchorTokens }) >=
+    TITLE_SIMILARITY_THRESHOLD
+  )
+}
 
-/** Returns which dedup tier matched, or null if the finding is new. */
+export type DuplicateTier = "positional" | "content" | "title"
+
+/** Returns which dedup tier matched, or null if the finding is new.
+ *  Checked most-constrained first so the tightest match wins. */
 export const classifyDuplicate = (
   finding: AnchorEntry,
   anchors: AnchorEntry[],
 ): DuplicateTier | null => {
+  // Separate passes enforce global tier precedence: a positional match on
+  // ANY anchor outranks a content match on ANY anchor, and content outranks
+  // title. A single loop returning the first hit would let tier ordering
+  // depend on anchor iteration order.
   for (const anchor of anchors) {
     if (isPositionalDuplicate({ finding, anchor })) return "positional"
   }
   for (const anchor of anchors) {
     if (isContentDuplicate({ finding, anchor })) return "content"
+  }
+  for (const anchor of anchors) {
+    if (isTitleDuplicate({ finding, anchor })) return "title"
   }
   return null
 }

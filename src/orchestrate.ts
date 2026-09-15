@@ -418,13 +418,14 @@ const describePhaseOutcome = (outcome: PhaseOutcome): PhaseStatus => {
 /** A failed phase's billed attempts ride on the client's error; any other
  *  failure reached no provider and billed nothing. */
 const phaseAttempts = (outcome: PhaseOutcome): PhaseAttempt[] => {
-  const attempts =
-    outcome.status === "completed"
-      ? outcome.result.attempts
-      : outcome.error instanceof ReviewRequestError
-        ? outcome.error.attempts
-        : []
-  return attempts.map((attempt) => ({ ...attempt, phase: outcome.phase.id }))
+  const tag = (attempts: StructuredReviewResult["attempts"]) => {
+    return attempts.map((attempt) => ({ ...attempt, phase: outcome.phase.id }))
+  }
+
+  if (outcome.status === "completed") return tag(outcome.result.attempts)
+  if (outcome.error instanceof ReviewRequestError)
+    return tag(outcome.error.attempts)
+  return []
 }
 
 type FilteredPhaseFindings = {
@@ -580,6 +581,7 @@ const runReviewPipeline = async (
     ? `${annotateDiff(reviewableFiles)}\n\n${excludedFilesNote}`
     : annotateDiff(reviewableFiles)
   const diffTokens = estimateTokens(annotatedDiff)
+  // The diff gets half the budget; the other half is for context files.
   const budgetHalf = Math.floor(config.contextBudgetTokens / 2)
   if (diffTokens > budgetHalf) {
     return postSkipReview({
@@ -883,13 +885,15 @@ const runReviewPipeline = async (
   // (anchor lines). Runs before the cap so duplicates don't consume slots.
   const existingAnchors = [...inlineState.anchors, ...issueState.anchors]
   const newFindings: Finding[] = []
-  const dedupCounts = { positional: 0, content: 0 }
+  const dedupCounts = { positional: 0, content: 0, title: 0 }
   for (const finding of realFindings) {
     const tier = classifyDuplicate(finding, existingAnchors)
     if (tier) {
       dedupCounts[tier]++
-      if (tier === "content") {
-        logger.info("content-tier dedup suppressed finding", {
+      // Positional is the common case and would be noisy — log only the
+      // higher tiers, which need the title evidence for diagnosis.
+      if (tier === "content" || tier === "title") {
+        logger.info(`${tier}-tier dedup suppressed finding`, {
           file: finding.file,
           line: finding.line,
           category: finding.category,
@@ -909,6 +913,7 @@ const runReviewPipeline = async (
     findingsSurvivedDedup: newFindings.length,
     droppedByPositional: dedupCounts.positional,
     droppedByContent: dedupCounts.content,
+    droppedByTitle: dedupCounts.title,
   })
 
   const {
