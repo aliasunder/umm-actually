@@ -1083,13 +1083,15 @@ describe("isDuplicateFinding", () => {
     ).toBeNull()
   })
 
-  it("rejects title tier at 0.84 similarity, catches at 0.86", () => {
+  it("rejects title tier at Jaccard 0.846, catches at 0.857", () => {
+    // 12 content words, 1 swap → intersection 11, union 13 → 0.846 < 0.85
     const anchors = [
       {
         file: "src/a.ts",
         category: "correctness",
         line: 50,
-        title: "alpha bravo charlie delta echo foxtrot golf",
+        title:
+          "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima",
       },
     ]
 
@@ -1099,26 +1101,29 @@ describe("isDuplicateFinding", () => {
           file: "src/b.ts",
           category: "correctness",
           line: 200,
-          title: "alpha bravo charlie delta echo foxtrot hotel",
+          title:
+            "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo mike",
         },
         anchors,
       ),
     ).toBeNull()
 
+    // 13 content words, 1 swap → intersection 12, union 14 → 0.857 > 0.85
     expect(
       classifyDuplicate(
         {
           file: "src/b.ts",
           category: "correctness",
           line: 200,
-          title: "alpha bravo charlie delta echo foxtrot golf hotel",
+          title:
+            "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima november",
         },
         anchors,
       ),
     ).toBe("title")
   })
 
-  it("skips title tier when either title has fewer than 3 content words", () => {
+  it("skips title tier when both titles have fewer than 3 content words", () => {
     const anchors = [
       {
         file: "src/a.ts",
@@ -1135,6 +1140,29 @@ describe("isDuplicateFinding", () => {
           category: "correctness",
           line: 50,
           title: "Race condition",
+        },
+        anchors,
+      ),
+    ).toBeNull()
+  })
+
+  it("skips title tier when only the anchor title has fewer than 3 content words", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Race condition",
+      },
+    ]
+
+    expect(
+      classifyDuplicate(
+        {
+          file: "src/b.ts",
+          category: "correctness",
+          line: 50,
+          title: "Race condition found during async handler teardown",
         },
         anchors,
       ),
