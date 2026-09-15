@@ -3,6 +3,17 @@
 
 
 
+
+## [0.4.4] — 2026-09-15
+
+### Features
+
+- Title-only dedup tier for re-anchored duplicate findings (#94)
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.3
+
 ## [0.4.3] — 2026-09-12
 
 ### Bug Fixes
