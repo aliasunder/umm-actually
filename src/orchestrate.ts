@@ -418,13 +418,14 @@ const describePhaseOutcome = (outcome: PhaseOutcome): PhaseStatus => {
 /** A failed phase's billed attempts ride on the client's error; any other
  *  failure reached no provider and billed nothing. */
 const phaseAttempts = (outcome: PhaseOutcome): PhaseAttempt[] => {
-  const attempts =
-    outcome.status === "completed"
-      ? outcome.result.attempts
-      : outcome.error instanceof ReviewRequestError
-        ? outcome.error.attempts
-        : []
-  return attempts.map((attempt) => ({ ...attempt, phase: outcome.phase.id }))
+  const tag = (attempts: StructuredReviewResult["attempts"]) => {
+    return attempts.map((attempt) => ({ ...attempt, phase: outcome.phase.id }))
+  }
+
+  if (outcome.status === "completed") return tag(outcome.result.attempts)
+  if (outcome.error instanceof ReviewRequestError)
+    return tag(outcome.error.attempts)
+  return []
 }
 
 type FilteredPhaseFindings = {
@@ -580,6 +581,7 @@ const runReviewPipeline = async (
     ? `${annotateDiff(reviewableFiles)}\n\n${excludedFilesNote}`
     : annotateDiff(reviewableFiles)
   const diffTokens = estimateTokens(annotatedDiff)
+  // The diff gets half the budget; the other half is for context files.
   const budgetHalf = Math.floor(config.contextBudgetTokens / 2)
   if (diffTokens > budgetHalf) {
     return postSkipReview({
@@ -888,6 +890,8 @@ const runReviewPipeline = async (
     const tier = classifyDuplicate(finding, existingAnchors)
     if (tier) {
       dedupCounts[tier]++
+      // Positional is the common case and would be noisy — log only the
+      // higher tiers, which need the title evidence for diagnosis.
       if (tier === "content" || tier === "title") {
         logger.info(`${tier}-tier dedup suppressed finding`, {
           file: finding.file,

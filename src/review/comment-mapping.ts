@@ -89,10 +89,10 @@ export const computeAnchorKey = (
   finding: Pick<Finding, "file" | "category" | "line">,
 ): string => `${finding.file}:${finding.category}:${finding.line}`
 
-/** Splits a `file:category:line` key from the right: the file segment may
- *  itself contain colons, categories never do, and the line must be a
- *  positive integer — old-format keys (title-hash) fail that last
- *  requirement and are rejected. */
+/** Splits a `file:category:line` key from the right (greedy `.+` captures
+ *  all colons except the final two): the file segment may itself contain
+ *  colons, categories never do, and the line must be a positive integer —
+ *  old-format keys (title-hash) fail that last requirement and are rejected. */
 const ANCHOR_KEY_PATTERN = /^(?<file>.+):(?<category>[^:]+):(?<line>[1-9]\d*)$/
 
 /** Parses one `file:category:line` anchor key out of a comment body.
@@ -140,7 +140,8 @@ const isPositionalDuplicate = ({
   )
 }
 
-/** Fails open to positional-only when either side lacks a title. */
+/** Returns false when either side lacks a title, leaving dedup to the
+ *  positional tier. */
 const isContentDuplicate = ({
   finding,
   anchor,
@@ -190,6 +191,10 @@ export const classifyDuplicate = (
   finding: AnchorEntry,
   anchors: AnchorEntry[],
 ): DuplicateTier | null => {
+  // Separate passes enforce global tier precedence: a positional match on
+  // ANY anchor outranks a content match on ANY anchor, and content outranks
+  // title. A single loop returning the first hit would let tier ordering
+  // depend on anchor iteration order.
   for (const anchor of anchors) {
     if (isPositionalDuplicate({ finding, anchor })) return "positional"
   }
