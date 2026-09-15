@@ -2447,6 +2447,7 @@ describe("orchestrate", () => {
           findingsSurvivedDedup: findings.length - 1,
           droppedByPositional: 0,
           droppedByContent: 1,
+          droppedByTitle: 0,
         },
       })
     })

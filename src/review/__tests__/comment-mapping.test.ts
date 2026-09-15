@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { CommentableFile } from "../../diff/commentable-lines.js"
 import {
   buildStatusComment,
+  classifyDuplicate,
   coalesceAnchors,
   computeAnchorKey,
   extractAnchors,
@@ -885,7 +886,7 @@ describe("isDuplicateFinding", () => {
     ).toBe(false)
   })
 
-  it("rejects content match when line distance exceeds 50", () => {
+  it("content tier rejects >50 lines apart but title tier catches it", () => {
     const anchors = [
       {
         file: "src/a.ts",
@@ -896,7 +897,7 @@ describe("isDuplicateFinding", () => {
     ]
 
     expect(
-      isDuplicateFinding(
+      classifyDuplicate(
         {
           file: "src/a.ts",
           category: "correctness",
@@ -905,7 +906,7 @@ describe("isDuplicateFinding", () => {
         },
         anchors,
       ),
-    ).toBe(false)
+    ).toBe("title")
   })
 
   it("skips content match when the finding has no title", () => {
@@ -988,7 +989,7 @@ describe("isDuplicateFinding", () => {
     ).toBe(true)
   })
 
-  it("rejects content match when file differs", () => {
+  it("rejects content match when file differs but title tier catches it", () => {
     const anchors = [
       {
         file: "src/a.ts",
@@ -999,7 +1000,7 @@ describe("isDuplicateFinding", () => {
     ]
 
     expect(
-      isDuplicateFinding(
+      classifyDuplicate(
         {
           file: "src/b.ts",
           category: "correctness",
@@ -1008,7 +1009,182 @@ describe("isDuplicateFinding", () => {
         },
         anchors,
       ),
-    ).toBe(false)
+    ).toBe("title")
+  })
+
+  // --- Title dedup tier ---
+
+  it("catches cross-file drift with identical title via title tier", () => {
+    const anchors = [
+      {
+        file: "src/orchestrate.ts",
+        category: "correctness",
+        line: 50,
+        title: "Unguarded RRule construction outside the try catch",
+      },
+    ]
+
+    expect(
+      classifyDuplicate(
+        {
+          file: "src/config.ts",
+          category: "subtle_bugs",
+          line: 312,
+          title: "Unguarded RRule construction outside the try catch",
+        },
+        anchors,
+      ),
+    ).toBe("title")
+  })
+
+  it("catches same-file drift beyond 50 lines via title tier", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 44,
+        title: "Missing validation before database insert",
+      },
+    ]
+
+    expect(
+      classifyDuplicate(
+        {
+          file: "src/a.ts",
+          category: "correctness",
+          line: 118,
+          title: "Missing validation before database insert",
+        },
+        anchors,
+      ),
+    ).toBe("title")
+  })
+
+  it("rejects title tier when titles are dissimilar", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email",
+      },
+    ]
+
+    expect(
+      classifyDuplicate(
+        {
+          file: "src/b.ts",
+          category: "correctness",
+          line: 50,
+          title: "Race condition in async handler teardown",
+        },
+        anchors,
+      ),
+    ).toBeNull()
+  })
+
+  it("rejects title tier at 0.84 similarity, catches at 0.86", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "alpha bravo charlie delta echo foxtrot golf",
+      },
+    ]
+
+    expect(
+      classifyDuplicate(
+        {
+          file: "src/b.ts",
+          category: "correctness",
+          line: 200,
+          title: "alpha bravo charlie delta echo foxtrot hotel",
+        },
+        anchors,
+      ),
+    ).toBeNull()
+
+    expect(
+      classifyDuplicate(
+        {
+          file: "src/b.ts",
+          category: "correctness",
+          line: 200,
+          title: "alpha bravo charlie delta echo foxtrot golf hotel",
+        },
+        anchors,
+      ),
+    ).toBe("title")
+  })
+
+  it("skips title tier when either title has fewer than 3 content words", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Race condition",
+      },
+    ]
+
+    expect(
+      classifyDuplicate(
+        {
+          file: "src/b.ts",
+          category: "correctness",
+          line: 50,
+          title: "Race condition",
+        },
+        anchors,
+      ),
+    ).toBeNull()
+  })
+
+  it("positional tier wins when all three tiers would match", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email before access",
+      },
+    ]
+
+    expect(
+      classifyDuplicate(
+        {
+          file: "src/a.ts",
+          category: "correctness",
+          line: 52,
+          title: "Missing null check on user.email before access",
+        },
+        anchors,
+      ),
+    ).toBe("positional")
+  })
+
+  it("content tier wins over title tier for same-file near-line match", () => {
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title: "Missing null check on user.email before access",
+      },
+    ]
+
+    expect(
+      classifyDuplicate(
+        {
+          file: "src/a.ts",
+          category: "subtle_bugs",
+          line: 70,
+          title: "Null check missing on user.email before access",
+        },
+        anchors,
+      ),
+    ).toBe("content")
   })
 })
 

@@ -54,6 +54,16 @@ const CONTENT_SIMILARITY_THRESHOLD = 0.5
  *  to absorb code motion between pushes, not conceptual proximity. */
 const CONTENT_LINE_PROXIMITY = 50
 
+/** Jaccard floor for the title-only dedup tier. Higher than the content tier
+ *  because no file/line gating narrows the match — title similarity alone
+ *  carries the decision. 0.85 catches near-identical rewording while letting
+ *  genuinely distinct findings survive. */
+const TITLE_SIMILARITY_THRESHOLD = 0.85
+
+/** Titles with fewer than this many content words (after stop-word removal)
+ *  skip the title tier — Jaccard on tiny vocabularies is unreliable. */
+const MIN_TITLE_TOKENS = 3
+
 /** Extracts the bold title from the first line of a rendered finding comment. */
 const TITLE_PATTERN = /^\*\*(.+?)\*\*/m
 
@@ -150,9 +160,32 @@ const isContentDuplicate = ({
   )
 }
 
-export type DuplicateTier = "positional" | "content"
+/** Catches re-anchored duplicates that drifted cross-file or beyond the
+ *  content tier's 50-line window. No file/line/category constraint — title
+ *  similarity alone carries the decision, gated by a higher threshold and
+ *  a minimum token count to keep Jaccard reliable. */
+const isTitleDuplicate = ({
+  finding,
+  anchor,
+}: {
+  finding: AnchorEntry
+  anchor: AnchorEntry
+}): boolean => {
+  if (!finding.title || !anchor.title) return false
+  const findingTokens = normalizeTitle(finding.title)
+  const anchorTokens = normalizeTitle(anchor.title)
+  if (findingTokens.length < MIN_TITLE_TOKENS) return false
+  if (anchorTokens.length < MIN_TITLE_TOKENS) return false
+  return (
+    titleSimilarity({ leftTokens: findingTokens, rightTokens: anchorTokens }) >=
+    TITLE_SIMILARITY_THRESHOLD
+  )
+}
 
-/** Returns which dedup tier matched, or null if the finding is new. */
+export type DuplicateTier = "positional" | "content" | "title"
+
+/** Returns which dedup tier matched, or null if the finding is new.
+ *  Checked most-constrained first so the tightest match wins. */
 export const classifyDuplicate = (
   finding: AnchorEntry,
   anchors: AnchorEntry[],
@@ -162,6 +195,9 @@ export const classifyDuplicate = (
   }
   for (const anchor of anchors) {
     if (isContentDuplicate({ finding, anchor })) return "content"
+  }
+  for (const anchor of anchors) {
+    if (isTitleDuplicate({ finding, anchor })) return "title"
   }
   return null
 }
