@@ -1108,7 +1108,16 @@ describe("isDuplicateFinding", () => {
       ),
     ).toBeNull()
 
-    // 13 content words, 1 swap → intersection 12, union 14 → 0.857 > 0.85
+    // 13 content words each, 1 swap → intersection 12, union 14 → 0.857 > 0.85
+    const swapAnchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title:
+          "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima november",
+      },
+    ]
     expect(
       classifyDuplicate(
         {
@@ -1116,7 +1125,33 @@ describe("isDuplicateFinding", () => {
           category: "correctness",
           line: 200,
           title:
-            "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima november",
+            "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike",
+        },
+        swapAnchors,
+      ),
+    ).toBe("title")
+  })
+
+  it("catches title tier at exact 0.85 inclusive boundary", () => {
+    // 18 anchor words, 19 finding words, 17 shared → union 20, 17/20 = 0.85
+    const anchors = [
+      {
+        file: "src/a.ts",
+        category: "correctness",
+        line: 50,
+        title:
+          "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo",
+      },
+    ]
+
+    expect(
+      classifyDuplicate(
+        {
+          file: "src/b.ts",
+          category: "correctness",
+          line: 201,
+          title:
+            "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec victor whiskey",
         },
         anchors,
       ),
