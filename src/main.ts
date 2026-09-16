@@ -9,6 +9,7 @@ import { createLogger } from "./logger.js"
 import { createOpenRouterClient } from "./openrouter/client.js"
 import { createPromptedGenerateFindings, orchestrate } from "./orchestrate.js"
 
+const actionStartedAt = performance.now()
 const logger = createLogger("umm-actually")
 
 process.on("unhandledRejection", (error) => {
@@ -66,6 +67,7 @@ const collectRawInputs = (): RawInputs => ({
   model: core.getInput("model"),
   fallbackModel: core.getInput("fallback_model"),
   requestTimeoutSeconds: core.getInput("request_timeout_seconds"),
+  reviewTimeoutSeconds: core.getInput("review_timeout_seconds"),
   maxFindings: core.getInput("max_findings"),
   severityThreshold: core.getInput("severity_threshold"),
   conventionsFile: core.getInput("conventions_file"),
@@ -86,6 +88,9 @@ const collectRawInputs = (): RawInputs => ({
 
 try {
   const config = parseConfig(collectRawInputs())
+  const reviewDeadline = actionStartedAt + config.reviewTimeoutSeconds * 1000
+  const remainingReviewMs = (): number =>
+    Math.max(0, reviewDeadline - performance.now())
   core.setSecret(config.githubToken)
   core.setSecret(config.openrouterApiKey)
 
@@ -100,6 +105,7 @@ try {
   const result = await orchestrate(
     {
       config,
+      remainingReviewMs,
       eventName: context.eventName,
       payload: context.payload,
       githubClient: createGithubClient({ octokit, owner, repo }, logger),
@@ -120,6 +126,7 @@ try {
             {
               sdk: new OpenRouter({ apiKey: config.openrouterApiKey }),
               requestTimeoutMs: config.requestTimeoutSeconds * 1000,
+              remainingReviewMs,
             },
             logger,
           ),

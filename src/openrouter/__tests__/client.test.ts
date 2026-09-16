@@ -112,7 +112,12 @@ const makeSdkStub = ({
 const makeClient = (stub: { sdk: OpenRouterLike }) => {
   const logger = createTestLogger()
   const client = createOpenRouterClient(
-    { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+    {
+      sdk: stub.sdk,
+      remainingReviewMs: () => Infinity,
+      requestTimeoutMs: 45_000,
+      retryDelayMs: 0,
+    },
     logger,
   )
   return { client, logger }
@@ -141,6 +146,265 @@ const requestParams = {
 }
 
 describe("requestReview", () => {
+  it("does not start an attempt when the review deadline has expired", async () => {
+    const stub = makeSdkStub({ sendResponses: [] })
+    const client = createOpenRouterClient(
+      { sdk: stub.sdk, requestTimeoutMs: 45_000, remainingReviewMs: () => 0 },
+      createTestLogger(),
+    )
+    const error = await captureRejection(client.requestReview(requestParams))
+    expect(error).toBeInstanceOf(ReviewRequestError)
+    if (!(error instanceof ReviewRequestError)) throw error
+    expect({
+      message: error.message,
+      attempts: error.attempts,
+      aborted: error.aborted,
+      deadlineExceeded: error.deadlineExceeded,
+    }).toEqual({
+      message: "review deadline exceeded",
+      attempts: [],
+      aborted: false,
+      deadlineExceeded: true,
+    })
+    expect(stub.sendCalls).toEqual([])
+    expect(stub.generationCalls).toEqual([])
+  })
+
+  it.each(["primary", "fallback"])(
+    "stops the %s request at the shared deadline even when abort is ignored",
+    async (rung) => {
+      vi.useFakeTimers()
+      try {
+        const late = Promise.withResolvers<unknown>()
+        const stub = makeSdkStub({
+          sendResponses: [
+            ...(rung === "fallback" ? [{ error: makeStatusError(400) }] : []),
+            { pending: () => late.promise },
+          ],
+        })
+        const deadline = performance.now() + 100
+        const client = createOpenRouterClient(
+          {
+            sdk: stub.sdk,
+            requestTimeoutMs: 45_000,
+            remainingReviewMs: () => deadline - performance.now(),
+          },
+          createTestLogger(),
+        )
+        const rejection = captureRejection(client.requestReview(requestParams))
+        await vi.advanceTimersByTimeAsync(100)
+        const error = await rejection
+        expect(error).toBeInstanceOf(ReviewRequestError)
+        if (!(error instanceof ReviewRequestError)) throw error
+        const expectedAttempts = [
+          ...(rung === "fallback"
+            ? [
+                {
+                  model: requestParams.model,
+                  outcome: "api_error",
+                  promptTokens: null,
+                  completionTokens: null,
+                  costUsd: null,
+                  errorSummary: "HTTP 400: HTTP 400",
+                },
+              ]
+            : []),
+          {
+            model:
+              rung === "primary"
+                ? requestParams.model
+                : requestParams.fallbackModel,
+            outcome: "timeout",
+            promptTokens: null,
+            completionTokens: null,
+            costUsd: null,
+            errorSummary: "review deadline exceeded",
+          },
+        ]
+        expect({
+          message: error.message,
+          attempts: error.attempts,
+          aborted: error.aborted,
+          deadlineExceeded: error.deadlineExceeded,
+        }).toEqual({
+          message: "review deadline exceeded",
+          attempts: expectedAttempts,
+          aborted: false,
+          deadlineExceeded: true,
+        })
+        expect(
+          stub.sendCalls.map(({ chatRequest, options }) => ({
+            model: chatRequest.model,
+            aborted: options?.signal?.aborted,
+          })),
+        ).toEqual([
+          ...(rung === "fallback"
+            ? [{ model: requestParams.model, aborted: false }]
+            : []),
+          {
+            model:
+              rung === "primary"
+                ? requestParams.model
+                : requestParams.fallbackModel,
+            aborted: true,
+          },
+        ])
+        late.resolve(acceptedChatResult)
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(error.attempts).toEqual(expectedAttempts)
+        expect(stub.generationCalls).toEqual([])
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it("expires during retry sleep without losing billed usage or starting another attempt", async () => {
+    vi.useFakeTimers()
+    try {
+      const stub = makeSdkStub({
+        sendResponses: [
+          {
+            value: {
+              id: "invalid",
+              model: requestParams.model,
+              choices: [{ message: { content: "not json" } }],
+              usage: { promptTokens: 10, completionTokens: 20, cost: 0.01 },
+            },
+          },
+        ],
+      })
+      const deadline = performance.now() + 100
+      const client = createOpenRouterClient(
+        {
+          sdk: stub.sdk,
+          requestTimeoutMs: 45_000,
+          remainingReviewMs: () => deadline - performance.now(),
+        },
+        createTestLogger(),
+      )
+      const rejection = captureRejection(client.requestReview(requestParams))
+      await vi.advanceTimersByTimeAsync(100)
+      const error = await rejection
+      expect(error).toBeInstanceOf(ReviewRequestError)
+      if (!(error instanceof ReviewRequestError)) throw error
+      expect({
+        message: error.message,
+        deadlineExceeded: error.deadlineExceeded,
+        attempts: error.attempts,
+      }).toEqual({
+        message: "review deadline exceeded",
+        deadlineExceeded: true,
+        attempts: [
+          {
+            model: requestParams.model,
+            outcome: "invalid_json",
+            promptTokens: 10,
+            completionTokens: 20,
+            costUsd: 0.01,
+            errorSummary: "response content is not valid JSON",
+          },
+        ],
+      })
+      expect(
+        stub.sendCalls.map(({ chatRequest }) => chatRequest.model),
+      ).toEqual([requestParams.model])
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("skips cost lookup when an accepted response exhausts the remaining review time", async () => {
+    const remainingReviewMs = vi.fn(() => 100)
+    const stub = makeSdkStub({
+      sendResponses: [
+        {
+          pending: async () => {
+            remainingReviewMs.mockReturnValue(0)
+            return makeNoCostChatResult()
+          },
+        },
+      ],
+    })
+    const client = createOpenRouterClient(
+      { sdk: stub.sdk, requestTimeoutMs: 45_000, remainingReviewMs },
+      createTestLogger(),
+    )
+    expect(await client.requestReview(requestParams)).toEqual({
+      review: acceptedReview,
+      modelUsed: requestParams.model,
+      attempts: [
+        {
+          model: requestParams.model,
+          outcome: "accepted",
+          promptTokens: 12000,
+          completionTokens: 800,
+          costUsd: null,
+          errorSummary: null,
+        },
+      ],
+    })
+    expect(stub.sendCalls.map(({ chatRequest }) => chatRequest.model)).toEqual([
+      requestParams.model,
+    ])
+    expect(stub.generationCalls).toEqual([])
+  })
+
+  it("retains an accepted review when cost lookup reaches the review deadline and ignores its late response", async () => {
+    vi.useFakeTimers()
+    try {
+      const late = Promise.withResolvers<unknown>()
+      const stub = makeSdkStub({
+        sendResponses: [{ value: makeNoCostChatResult() }],
+        generationResponses: [{ pending: () => late.promise }],
+      })
+      const deadline = performance.now() + 100
+      const client = createOpenRouterClient(
+        {
+          sdk: stub.sdk,
+          requestTimeoutMs: 45_000,
+          remainingReviewMs: () => deadline - performance.now(),
+        },
+        createTestLogger(),
+      )
+      const request = client.requestReview(requestParams)
+      await vi.advanceTimersByTimeAsync(100)
+      const result = await request
+      const expected = {
+        review: acceptedReview,
+        modelUsed: requestParams.model,
+        attempts: [
+          {
+            model: requestParams.model,
+            outcome: "accepted",
+            promptTokens: 12000,
+            completionTokens: 800,
+            costUsd: null,
+            errorSummary: null,
+          },
+        ],
+      }
+      expect(result).toEqual(expected)
+      expect(
+        stub.generationCalls.map(({ id, options }) => ({
+          id,
+          aborted: options?.signal?.aborted,
+        })),
+      ).toEqual([{ id: "gen-no-cost", aborted: true }])
+      late.resolve({ data: { totalCost: 42 } })
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(result).toEqual(expected)
+      expect(
+        stub.sendCalls.map(({ chatRequest }) => chatRequest.model),
+      ).toEqual([requestParams.model])
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("sends the strict json_schema response format with the review schema and per-attempt timeout", async () => {
     const stub = makeSdkStub({ sendResponses: [{ value: acceptedChatResult }] })
     const { client } = makeClient(stub)
@@ -403,7 +667,12 @@ describe("requestReview", () => {
       })
       const logger = createTestLogger()
       const client = createOpenRouterClient(
-        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        {
+          sdk: stub.sdk,
+          remainingReviewMs: () => Infinity,
+          requestTimeoutMs: 45_000,
+          retryDelayMs: 0,
+        },
         logger,
       )
 
@@ -450,7 +719,12 @@ describe("requestReview", () => {
       })
       const logger = createTestLogger()
       const client = createOpenRouterClient(
-        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        {
+          sdk: stub.sdk,
+          remainingReviewMs: () => Infinity,
+          requestTimeoutMs: 45_000,
+          retryDelayMs: 0,
+        },
         logger,
       )
 
@@ -527,7 +801,12 @@ describe("requestReview", () => {
       })
       const logger = createTestLogger()
       const client = createOpenRouterClient(
-        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        {
+          sdk: stub.sdk,
+          remainingReviewMs: () => Infinity,
+          requestTimeoutMs: 45_000,
+          retryDelayMs: 0,
+        },
         logger,
       )
 
@@ -572,7 +851,12 @@ describe("requestReview", () => {
       })
       const logger = createTestLogger()
       const client = createOpenRouterClient(
-        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        {
+          sdk: stub.sdk,
+          remainingReviewMs: () => Infinity,
+          requestTimeoutMs: 45_000,
+          retryDelayMs: 0,
+        },
         logger,
       )
 
@@ -615,7 +899,12 @@ describe("requestReview", () => {
       })
       const logger = createTestLogger()
       const client = createOpenRouterClient(
-        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        {
+          sdk: stub.sdk,
+          remainingReviewMs: () => Infinity,
+          requestTimeoutMs: 45_000,
+          retryDelayMs: 0,
+        },
         logger,
       )
 
@@ -669,7 +958,12 @@ describe("requestReview", () => {
       })
       const logger = createTestLogger()
       const client = createOpenRouterClient(
-        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        {
+          sdk: stub.sdk,
+          remainingReviewMs: () => Infinity,
+          requestTimeoutMs: 45_000,
+          retryDelayMs: 0,
+        },
         logger,
       )
 
@@ -705,7 +999,12 @@ describe("requestReview", () => {
       })
       const logger = createTestLogger()
       const client = createOpenRouterClient(
-        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs },
+        {
+          sdk: stub.sdk,
+          remainingReviewMs: () => Infinity,
+          requestTimeoutMs: 45_000,
+          retryDelayMs,
+        },
         logger,
       )
 
@@ -736,7 +1035,12 @@ describe("requestReview", () => {
       })
       const logger = createTestLogger()
       const client = createOpenRouterClient(
-        { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs: 0 },
+        {
+          sdk: stub.sdk,
+          remainingReviewMs: () => Infinity,
+          requestTimeoutMs: 45_000,
+          retryDelayMs: 0,
+        },
         logger,
       )
 
@@ -790,7 +1094,12 @@ describe("requestReview", () => {
     })
     const logger = createTestLogger()
     const client = createOpenRouterClient(
-      { sdk: stub.sdk, requestTimeoutMs: 45_000, retryDelayMs },
+      {
+        sdk: stub.sdk,
+        remainingReviewMs: () => Infinity,
+        requestTimeoutMs: 45_000,
+        retryDelayMs,
+      },
       logger,
     )
 

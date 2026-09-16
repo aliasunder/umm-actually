@@ -6,6 +6,7 @@ export type ReviewSummaryStats = {
   phasesCompleted: string[]
   /** Phases that ended without an accepted response — their findings are absent. */
   phasesIncomplete: string[]
+  reviewDeadlineExceeded?: boolean
   changedFilePaths: string[]
   relatedFilePaths: string[]
   relatedFilesExcludedPaths: string[]
@@ -59,6 +60,12 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     `**Instructions:** ${stats.conventionsFile ?? "none"}`,
     "",
     `**Phases:** ${renderPaths(stats.phasesCompleted)}${incompleteClause}`,
+    ...(stats.reviewDeadlineExceeded
+      ? [
+          "",
+          "The review deadline expired; results from completed phases are shown.",
+        ]
+      : []),
     "",
     "#### Context",
     "",

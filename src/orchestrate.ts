@@ -122,6 +122,7 @@ export type OrchestrateDeps = {
   githubClient: GithubClient
   contextReader: ContextReader
   generateFindings: GenerateFindings
+  remainingReviewMs: () => number
   /** Hooks the check-run cancellation cleanup into the process's signal
    *  handling (main.ts wires it to SIGINT/SIGTERM); returns an unregister.
    *  Optional so the pipeline stays runnable without process wiring. */
@@ -836,11 +837,17 @@ const runReviewPipeline = async (
       priorBotComments,
     })
   }
-  const phaseOutcomes = await runStages({ stages, runPhase }, logger)
+  const phaseOutcomes = await runStages(
+    { stages, runPhase, remainingReviewMs: deps.remainingReviewMs },
+    logger,
+  )
   const completedPhases = phaseOutcomes.filter(
     (outcome) => outcome.status === "completed",
   )
   const phases = phaseOutcomes.map(describePhaseOutcome)
+  const reviewDeadlineExceeded = phaseOutcomes.some(
+    (outcome) => outcome.status === "failed" && outcome.deadlineExceeded,
+  )
   const modelUsed = [
     ...new Set(completedPhases.map((outcome) => outcome.result.modelUsed)),
   ].join(", ")
@@ -1002,6 +1009,7 @@ const runReviewPipeline = async (
     model: modelUsed,
     contextNotes,
     incompletePhases: incompletePhaseIds(phases),
+    reviewDeadlineExceeded,
   })
   try {
     await githubClient.upsertSummaryComment({
@@ -1020,6 +1028,7 @@ const runReviewPipeline = async (
     conventionsFile: conventions ? config.conventionsFile : null,
     phasesCompleted: completedPhases.map((outcome) => outcome.phase.id),
     phasesIncomplete: incompletePhaseIds(phases),
+    reviewDeadlineExceeded,
     changedFilePaths: changedFiles.map((file) => file.path),
     relatedFilePaths: relatedFiles.map((file) => file.path),
     relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,

@@ -204,7 +204,7 @@ const withDeadline = async <T>(
     // microtask ordering between the deadline and an honoured abort
     deadline.resolve({ status: "timed_out" })
     controller.abort()
-  }, timeoutMs)
+  }, Math.ceil(timeoutMs))
 
   const bounded = await Promise.race([settled, deadline.promise]).finally(
     () => {
@@ -283,26 +283,29 @@ type SingleAttempt =
       abort: boolean
     }
 
-/** Thrown when the ladder ends without an accepted response. Carries the
- *  billed attempts so the caller can still account for their cost, and
- *  whether the ladder stopped on an auth/credit error (no fallback tried). */
+/** Retains billed attempts when the ladder fails, distinguishing auth/credit
+ *  errors from the shared review deadline. */
 export class ReviewRequestError extends Error {
   readonly attempts: ModelAttempt[]
   readonly aborted: boolean
+  readonly deadlineExceeded: boolean
 
   constructor({
     message,
     attempts,
     aborted,
+    deadlineExceeded = false,
   }: {
     message: string
     attempts: ModelAttempt[]
     aborted: boolean
+    deadlineExceeded?: boolean
   }) {
     super(message)
     this.name = "ReviewRequestError"
     this.attempts = attempts
     this.aborted = aborted
+    this.deadlineExceeded = deadlineExceeded
   }
 }
 
@@ -319,6 +322,7 @@ export const createOpenRouterClient = (
   {
     sdk,
     requestTimeoutMs,
+    remainingReviewMs,
     retryDelayMs = RETRY_DELAY_MS,
   }: {
     sdk: OpenRouterLike
@@ -328,6 +332,7 @@ export const createOpenRouterClient = (
      *  or not the provider connection closes. The HTTP call is aborted
      *  best-effort. */
     requestTimeoutMs: number
+    remainingReviewMs: () => number
     retryDelayMs?: number
   },
   logger: Logger,
@@ -341,6 +346,7 @@ export const createOpenRouterClient = (
     chatRequest: ChatRequestSubset
     model: string
   }): Promise<SingleAttempt> => {
+    const remainingMs = remainingReviewMs()
     const sendResult = await withDeadline(
       {
         start: (signal) => {
@@ -349,7 +355,7 @@ export const createOpenRouterClient = (
             { retries: { strategy: "none" }, signal },
           )
         },
-        timeoutMs: requestTimeoutMs,
+        timeoutMs: Math.min(requestTimeoutMs, remainingMs),
         logContext: { operation: "chat request", model },
       },
       logger,
@@ -363,7 +369,10 @@ export const createOpenRouterClient = (
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
-          errorSummary: deadlineSummary,
+          errorSummary:
+            remainingMs <= requestTimeoutMs
+              ? "review deadline exceeded"
+              : deadlineSummary,
         },
         retryable: true,
         abort: false,
@@ -466,7 +475,7 @@ export const createOpenRouterClient = (
     generationId: string,
   ): Promise<number | null> => {
     const generations = sdk.generations
-    if (!generations) return null
+    if (!generations || remainingReviewMs() <= 0) return null
     const lookup = await withDeadline(
       {
         start: (signal) => {
@@ -475,13 +484,18 @@ export const createOpenRouterClient = (
             { retries: { strategy: "none" }, signal },
           )
         },
-        timeoutMs: requestTimeoutMs,
+        timeoutMs: Math.min(requestTimeoutMs, remainingReviewMs()),
         logContext: { operation: "generation cost lookup", generationId },
       },
       logger,
     )
     if (lookup.status === "timed_out") {
-      logger.warn("generation cost lookup failed", { error: deadlineSummary })
+      logger.warn("generation cost lookup failed", {
+        error:
+          remainingReviewMs() <= 0
+            ? "review deadline exceeded"
+            : deadlineSummary,
+      })
       return null
     }
     if (lookup.status === "rejected") {
@@ -512,6 +526,15 @@ export const createOpenRouterClient = (
     const modelLadder =
       fallbackModel === null ? [model] : [model, fallbackModel]
     const attempts: ModelAttempt[] = []
+    const ensureReviewTimeRemaining = (): void => {
+      if (remainingReviewMs() > 0) return
+      throw new ReviewRequestError({
+        message: "review deadline exceeded",
+        attempts,
+        aborted: false,
+        deadlineExceeded: true,
+      })
+    }
 
     for (const [ladderIndex, ladderModel] of modelLadder.entries()) {
       const chatRequest = buildChatRequest({
@@ -523,6 +546,7 @@ export const createOpenRouterClient = (
 
       let attemptNumber = 1
       while (attemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
+        ensureReviewTimeRemaining()
         const attemptResult = await attemptOnce({
           chatRequest,
           model: ladderModel,
@@ -560,6 +584,7 @@ export const createOpenRouterClient = (
             aborted: true,
           })
         }
+        ensureReviewTimeRemaining()
         // A timeout consumed a full deadline window and signals live provider
         // degradation. Retrying the same model would double the wait before
         // the fallback runs — past a typical workflow job timeout — so the
@@ -576,7 +601,12 @@ export const createOpenRouterClient = (
         if (!attemptResult.retryable) break
         attemptNumber++
         if (attemptNumber <= MAX_ATTEMPTS_PER_MODEL && retryDelayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+          await new Promise((resolve) => {
+            setTimeout(
+              resolve,
+              Math.ceil(Math.min(retryDelayMs, remainingReviewMs())),
+            )
+          })
         }
       }
     }

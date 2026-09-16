@@ -30,21 +30,24 @@ const maxTimeoutSeconds = 2_147_483
 
 /** Mirrors the action.yml default — keep the two in sync. */
 const defaultRequestTimeoutSeconds = 900
+const defaultReviewTimeoutSeconds = 1500
 
-const timerSafeSeconds = z.string().transform((value, ctx) => {
-  // Empty string means "not provided": workflows wiring a bare unset repo
-  // variable pass "", which would otherwise override the action.yml default.
-  if (!value) return defaultRequestTimeoutSeconds
-  const parsed = parsePositiveInteger(value, ctx)
-  if (parsed > maxTimeoutSeconds) {
-    ctx.addIssue({
-      code: "custom",
-      message: `"${value}" exceeds the ${maxTimeoutSeconds}-second cap (2^31−1 ms timer limit)`,
-    })
-    return z.NEVER
-  }
-  return parsed
-})
+const timerSafeSeconds = (defaultSeconds: number) => {
+  return z.string().transform((value, ctx) => {
+    // Empty string means "not provided": workflows wiring a bare unset repo
+    // variable pass "", which would otherwise override the action.yml default.
+    if (!value) return defaultSeconds
+    const parsed = parsePositiveInteger(value, ctx)
+    if (parsed > maxTimeoutSeconds) {
+      ctx.addIssue({
+        code: "custom",
+        message: `"${value}" exceeds the ${maxTimeoutSeconds}-second cap (2^31−1 ms timer limit)`,
+      })
+      return z.NEVER
+    }
+    return parsed
+  })
+}
 
 /**
  * Built-in diff exclusions — the file classes GitHub's linguist auto-collapses
@@ -133,7 +136,8 @@ const configSchema = z.object({
   openrouterApiKey: z.string().min(1, "openrouter_api_key is required"),
   model: z.string().min(1, "model must not be empty"),
   fallbackModel: z.string(),
-  requestTimeoutSeconds: timerSafeSeconds,
+  requestTimeoutSeconds: timerSafeSeconds(defaultRequestTimeoutSeconds),
+  reviewTimeoutSeconds: timerSafeSeconds(defaultReviewTimeoutSeconds),
   maxFindings: optionalPositiveInteger,
   // Shape-only, like phases: the value is validated by its domain owner
   // (review/finding.ts resolveSeverityThreshold) at startup
