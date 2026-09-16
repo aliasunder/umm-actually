@@ -91,7 +91,7 @@ const runStage = async (
           phase: phase.id,
           error: describeError(error),
         })
-        // duck-typed — instanceof needs a runtime import, which would violate pure→I/O layering
+        // duck-typed — instanceof needs a runtime import of the class
         const deadlineExceeded =
           typeof error === "object" &&
           error !== null &&
