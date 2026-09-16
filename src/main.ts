@@ -115,6 +115,7 @@ try {
           workspaceRoot,
           maxScanFiles: config.maxScanFiles,
           maxScanBytes: config.maxScanBytes,
+          // workspace uses noun-first (relatedFilesMax); config uses limit-first (maxRelatedFiles)
           relatedFilesMax: config.maxRelatedFiles,
           relatedDocsMax: config.maxRelatedDocs,
           excludePaths: config.excludePaths,

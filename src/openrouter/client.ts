@@ -379,6 +379,8 @@ export const createOpenRouterClient = (
     if (sendResult.status === "rejected") {
       const statusCode = errorStatusCode(sendResult.error)
       const abort = statusCode !== undefined && ABORT_STATUSES.has(statusCode)
+      // Retryable: unknown status, 5xx, 408 timeout, 429 rate-limit.
+      // Other 4xx (e.g. 400 bad request) is structural — don't retry.
       const retryable =
         statusCode === undefined ||
         statusCode >= 500 ||
@@ -507,6 +509,7 @@ export const createOpenRouterClient = (
       logger.warn("unexpected generation response shape")
       return null
     }
+    // parsed.data = Zod safeParse result; .data = API envelope's data property
     return parsed.data.data.totalCost
   }
 
