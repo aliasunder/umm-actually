@@ -27,4 +27,4 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
-ENTRYPOINT ["node", "/app/dist/src/main.js"]
+ENTRYPOINT ["node", "--enable-source-maps", "/app/dist/src/main.js"]
