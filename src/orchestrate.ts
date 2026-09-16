@@ -845,8 +845,8 @@ const runReviewPipeline = async (
     (outcome) => outcome.status === "completed",
   )
   const phases = phaseOutcomes.map(describePhaseOutcome)
-  /** Cost lookup expiry alone does not mean review coverage was lost. */
-  const reviewDeadlineExceeded = phaseOutcomes.some(
+  /** Cost lookup expiry alone does not lose review coverage. */
+  const coverageLostToReviewDeadline = phaseOutcomes.some(
     (outcome) => outcome.status === "failed" && outcome.deadlineExceeded,
   )
   const modelUsed = [
@@ -1010,7 +1010,7 @@ const runReviewPipeline = async (
     model: modelUsed,
     contextNotes,
     incompletePhases: incompletePhaseIds(phases),
-    reviewDeadlineExceeded,
+    reviewDeadlineExceeded: coverageLostToReviewDeadline,
   })
   try {
     await githubClient.upsertSummaryComment({
@@ -1029,7 +1029,7 @@ const runReviewPipeline = async (
     conventionsFile: conventions ? config.conventionsFile : null,
     phasesCompleted: completedPhases.map((outcome) => outcome.phase.id),
     phasesIncomplete: incompletePhaseIds(phases),
-    reviewDeadlineExceeded,
+    reviewDeadlineExceeded: coverageLostToReviewDeadline,
     changedFilePaths: changedFiles.map((file) => file.path),
     relatedFilePaths: relatedFiles.map((file) => file.path),
     relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,

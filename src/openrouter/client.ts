@@ -175,12 +175,10 @@ const describeLateSettlement = <T>(late: SettledResult<T>): LateSettlement => {
   return "error"
 }
 
-/** Bounds an SDK call with a deadline that is authoritative in this scope:
- *  it wins the race whether or not the SDK honours the abort, so a request
- *  the provider keeps serving cannot hold the attempt open. The abandoned
- *  call is observed, never awaited, and its settlement is logged: an
- *  "abort_error" settlement means the abort propagated; no settlement line
- *  at all means the request never ended. */
+/** Bounds an SDK call with an authoritative deadline:
+ *  - Resolve the deadline before aborting so it wins deterministically.
+ *  - Return at the deadline even when the SDK ignores the abort.
+ *  - Observe the abandoned call and log how it eventually settles. */
 const withDeadline = async <T>(
   {
     start,
@@ -347,6 +345,7 @@ export const createOpenRouterClient = (
     model: string
   }): Promise<SingleAttempt> => {
     const remainingMs = remainingReviewMs()
+    const reviewDeadlineWins = remainingMs <= requestTimeoutMs
     const sendResult = await withDeadline(
       {
         start: (signal) => {
@@ -369,10 +368,9 @@ export const createOpenRouterClient = (
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
-          errorSummary:
-            remainingMs <= requestTimeoutMs
-              ? "review deadline exceeded"
-              : deadlineSummary,
+          errorSummary: reviewDeadlineWins
+            ? "review deadline exceeded"
+            : deadlineSummary,
         },
         retryable: true,
         abort: false,
