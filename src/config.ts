@@ -104,6 +104,7 @@ const diffExcludePathsInput = z.string().transform((value, ctx) => {
     return z.NEVER
   }
 
+  // normalizeWorkspacePath("") yields "." — strip it alongside empty entries
   const diffExcludePathPatterns = patternEntries
     .map(normalizeWorkspacePath)
     .filter((pattern) => pattern !== "" && pattern !== ".")
@@ -150,6 +151,7 @@ const configSchema = z.object({
   maxScanBytes: requiredPositiveInteger,
   maxRelatedFiles: requiredPositiveInteger,
   maxRelatedDocs: requiredPositiveInteger,
+  // normalizeWorkspacePath("") yields "." — strip it alongside empty entries
   priorityDocs: z.string().transform((value) =>
     value
       .split(",")

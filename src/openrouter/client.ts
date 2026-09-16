@@ -153,8 +153,8 @@ const toResult = async <T>(promise: Promise<T>): Promise<SettledResult<T>> => {
   }
 }
 
-/** Real cause chains are two deep at most; the bound only stops a cyclic
- *  `cause` from recursing forever. */
+/** Real cause chains are two deep at most; capped at 5 as a generous
+ *  margin so a cyclic `cause` cannot recurse forever. */
 const MAX_CAUSE_DEPTH = 5
 
 /** An honoured AbortSignal rejects with an error named "AbortError"; the

@@ -201,6 +201,8 @@ const fetchIssueCommentState = async (
       // startsWith, not includes: a finding comment's model-generated text
       // could quote the marker mid-body and misclassify the run as a re-run.
       statusCommentExists: comments.length > findingComments.length,
+      // Issue comments carry no line position — extractAnchors falls back
+      // to the line embedded in the anchor key
       anchors: extractAnchors(
         findingComments.map((comment) => ({
           body: comment.body,
@@ -661,6 +663,8 @@ const runReviewPipeline = async (
   const rawFloor = Math.floor(
     config.contextBudgetTokens * PRIORITY_DOCS_BUDGET_FLOOR_RATIO,
   )
+  // Floor cannot exceed what's left — it constrains related files, not
+  // the total budget
   const priorityDocFloor = needsPriorityDocFloor
     ? Math.min(rawFloor, remainingTokens)
     : 0
