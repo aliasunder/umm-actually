@@ -119,6 +119,7 @@ try {
           relatedFilesMax: config.maxRelatedFiles,
           relatedDocsMax: config.maxRelatedDocs,
           excludePaths: config.excludePaths,
+          remainingReviewMs,
         },
         logger,
       ),
