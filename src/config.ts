@@ -26,7 +26,7 @@ const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
 /** Ceiling that keeps seconds × 1000 within the 2^31−1 ms timer cap —
  *  beyond it, timer implementations clamp the delay to ~1 ms and every
  *  request would time out instantly instead of being bounded. */
-const maxTimeoutSeconds = 2_147_483
+const maxTimeoutSeconds = Math.floor((2 ** 31 - 1) / 1000)
 
 /** Mirrors the action.yml default — keep the two in sync. */
 const defaultRequestTimeoutSeconds = 900

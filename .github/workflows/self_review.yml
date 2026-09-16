@@ -13,6 +13,8 @@ permissions:
 # isolate them in a per-run group so they can't cancel an in-flight review.
 # Every reply a review session posts on the PR would otherwise kill the very
 # review run it's responding to.
+#   trigger comment / PR event → "self-review-{pr}" (cancels prior run)
+#   non-trigger comment        → "self-review-{pr}-noop-{run_id}" (unique, harmless)
 concurrency:
   group: self-review-${{ github.event.pull_request.number || github.event.issue.number }}${{ (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '@umm review')) && format('-noop-{0}', github.run_id) || '' }}
   cancel-in-progress: true
