@@ -845,6 +845,7 @@ const runReviewPipeline = async (
     (outcome) => outcome.status === "completed",
   )
   const phases = phaseOutcomes.map(describePhaseOutcome)
+  /** Cost lookup expiry alone does not mean review coverage was lost. */
   const reviewDeadlineExceeded = phaseOutcomes.some(
     (outcome) => outcome.status === "failed" && outcome.deadlineExceeded,
   )
@@ -1084,6 +1085,7 @@ export const orchestrate = async (
     model: config.model,
     fallbackModel: config.fallbackModel || null,
     phases: config.phases,
+    reviewTimeoutSeconds: config.reviewTimeoutSeconds,
     severityThreshold: config.severityThreshold,
     maxFindings: config.maxFindings ?? "uncapped",
     traceRelatedFiles: config.traceRelatedFiles,

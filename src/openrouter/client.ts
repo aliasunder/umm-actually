@@ -553,6 +553,7 @@ export const createOpenRouterClient = (
         })
 
         if (attemptResult.kind === "accepted") {
+          /** Optional cost lookup expiry must not discard an accepted review. */
           const costUsd =
             attemptResult.attempt.costUsd ??
             (await lookupGenerationCost(attemptResult.generationId))

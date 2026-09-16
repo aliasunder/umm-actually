@@ -131,6 +131,8 @@ const completedFindings = (outcomes: PhaseOutcome[]): Finding[] => {
  * Runs each stage's phases concurrently and the stages in order, passing
  * every earlier stage's findings (non-findings removed) to the next stage as
  * prior findings.
+ * runPhase must bound active calls using the same deadline as remainingReviewMs;
+ * this dispatcher only prevents new stages from starting after expiry.
  * Outcomes come back in stage-then-phase order regardless of completion
  * order. Throws AllPhasesFailedError only when no phase completed.
  */

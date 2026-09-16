@@ -488,6 +488,7 @@ export const buildStatusComment = ({
   contextNotes?: string[]
   /** Ids of review phases that ended without an accepted response. */
   incompletePhases?: string[]
+  /** True when deadline expiry left phases incomplete. */
   reviewDeadlineExceeded?: boolean
 }): string => {
   const shaShort = sha.slice(0, 7)

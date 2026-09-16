@@ -89,8 +89,9 @@ const collectRawInputs = (): RawInputs => ({
 try {
   const config = parseConfig(collectRawInputs())
   const reviewDeadline = actionStartedAt + config.reviewTimeoutSeconds * 1000
-  const remainingReviewMs = (): number =>
-    Math.max(0, reviewDeadline - performance.now())
+  const remainingReviewMs = (): number => {
+    return Math.max(0, reviewDeadline - performance.now())
+  }
   core.setSecret(config.githubToken)
   core.setSecret(config.openrouterApiKey)
 
