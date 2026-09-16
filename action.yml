@@ -54,7 +54,8 @@ inputs:
     default: "true"
   priority_docs:
     description: >-
-      Comma-separated repo-relative paths always included in review context.
+      Comma-separated repo-relative paths prioritized for review context,
+      subject to the token budget.
       Docs already present in full from other context channels are not
       re-read; a changed file excluded from the review diff stays excluded
       (empty = disabled)
