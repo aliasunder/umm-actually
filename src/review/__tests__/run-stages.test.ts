@@ -117,6 +117,33 @@ describe("runStages", () => {
       })),
     ])
   })
+
+  it("propagates deadlineExceeded from a phase error to the outcome", async () => {
+    const resultA = makeResult()
+    const deadlineError = Object.assign(new Error("review deadline exceeded"), {
+      deadlineExceeded: true,
+    })
+    const { runPhase } = makeRunPhase({
+      a: () => resultA,
+      b: () => Promise.reject(deadlineError),
+    })
+
+    const outcomes = await runStages(
+      { stages: [[phaseA, phaseB]], runPhase },
+      createTestLogger(),
+    )
+
+    expect(outcomes).toEqual([
+      { phase: phaseA, status: "completed", result: resultA },
+      {
+        phase: phaseB,
+        status: "failed",
+        error: deadlineError,
+        deadlineExceeded: true,
+      },
+    ])
+  })
+
   it("dispatches a stage's phases together with empty prior findings and returns outcomes in phase order", async () => {
     const resultA = makeResult({ modelUsed: "model/a" })
     const resultB = makeResult({ modelUsed: "model/b" })
