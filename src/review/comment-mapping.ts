@@ -476,6 +476,7 @@ export const buildStatusComment = ({
   model,
   contextNotes = [],
   incompletePhases = [],
+  reviewDeadlineExceeded = false,
 }: {
   sha: string
   isFirstRun: boolean
@@ -487,6 +488,8 @@ export const buildStatusComment = ({
   contextNotes?: string[]
   /** Ids of review phases that ended without an accepted response. */
   incompletePhases?: string[]
+  /** True when deadline expiry left phases incomplete. */
+  reviewDeadlineExceeded?: boolean
 }): string => {
   const shaShort = sha.slice(0, 7)
   const verb = isFirstRun ? "reviewed" : "re-reviewed"
@@ -504,7 +507,16 @@ export const buildStatusComment = ({
     droppedByCap.length === 0
       ? ""
       : `_${droppedByCap.length} lower-severity finding(s) omitted by the max_findings cap: ${droppedByCap.map((finding) => `\`${finding.file}:${finding.line}\``).join(", ")}_`
-  const incompleteNote = buildIncompleteNote(incompletePhases)
+  const incompleteNote = [
+    buildIncompleteNote(incompletePhases),
+    ...(reviewDeadlineExceeded
+      ? [
+          "_The review deadline expired; results from completed phases are shown._",
+        ]
+      : []),
+  ]
+    .filter(Boolean)
+    .join("\n\n")
   const contextSection =
     contextNotes.length === 0
       ? ""

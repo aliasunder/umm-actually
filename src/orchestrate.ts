@@ -122,6 +122,7 @@ export type OrchestrateDeps = {
   githubClient: GithubClient
   contextReader: ContextReader
   generateFindings: GenerateFindings
+  remainingReviewMs: () => number
   /** Hooks the check-run cancellation cleanup into the process's signal
    *  handling (main.ts wires it to SIGINT/SIGTERM); returns an unregister.
    *  Optional so the pipeline stays runnable without process wiring. */
@@ -200,6 +201,8 @@ const fetchIssueCommentState = async (
       // startsWith, not includes: a finding comment's model-generated text
       // could quote the marker mid-body and misclassify the run as a re-run.
       statusCommentExists: comments.length > findingComments.length,
+      // Issue comments carry no line position — extractAnchors falls back
+      // to the line embedded in the anchor key
       anchors: extractAnchors(
         findingComments.map((comment) => ({
           body: comment.body,
@@ -609,6 +612,8 @@ const runReviewPipeline = async (
     .flatMap((file) => {
       const toPath = newFilePath(file)
       const fromPath = file.from
+      // parse-diff: from is undefined for binary files, "/dev/null" for
+      // added files — neither is a pre-rename path worth tracing
       const isRename =
         toPath !== null &&
         fromPath !== undefined &&
@@ -660,6 +665,8 @@ const runReviewPipeline = async (
   const rawFloor = Math.floor(
     config.contextBudgetTokens * PRIORITY_DOCS_BUDGET_FLOOR_RATIO,
   )
+  // Floor cannot exceed what's left — it constrains related files, not
+  // the total budget
   const priorityDocFloor = needsPriorityDocFloor
     ? Math.min(rawFloor, remainingTokens)
     : 0
@@ -836,11 +843,18 @@ const runReviewPipeline = async (
       priorBotComments,
     })
   }
-  const phaseOutcomes = await runStages({ stages, runPhase }, logger)
+  const phaseOutcomes = await runStages(
+    { stages, runPhase, remainingReviewMs: deps.remainingReviewMs },
+    logger,
+  )
   const completedPhases = phaseOutcomes.filter(
     (outcome) => outcome.status === "completed",
   )
   const phases = phaseOutcomes.map(describePhaseOutcome)
+  /** Cost lookup expiry alone does not lose review coverage. */
+  const coverageLostToReviewDeadline = phaseOutcomes.some(
+    (outcome) => outcome.status === "failed" && outcome.deadlineExceeded,
+  )
   const modelUsed = [
     ...new Set(completedPhases.map((outcome) => outcome.result.modelUsed)),
   ].join(", ")
@@ -1002,6 +1016,7 @@ const runReviewPipeline = async (
     model: modelUsed,
     contextNotes,
     incompletePhases: incompletePhaseIds(phases),
+    reviewDeadlineExceeded: coverageLostToReviewDeadline,
   })
   try {
     await githubClient.upsertSummaryComment({
@@ -1020,6 +1035,7 @@ const runReviewPipeline = async (
     conventionsFile: conventions ? config.conventionsFile : null,
     phasesCompleted: completedPhases.map((outcome) => outcome.phase.id),
     phasesIncomplete: incompletePhaseIds(phases),
+    reviewDeadlineExceeded: coverageLostToReviewDeadline,
     changedFilePaths: changedFiles.map((file) => file.path),
     relatedFilePaths: relatedFiles.map((file) => file.path),
     relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths,
@@ -1075,6 +1091,7 @@ export const orchestrate = async (
     model: config.model,
     fallbackModel: config.fallbackModel || null,
     phases: config.phases,
+    reviewTimeoutSeconds: config.reviewTimeoutSeconds,
     severityThreshold: config.severityThreshold,
     maxFindings: config.maxFindings ?? "uncapped",
     traceRelatedFiles: config.traceRelatedFiles,

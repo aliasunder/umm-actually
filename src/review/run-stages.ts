@@ -18,7 +18,12 @@ import type { ReviewPhase, ReviewStage } from "./phases.js"
 
 export type PhaseOutcome =
   | { phase: ReviewPhase; status: "completed"; result: StructuredReviewResult }
-  | { phase: ReviewPhase; status: "failed"; error: unknown }
+  | {
+      phase: ReviewPhase
+      status: "failed"
+      error: unknown
+      deadlineExceeded?: boolean
+    }
 
 export type RunPhase = (params: {
   phase: ReviewPhase
@@ -86,7 +91,18 @@ const runStage = async (
           phase: phase.id,
           error: describeError(error),
         })
-        return { phase, status: "failed", error }
+        // duck-typed — instanceof needs a runtime import of the class
+        const deadlineExceeded =
+          typeof error === "object" &&
+          error !== null &&
+          "deadlineExceeded" in error &&
+          error.deadlineExceeded === true
+        return {
+          phase,
+          status: "failed",
+          error,
+          ...(deadlineExceeded ? { deadlineExceeded } : {}),
+        }
       }
     }),
   )
@@ -116,11 +132,21 @@ const completedFindings = (outcomes: PhaseOutcome[]): Finding[] => {
  * Runs each stage's phases concurrently and the stages in order, passing
  * every earlier stage's findings (non-findings removed) to the next stage as
  * prior findings.
+ * runPhase must bound active calls using the same deadline as remainingReviewMs;
+ * this dispatcher only prevents new stages from starting after expiry.
  * Outcomes come back in stage-then-phase order regardless of completion
  * order. Throws AllPhasesFailedError only when no phase completed.
  */
 export const runStages = async (
-  { stages, runPhase }: { stages: ReviewStage[]; runPhase: RunPhase },
+  {
+    stages,
+    runPhase,
+    remainingReviewMs,
+  }: {
+    stages: ReviewStage[]
+    runPhase: RunPhase
+    remainingReviewMs: () => number
+  },
   logger: Logger,
 ): Promise<PhaseOutcome[]> => {
   if (stages.length === 0 || stages.some((stage) => stage.length === 0)) {
@@ -131,6 +157,25 @@ export const runStages = async (
   // prior findings are read from everything completed so far.
   let outcomes: PhaseOutcome[] = []
   for (const [stageIndex, stage] of stages.entries()) {
+    if (remainingReviewMs() <= 0) {
+      const skippedPhases = stages.slice(stageIndex).flat()
+      logger.warn(
+        "skipping remaining review stages after the review deadline",
+        {
+          skippedPhases: skippedPhases.map((phase) => phase.id),
+        },
+      )
+      outcomes = [
+        ...outcomes,
+        ...skippedPhases.map((phase): PhaseOutcome => ({
+          phase,
+          status: "failed",
+          error: new Error("not attempted: review deadline exceeded"),
+          deadlineExceeded: true,
+        })),
+      ]
+      break
+    }
     const stageOutcomes = await runStage(
       { stage, priorFindings: completedFindings(outcomes), runPhase },
       logger,

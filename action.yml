@@ -24,6 +24,10 @@ inputs:
     description: Per-attempt deadline for a single model request, in seconds. When it elapses the attempt is recorded as `timeout` and the ladder advances to the fallback model when one is configured (the last ladder model may retry once), whether or not the provider connection closes; the HTTP call is aborted best-effort. Empty = the 900 default, so workflows can wire an unset repo variable directly
     required: false
     default: "900"
+  review_timeout_seconds:
+    description: Shared model-work budget from action start, in seconds, including context preparation, all phases, retries, fallbacks and cost lookups. At expiry, completed phases post with incomplete coverage identified; the run fails if no phase completed. Leave room below the job timeout for setup and GitHub publication. External cancellation still stops the run. Empty = 1500
+    required: false
+    default: "1500"
   max_findings:
     description: Cap on posted findings, highest severity first. Empty = uncapped (all validated findings post)
     required: false
@@ -50,7 +54,8 @@ inputs:
     default: "true"
   priority_docs:
     description: >-
-      Comma-separated repo-relative paths always included in review context.
+      Comma-separated repo-relative paths prioritized for review context,
+      subject to the token budget.
       Docs already present in full from other context channels are not
       re-read; a changed file excluded from the review diff stays excluded
       (empty = disabled)

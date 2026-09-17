@@ -1,9 +1,17 @@
 import { readFileSync } from "node:fs"
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createTestLogger } from "../../__tests__/test-logger.js"
 import { estimateTokens } from "../../review/prompt.js"
 import {
@@ -15,6 +23,11 @@ import {
   type ContextReaderConfig,
 } from "../workspace.js"
 
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>()
+  return { ...actual, readFile: vi.fn(actual.readFile) }
+})
+
 const defaultConfig = (workspaceRoot: string): ContextReaderConfig => ({
   workspaceRoot,
   maxScanFiles: DEFAULT_MAX_SCAN_FILES,
@@ -22,6 +35,7 @@ const defaultConfig = (workspaceRoot: string): ContextReaderConfig => ({
   relatedFilesMax: DEFAULT_RELATED_FILES_MAX,
   relatedDocsMax: DEFAULT_RELATED_DOCS_MAX,
   excludePaths: [],
+  remainingReviewMs: () => Infinity,
 })
 
 const workspaceRoot = fileURLToPath(
@@ -65,6 +79,43 @@ const makeTempWorkspace = async (
 }
 
 describe("readConventions", () => {
+  it("aborts an in-flight conventions read when the review deadline expires", async () => {
+    const readStarted = Promise.withResolvers<true>()
+    const captured: { signal?: AbortSignal } = {}
+    vi.mocked(readFile).mockImplementationOnce((_path, options) => {
+      if (
+        typeof options === "object" &&
+        options !== null &&
+        "signal" in options &&
+        options.signal
+      ) {
+        captured.signal = options.signal
+      }
+      readStarted.resolve(true)
+      return new Promise<never>(() => undefined)
+    })
+    const logger = createTestLogger()
+    const contextReader = createContextReader(
+      { ...defaultConfig(workspaceRoot), remainingReviewMs: () => 250 },
+      logger,
+    )
+
+    const pending = contextReader.readConventions({
+      conventionsFile: "AGENTS.md",
+    })
+    await readStarted.promise
+
+    await expect(pending).resolves.toBeNull()
+    expect(captured.signal?.aborted).toBe(true)
+    expect(logger.messages).toEqual([
+      {
+        level: "warn",
+        message: "review deadline reached during context preparation",
+        data: { operation: "read conventions" },
+      },
+    ])
+  })
+
   it("returns the conventions file content", async () => {
     const { contextReader } = makeReader()
 
@@ -265,6 +316,37 @@ describe("readGitAttributes", () => {
 })
 
 describe("readChangedFiles", () => {
+  it("keeps every changed path as diff-only when the review deadline has expired", async () => {
+    const logger = createTestLogger()
+    const remainingReviewMs = vi.fn(() => 0)
+    const contextReader = createContextReader(
+      { ...defaultConfig(workspaceRoot), remainingReviewMs },
+      logger,
+    )
+
+    const result = await contextReader.readChangedFiles({
+      changedPaths: ["src/greeter.ts", "src/registry.ts"],
+      budgetTokens: 10_000,
+      diffOnlyPaths: [],
+    })
+
+    expect(result).toEqual({
+      files: [
+        { path: "src/greeter.ts", content: "", includedAs: "diff-only" },
+        { path: "src/registry.ts", content: "", includedAs: "diff-only" },
+      ],
+      remainingTokens: 10_000,
+    })
+    expect(remainingReviewMs).toHaveBeenCalledTimes(1)
+    expect(logger.messages).toEqual([
+      {
+        level: "warn",
+        message: "review deadline reached during context preparation",
+        data: { operation: "read changed files" },
+      },
+    ])
+  })
+
   it("includes files in full and subtracts their tokens from the budget", async () => {
     const { contextReader } = makeReader()
 
@@ -570,6 +652,47 @@ describe("readChangedFiles", () => {
 })
 
 describe("findRelatedFiles", () => {
+  it("stops a workspace scan when the review deadline expires", async () => {
+    const { root, cleanup } = await makeTempWorkspace({
+      "a-changed.ts": "export{}",
+      "b-oversized.ts": "x".repeat(32),
+    })
+    const logger = createTestLogger()
+    const remainingReviewMs = vi
+      .fn<() => number>()
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(100)
+      .mockReturnValue(0)
+    const contextReader = createContextReader(
+      { ...defaultConfig(root), maxScanBytes: 16, remainingReviewMs },
+      logger,
+    )
+
+    try {
+      const result = await contextReader.findRelatedFiles({
+        changedPaths: ["a-changed.ts"],
+        budgetTokens: 100_000,
+        excludePaths: [],
+      })
+
+      expect(result).toEqual({ files: [], excludedByCapPaths: [] })
+      expect(remainingReviewMs).toHaveBeenCalledTimes(8)
+      expect(logger.messages).toEqual([
+        {
+          level: "warn",
+          message: "review deadline reached during context preparation",
+          data: { operation: "scan workspace" },
+        },
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
   it("ranks importers by changed-file import count with test files last", async () => {
     const { contextReader } = makeReader()
 

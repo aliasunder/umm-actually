@@ -23,28 +23,31 @@ const optionalPositiveInteger = z
 
 const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
 
-/** Ceiling that keeps seconds × 1000 within the 2^31−1 ms timer cap —
- *  beyond it, timer implementations clamp the delay to ~1 ms and every
- *  request would time out instantly instead of being bounded. */
-const maxTimeoutSeconds = 2_147_483
+/** Ceiling that keeps seconds × 1000 within the 2^31−1 ms timer cap.
+ *  Beyond it, setTimeout clamps the delay to 1 ms and every request
+ *  would time out instantly. https://nodejs.org/api/timers.html#settimeoutcallback-delay-args */
+const maxTimeoutSeconds = Math.floor((2 ** 31 - 1) / 1000)
 
 /** Mirrors the action.yml default — keep the two in sync. */
 const defaultRequestTimeoutSeconds = 900
+const defaultReviewTimeoutSeconds = 1500
 
-const timerSafeSeconds = z.string().transform((value, ctx) => {
-  // Empty string means "not provided": workflows wiring a bare unset repo
-  // variable pass "", which would otherwise override the action.yml default.
-  if (!value) return defaultRequestTimeoutSeconds
-  const parsed = parsePositiveInteger(value, ctx)
-  if (parsed > maxTimeoutSeconds) {
-    ctx.addIssue({
-      code: "custom",
-      message: `"${value}" exceeds the ${maxTimeoutSeconds}-second cap (2^31−1 ms timer limit)`,
-    })
-    return z.NEVER
-  }
-  return parsed
-})
+const timerSafeSeconds = (defaultSeconds: number) => {
+  return z.string().transform((value, ctx) => {
+    // Empty string means "not provided": workflows wiring a bare unset repo
+    // variable pass "", which would otherwise override the action.yml default.
+    if (!value) return defaultSeconds
+    const parsed = parsePositiveInteger(value, ctx)
+    if (parsed > maxTimeoutSeconds) {
+      ctx.addIssue({
+        code: "custom",
+        message: `"${value}" exceeds the ${maxTimeoutSeconds}-second cap (2^31−1 ms timer limit)`,
+      })
+      return z.NEVER
+    }
+    return parsed
+  })
+}
 
 /**
  * Built-in diff exclusions — the file classes GitHub's linguist auto-collapses
@@ -101,6 +104,7 @@ const diffExcludePathsInput = z.string().transform((value, ctx) => {
     return z.NEVER
   }
 
+  // normalizeWorkspacePath("") yields "." — strip it alongside empty entries
   const diffExcludePathPatterns = patternEntries
     .map(normalizeWorkspacePath)
     .filter((pattern) => pattern !== "" && pattern !== ".")
@@ -133,7 +137,8 @@ const configSchema = z.object({
   openrouterApiKey: z.string().min(1, "openrouter_api_key is required"),
   model: z.string().min(1, "model must not be empty"),
   fallbackModel: z.string(),
-  requestTimeoutSeconds: timerSafeSeconds,
+  requestTimeoutSeconds: timerSafeSeconds(defaultRequestTimeoutSeconds),
+  reviewTimeoutSeconds: timerSafeSeconds(defaultReviewTimeoutSeconds),
   maxFindings: optionalPositiveInteger,
   // Shape-only, like phases: the value is validated by its domain owner
   // (review/finding.ts resolveSeverityThreshold) at startup
@@ -146,6 +151,7 @@ const configSchema = z.object({
   maxScanBytes: requiredPositiveInteger,
   maxRelatedFiles: requiredPositiveInteger,
   maxRelatedDocs: requiredPositiveInteger,
+  // normalizeWorkspacePath("") yields "." — strip it alongside empty entries
   priorityDocs: z.string().transform((value) =>
     value
       .split(",")

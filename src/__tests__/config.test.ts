@@ -11,6 +11,7 @@ const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   model: "anthropic/claude-sonnet-4-6",
   fallbackModel: "",
   requestTimeoutSeconds: "600",
+  reviewTimeoutSeconds: "",
   maxFindings: "",
   severityThreshold: "low",
   conventionsFile: "AGENTS.md",
@@ -40,6 +41,7 @@ describe("parseConfig", () => {
       model: "anthropic/claude-sonnet-4-6",
       fallbackModel: "",
       requestTimeoutSeconds: 600,
+      reviewTimeoutSeconds: 1500,
       maxFindings: undefined,
       severityThreshold: "low",
       conventionsFile: "AGENTS.md",
@@ -77,6 +79,35 @@ describe("parseConfig", () => {
       costSummary: true,
       prNumberOverride: undefined,
     })
+  })
+
+  it.each(["1", "2400", "2147483"])(
+    "accepts review_timeout_seconds %s",
+    (value) => {
+      expect(
+        parseConfig(makeRawInputs({ reviewTimeoutSeconds: value }))
+          .reviewTimeoutSeconds,
+      ).toBe(Number(value))
+    },
+  )
+
+  it.each(["0", "-1", "1.5", "never"])(
+    "rejects invalid review_timeout_seconds %s",
+    (value) => {
+      expect(() =>
+        parseConfig(makeRawInputs({ reviewTimeoutSeconds: value })),
+      ).toThrow(
+        `invalid action inputs — reviewTimeoutSeconds: "${value}" is not a positive integer`,
+      )
+    },
+  )
+
+  it("rejects a review timeout beyond the timer limit", () => {
+    expect(() =>
+      parseConfig(makeRawInputs({ reviewTimeoutSeconds: "2147484" })),
+    ).toThrow(
+      'invalid action inputs — reviewTimeoutSeconds: "2147484" exceeds the 2147483-second cap (2^31−1 ms timer limit)',
+    )
   })
 
   it("passes a false cost_summary through unchanged", () => {

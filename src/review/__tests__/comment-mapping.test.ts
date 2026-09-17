@@ -466,22 +466,29 @@ describe("buildStatusComment", () => {
     )
   })
 
-  it("names a single incomplete phase without its error text", () => {
-    const body = buildStatusComment({
-      sha: "abc123def456abc123def456abc123def456abc1",
-      isFirstRun: true,
-      postedCount: 2,
-      unpostedCount: 0,
-      totalCount: 2,
-      droppedByCap: [],
-      model: "anthropic/claude-sonnet-4-6",
-      incompletePhases: ["subtle-bugs"],
-    })
+  it.each([false, true])(
+    "names an incomplete phase and reports deadline expiry when reviewDeadlineExceeded is %s",
+    (reviewDeadlineExceeded) => {
+      const body = buildStatusComment({
+        sha: "abc123def456abc123def456abc123def456abc1",
+        isFirstRun: true,
+        postedCount: 2,
+        unpostedCount: 0,
+        totalCount: 2,
+        droppedByCap: [],
+        model: "anthropic/claude-sonnet-4-6",
+        incompletePhases: ["subtle-bugs"],
+        reviewDeadlineExceeded,
+      })
 
-    expect(body).toBe(
-      `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\n2 new finding(s) posted (2 tracked finding(s) across all runs).\n\n_Review phase \`subtle-bugs\` did not complete; its findings are missing from this run. See the check run for details._\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
-    )
-  })
+      const deadlineNotice = reviewDeadlineExceeded
+        ? "\n\n_The review deadline expired; results from completed phases are shown._"
+        : ""
+      expect(body).toBe(
+        `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\n2 new finding(s) posted (2 tracked finding(s) across all runs).\n\n_Review phase \`subtle-bugs\` did not complete; its findings are missing from this run. See the check run for details._${deadlineNotice}\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+      )
+    },
+  )
 
   it("names several incomplete phases in the plural", () => {
     const body = buildStatusComment({

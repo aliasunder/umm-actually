@@ -13,6 +13,8 @@ permissions:
 # isolate them in a per-run group so they can't cancel an in-flight review.
 # Every reply a review session posts on the PR would otherwise kill the very
 # review run it's responding to.
+#   trigger comment / PR event → "self-review-{pr}" (cancels prior run)
+#   non-trigger comment        → "self-review-{pr}-noop-{run_id}" (unique, harmless)
 concurrency:
   group: self-review-${{ github.event.pull_request.number || github.event.issue.number }}${{ (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '@umm review')) && format('-noop-{0}', github.run_id) || '' }}
   cancel-in-progress: true
@@ -30,9 +32,6 @@ jobs:
         github.event.issue.pull_request &&
         contains(github.event.comment.body, '@umm review')
       )
-    permissions:
-      contents: read
-      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,4 +53,5 @@ jobs:
           openrouter_api_key: ${{ secrets.OPENROUTER_KEY }}
           model: ${{ vars.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4-6' }}
           request_timeout_seconds: ${{ vars.UMM_REQUEST_TIMEOUT_SECONDS }}
+          review_timeout_seconds: ${{ vars.UMM_REVIEW_TIMEOUT_SECONDS }}
           phases: ${{ vars.UMM_PHASES }}

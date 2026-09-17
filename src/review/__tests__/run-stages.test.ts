@@ -5,10 +5,17 @@ import type { Finding } from "../finding.js"
 import type { ReviewPhase } from "../phases.js"
 import {
   AllPhasesFailedError,
-  runStages,
+  runStages as dispatchStages,
   type RunPhase,
 } from "../run-stages.js"
 import { makeFinding } from "./make-finding.js"
+
+const runStages = (
+  params: Omit<Parameters<typeof dispatchStages>[0], "remainingReviewMs"> & {
+    remainingReviewMs?: () => number
+  },
+  logger: Parameters<typeof dispatchStages>[1],
+) => dispatchStages({ remainingReviewMs: () => Infinity, ...params }, logger)
 
 const makePhase = (id: string): ReviewPhase => ({
   id,
@@ -60,6 +67,83 @@ const phaseB = makePhase("b")
 const phaseC = makePhase("c")
 
 describe("runStages", () => {
+  it("does not invoke any phase when the review deadline has already expired", async () => {
+    const { runPhase, calls } = makeRunPhase({})
+    const rejection = await captureRejection(
+      runStages(
+        { stages: [[phaseA], [phaseB]], runPhase, remainingReviewMs: () => 0 },
+        createTestLogger(),
+      ),
+    )
+    expect(calls).toEqual([])
+    expect(rejection).toBeInstanceOf(AllPhasesFailedError)
+    if (!(rejection instanceof AllPhasesFailedError))
+      throw new Error("expected phase failure")
+    expect(rejection.outcomes).toEqual(
+      [phaseA, phaseB].map((phase) => ({
+        phase,
+        status: "failed",
+        error: new Error("not attempted: review deadline exceeded"),
+        deadlineExceeded: true,
+      })),
+    )
+  })
+
+  it("keeps a completed stage and skips later stages when the review deadline expires", async () => {
+    const budget = { remaining: 100 }
+    const result = makeResult()
+    const { runPhase, calls } = makeRunPhase({
+      a: () => {
+        budget.remaining = 0
+        return result
+      },
+    })
+    const outcomes = await runStages(
+      {
+        stages: [[phaseA], [phaseB], [phaseC]],
+        runPhase,
+        remainingReviewMs: () => budget.remaining,
+      },
+      createTestLogger(),
+    )
+    expect(calls).toEqual([{ phase: "a", priorFindings: [] }])
+    expect(outcomes).toEqual([
+      { phase: phaseA, status: "completed", result },
+      ...[phaseB, phaseC].map((phase) => ({
+        phase,
+        status: "failed",
+        error: new Error("not attempted: review deadline exceeded"),
+        deadlineExceeded: true,
+      })),
+    ])
+  })
+
+  it("propagates deadlineExceeded from a phase error to the outcome", async () => {
+    const resultA = makeResult()
+    const deadlineError = Object.assign(new Error("review deadline exceeded"), {
+      deadlineExceeded: true,
+    })
+    const { runPhase } = makeRunPhase({
+      a: () => resultA,
+      b: () => Promise.reject(deadlineError),
+    })
+
+    const outcomes = await runStages(
+      { stages: [[phaseA, phaseB]], runPhase },
+      createTestLogger(),
+    )
+
+    expect(outcomes).toEqual([
+      { phase: phaseA, status: "completed", result: resultA },
+      {
+        phase: phaseB,
+        status: "failed",
+        error: deadlineError,
+        deadlineExceeded: true,
+      },
+    ])
+  })
+
   it("dispatches a stage's phases together with empty prior findings and returns outcomes in phase order", async () => {
     const resultA = makeResult({ modelUsed: "model/a" })
     const resultB = makeResult({ modelUsed: "model/b" })

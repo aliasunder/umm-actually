@@ -11,6 +11,7 @@ import type { PrContext } from "../github/event.js"
 import type { ContextReader } from "../context/workspace.js"
 import {
   ReviewRequestError,
+  createOpenRouterClient,
   type ModelAttempt,
   type OpenRouterClient,
   type StructuredReviewResult,
@@ -226,6 +227,7 @@ const baseConfig: ActionConfig = {
   model: "test/model",
   fallbackModel: "",
   requestTimeoutSeconds: 600,
+  reviewTimeoutSeconds: 1500,
   maxFindings: undefined,
   severityThreshold: "low",
   conventionsFile: "AGENTS.md",
@@ -342,6 +344,7 @@ const makeOrchestrateDeps = (
     githubClient?: Partial<GithubClient>
     contextReader?: Partial<ContextReader>
     generateFindings?: GenerateFindings
+    remainingReviewMs?: () => number
     fixtureResult?: Partial<StructuredReviewResult>
   } = {},
 ): RecordingStubs => {
@@ -452,6 +455,7 @@ const makeOrchestrateDeps = (
     githubClient,
     contextReader,
     generateFindings: overrides.generateFindings ?? defaultGenerateFindings,
+    remainingReviewMs: overrides.remainingReviewMs ?? (() => Infinity),
   }
 
   return {
@@ -3075,6 +3079,202 @@ describe("staged phases", () => {
       ["conventions-tests", [correctnessFinding]],
       ["subtle-bugs", [correctnessFinding, conventionsFinding]],
     ])
+  })
+
+  it("publishes full coverage without a deadline warning when only accepted-response cost lookup expires", async () => {
+    vi.useFakeTimers()
+    try {
+      const deadline = Date.now() + 1000
+      const remainingReviewMs = () => deadline - Date.now()
+      const costResponse = Promise.withResolvers<unknown>()
+      const getGeneration = vi.fn(() => costResponse.promise)
+      const send = vi.fn(async () => ({
+        id: "accepted-before-deadline",
+        model: "test/model",
+        choices: [
+          { message: { content: JSON.stringify(fixtureReviewResponse) } },
+        ],
+        usage: { promptTokens: 10, completionTokens: 20 },
+      }))
+      const client = createOpenRouterClient(
+        {
+          sdk: { chat: { send }, generations: { getGeneration } },
+          requestTimeoutMs: 900_000,
+          remainingReviewMs,
+        },
+        createTestLogger(),
+      )
+      const stubs = makeOrchestrateDeps({
+        remainingReviewMs,
+        generateFindings: createPromptedGenerateFindings(
+          {
+            openrouterClient: client,
+            model: "test/model",
+            fallbackModel: "fallback/model",
+          },
+          createTestLogger(),
+        ),
+      })
+      const pending = orchestrate(stubs.deps, createTestLogger())
+      await vi.advanceTimersByTimeAsync(1000)
+      const result = await pending
+      const expectedCost = renderCostSummary({
+        attempts: [
+          {
+            phase: "combined",
+            model: "test/model",
+            outcome: "accepted",
+            promptTokens: 10,
+            completionTokens: 20,
+            costUsd: null,
+            errorSummary: null,
+          },
+        ],
+        modelUsed: "test/model",
+      })
+      expect(remainingReviewMs()).toBe(0)
+      expect(send).toHaveBeenCalledTimes(1)
+      expect(getGeneration).toHaveBeenCalledExactlyOnceWith(
+        { id: "accepted-before-deadline" },
+        { retries: { strategy: "none" }, signal: expect.any(AbortSignal) },
+      )
+      expect(result).toEqual({
+        findingsCount: expectedSelection.selected.length,
+        reviewUrl: "https://github.com/test/review/1",
+        modelUsed: "test/model",
+        skippedReason: "",
+        phases: [{ phase: "combined", status: "completed" }],
+        reviewSummaryMarkdown: expectedReviewSummary(),
+        costSummaryMarkdown: expectedCost,
+      })
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        expectedStatus({
+          isFirstRun: true,
+          postedCount: expectedSelection.selected.length,
+          totalCount: expectedSelection.selected.length,
+        }),
+      ])
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(expectedSelection.selected),
+      ])
+      expect(stubs.updateCheckRunCalls).toEqual([
+        {
+          checkRunId: 555,
+          conclusion: "success",
+          output: {
+            title: `${expectedSelection.selected.length} findings`,
+            summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.\n\n${expectedCost}`,
+          },
+        },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("publishes completed parallel phases once when a provider ignores the review deadline abort", async () => {
+    vi.useFakeTimers()
+    try {
+      const deadline = Date.now() + 1000
+      const remainingReviewMs = () => deadline - Date.now()
+      const lateResponse = Promise.withResolvers<unknown>()
+      const response = {
+        id: "completed",
+        model: "test/model",
+        choices: [
+          { message: { content: JSON.stringify(fixtureReviewResponse) } },
+        ],
+        usage: { promptTokens: 10, completionTokens: 20, cost: 0.01 },
+      }
+      const send = vi
+        .fn()
+        .mockResolvedValueOnce(response)
+        .mockResolvedValueOnce(response)
+        .mockImplementation(() => lateResponse.promise)
+      const client = createOpenRouterClient(
+        {
+          sdk: { chat: { send } },
+          requestTimeoutMs: 900_000,
+          remainingReviewMs,
+        },
+        createTestLogger(),
+      )
+      const stubs = makeOrchestrateDeps({
+        config: { phases: "parallel" },
+        remainingReviewMs,
+        generateFindings: createPromptedGenerateFindings(
+          {
+            openrouterClient: client,
+            model: "test/model",
+            fallbackModel: "fallback/model",
+          },
+          createTestLogger(),
+        ),
+      })
+      const pending = orchestrate(stubs.deps, createTestLogger())
+      await vi.advanceTimersByTimeAsync(1000)
+      const result = await pending
+      expect(send).toHaveBeenCalledTimes(3)
+      expect(result.phases).toEqual([
+        { phase: "correctness-security", status: "completed" },
+        { phase: "conventions-tests", status: "completed" },
+        {
+          phase: "subtle-bugs",
+          status: "failed",
+          reason: "[ReviewRequestError]: review deadline exceeded",
+        },
+      ])
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        expectedFindingsReview(expectedSelection.selected),
+      ])
+      expect(result.reviewSummaryMarkdown).toEqual(
+        expectedReviewSummary({
+          phasesCompleted: ["correctness-security", "conventions-tests"],
+          phasesIncomplete: ["subtle-bugs"],
+          reviewDeadlineExceeded: true,
+          totalFromModel: fixtureReviewResponse.findings.length * 2,
+          duplicatesAcrossPhases: fixtureReviewResponse.findings.length,
+        }),
+      )
+      expect(stubs.upsertSummaryCommentCalls).toEqual([
+        {
+          ...expectedStatus({
+            isFirstRun: true,
+            postedCount: expectedSelection.selected.length,
+            totalCount: expectedSelection.selected.length,
+            incompletePhases: ["subtle-bugs"],
+          }),
+          body: buildStatusComment({
+            sha: fixturePrContext.headSha,
+            isFirstRun: true,
+            postedCount: expectedSelection.selected.length,
+            unpostedCount: 0,
+            totalCount: expectedSelection.selected.length,
+            droppedByCap: [],
+            model: "test/model",
+            contextNotes: [],
+            incompletePhases: ["subtle-bugs"],
+            reviewDeadlineExceeded: true,
+          }),
+        },
+      ])
+      const published = structuredClone({
+        checks: stubs.updateCheckRunCalls,
+        statuses: stubs.upsertSummaryCommentCalls,
+        reviews: stubs.postFindingsReviewCalls,
+        result,
+      })
+      lateResponse.resolve(response)
+      await vi.runAllTimersAsync()
+      expect({
+        checks: stubs.updateCheckRunCalls,
+        statuses: stubs.upsertSummaryCommentCalls,
+        reviews: stubs.postFindingsReviewCalls,
+        result,
+      }).toEqual(published)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("posts the surviving phases' findings when one phase fails, naming the gap on the status comment and the check run", async () => {
