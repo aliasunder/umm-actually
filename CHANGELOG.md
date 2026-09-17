@@ -4,6 +4,17 @@
 
 
 
+
+## [0.4.5] — 2026-09-17
+
+### Bug Fixes
+
+- Publish partial reviews before the job timeout (#95)
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.4
+
 ## [0.4.4] — 2026-09-15
 
 ### Features
