@@ -122,21 +122,33 @@ type ImporterCandidate = {
   content: string
 }
 
-const isTestFile = (filePath: string): boolean =>
-  filePath.includes("__tests__/") || /\.test\.[^./]+$/.test(filePath)
+const isTestFile = (filePath: string): boolean => {
+  return filePath.includes("__tests__/") || /\.test\.[^./]+$/.test(filePath)
+}
 
 /**
  * Import-count desc, then non-test files before test files (test files feed
  * the test-quality dimension but carry less caller context), then path asc
  * for determinism.
  */
-const byRelevance = (a: ImporterCandidate, b: ImporterCandidate): number => {
-  if (a.importedChangedPaths.length !== b.importedChangedPaths.length) {
-    return b.importedChangedPaths.length - a.importedChangedPaths.length
+const byRelevance = (
+  leftCandidate: ImporterCandidate,
+  rightCandidate: ImporterCandidate,
+): number => {
+  if (
+    leftCandidate.importedChangedPaths.length !==
+    rightCandidate.importedChangedPaths.length
+  ) {
+    return (
+      rightCandidate.importedChangedPaths.length -
+      leftCandidate.importedChangedPaths.length
+    )
   }
-  const aIsTest = isTestFile(a.path)
-  if (aIsTest !== isTestFile(b.path)) return aIsTest ? 1 : -1
-  return a.path < b.path ? -1 : 1
+  const leftCandidateIsTest = isTestFile(leftCandidate.path)
+  if (leftCandidateIsTest !== isTestFile(rightCandidate.path)) {
+    return leftCandidateIsTest ? 1 : -1
+  }
+  return leftCandidate.path < rightCandidate.path ? -1 : 1
 }
 
 const isMissingFileError = (error: unknown): boolean => {
@@ -153,15 +165,15 @@ export const createContextReader = (
   logger: Logger,
 ): ContextReader => {
   const resolvedRoot = path.resolve(config.workspaceRoot)
-  // One warning identifies the first operation the deadline interrupted.
-  let contextDeadlineReported = false
+  // The reader reports only the first operation interrupted by the deadline.
+  const contextDeadlineState = { reported: false }
 
   const reportContextDeadline = (operation: string): void => {
-    if (!contextDeadlineReported) {
+    if (!contextDeadlineState.reported) {
       logger.warn("review deadline reached during context preparation", {
         operation,
       })
-      contextDeadlineReported = true
+      contextDeadlineState.reported = true
     }
   }
 
@@ -385,22 +397,25 @@ export const createContextReader = (
     }
   }
 
-  const readPriorityDocOrNull = async (
-    docPath: string,
-    maxBytes: number,
-    signal: AbortSignal,
-  ): Promise<string | null> => {
-    // Assigned inside a try because resolveUnderRoot throws on traversal —
-    // the escaping path must degrade to a skip, not crash the review.
-    let absolutePath: string
+  const resolvePriorityDocPathOrNull = (docPath: string): string | null => {
     try {
-      absolutePath = resolveUnderRoot(docPath)
+      return resolveUnderRoot(docPath)
     } catch {
       logger.warn("priority doc path escapes workspace — skipping", {
         path: docPath,
       })
       return null
     }
+  }
+
+  const readPriorityDocOrNull = async (
+    docPath: string,
+    maxBytes: number,
+    signal: AbortSignal,
+  ): Promise<string | null> => {
+    const absolutePath = resolvePriorityDocPathOrNull(docPath)
+    if (!absolutePath) return null
+
     try {
       const safePath = await realPathIfSafe(absolutePath)
       if (signal.aborted) return null
@@ -559,9 +574,9 @@ export const createContextReader = (
         return filePaths
       }
       // readdir order is platform-dependent — sort so scan-cap cutoffs are deterministic
-      const sortedEntries = [...entries].sort((a, b) =>
-        a.name < b.name ? -1 : 1,
-      )
+      const sortedEntries = entries.toSorted((leftEntry, rightEntry) => {
+        return leftEntry.name < rightEntry.name ? -1 : 1
+      })
 
       for (const entry of sortedEntries) {
         if (!contextTimeRemains("scan workspace")) return filePaths
@@ -570,11 +585,12 @@ export const createContextReader = (
           const isPruned =
             PRUNED_DIRECTORIES.has(entry.name) ||
             entry.name.startsWith(".") ||
-            config.excludePaths.some(
-              (excludePath) =>
+            config.excludePaths.some((excludePath) => {
+              return (
                 entryPath === excludePath ||
-                entryPath.startsWith(excludePath + "/"),
-            )
+                entryPath.startsWith(excludePath + "/")
+              )
+            })
           if (!isPruned) directoryQueue.push(entryPath)
           continue
         }
@@ -611,8 +627,9 @@ export const createContextReader = (
     return filePaths
   }
 
-  const scanWorkspaceSourceFiles = (): Promise<string[]> =>
-    scanWorkspaceFiles(SCANNABLE_EXTENSIONS)
+  const scanWorkspaceSourceFiles = (): Promise<string[]> => {
+    return scanWorkspaceFiles(SCANNABLE_EXTENSIONS)
+  }
 
   /** Paths in excludePaths are skipped during the import-trace scan so
    *  their content cannot re-enter the prompt after being excluded. */
@@ -650,17 +667,20 @@ export const createContextReader = (
       const importedChangedPaths = [
         ...new Set(
           extractImportSpecifiers(content)
-            .flatMap((specifier) =>
-              resolveImportSpecifier({ importerPath: scannedPath, specifier }),
-            )
+            .flatMap((specifier) => {
+              return resolveImportSpecifier({
+                importerPath: scannedPath,
+                specifier,
+              })
+            })
             .filter((candidatePath) => changedPathSet.has(candidatePath)),
         ),
-      ].sort()
+      ].toSorted()
       if (importedChangedPaths.length === 0) continue
       importers.push({ path: scannedPath, importedChangedPaths, content })
     }
 
-    const rankedImporters = [...importers].sort(byRelevance)
+    const rankedImporters = importers.toSorted(byRelevance)
 
     const relatedFiles: PromptFile[] = []
     // Sequential state by design: rank order is priority order, and an
@@ -827,7 +847,7 @@ export const createContextReader = (
       })
     }
 
-    const rankedCandidates = [...candidates].sort(byMentionRelevance)
+    const rankedCandidates = candidates.toSorted(byMentionRelevance)
 
     const relatedDocs: PromptFile[] = []
     // Sequential state by design: rank order is priority order, and an
