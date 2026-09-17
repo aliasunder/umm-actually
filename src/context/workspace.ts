@@ -171,10 +171,14 @@ export const createContextReader = (
   // The reader reports only the first operation interrupted by the deadline.
   const contextDeadlineState = { reported: false }
 
-  const reportContextDeadline = (operation: string): void => {
+  const reportContextDeadline = ({
+    interruptedOperation,
+  }: {
+    interruptedOperation: string
+  }): void => {
     if (!contextDeadlineState.reported) {
       logger.warn("review deadline reached during context preparation", {
-        operation,
+        operation: interruptedOperation,
       })
       contextDeadlineState.reported = true
     }
@@ -193,7 +197,7 @@ export const createContextReader = (
   }): Promise<Result> => {
     const remainingReviewMs = config.remainingReviewMs()
     if (remainingReviewMs <= 0) {
-      reportContextDeadline(operation)
+      reportContextDeadline({ interruptedOperation: operation })
       return fallback
     }
     const abortController = new AbortController()
@@ -219,7 +223,7 @@ export const createContextReader = (
       const result = await Promise.race([runWithStatus(), deadline.promise])
       if (result.status === "completed") return result.value
 
-      reportContextDeadline(operation)
+      reportContextDeadline({ interruptedOperation: operation })
       return fallback
     } finally {
       clearTimeout(timeout)
@@ -479,7 +483,7 @@ export const createContextReader = (
 
     for (const changedPath of changedPaths) {
       if (reviewDeadlineReached()) {
-        reportContextDeadline("read changed files")
+        reportContextDeadline({ interruptedOperation: "read changed files" })
         break
       }
       if (diffOnlyPathSet.has(posix.normalize(changedPath))) {
@@ -507,7 +511,7 @@ export const createContextReader = (
         run: () => stat(absolutePath).catch(() => null),
       })
       if (reviewDeadlineReached()) {
-        reportContextDeadline("read changed files")
+        reportContextDeadline({ interruptedOperation: "read changed files" })
         break
       }
       if (fileStats && fileStats.size > remainingTokens * CHARS_PER_TOKEN) {
@@ -522,7 +526,7 @@ export const createContextReader = (
         },
       })
       if (reviewDeadlineReached()) {
-        reportContextDeadline("read changed files")
+        reportContextDeadline({ interruptedOperation: "read changed files" })
         break
       }
       if (content === null) {
@@ -566,7 +570,7 @@ export const createContextReader = (
 
     for (let queueIndex = 0; queueIndex < directoryQueue.length; queueIndex++) {
       if (reviewDeadlineReached()) {
-        reportContextDeadline("scan workspace")
+        reportContextDeadline({ interruptedOperation: "scan workspace" })
         return filePaths
       }
       const currentDirectory = directoryQueue[queueIndex]
@@ -583,7 +587,7 @@ export const createContextReader = (
       })
       if (entries === null) return filePaths
       if (reviewDeadlineReached()) {
-        reportContextDeadline("scan workspace")
+        reportContextDeadline({ interruptedOperation: "scan workspace" })
         return filePaths
       }
       // readdir order is platform-dependent — sort so scan-cap cutoffs are deterministic
@@ -593,7 +597,7 @@ export const createContextReader = (
 
       for (const entry of sortedEntries) {
         if (reviewDeadlineReached()) {
-          reportContextDeadline("scan workspace")
+          reportContextDeadline({ interruptedOperation: "scan workspace" })
           return filePaths
         }
         const entryPath = posix.join(currentDirectory, entry.name)
@@ -627,7 +631,7 @@ export const createContextReader = (
         })
         if (fileStats === null) return filePaths
         if (reviewDeadlineReached()) {
-          reportContextDeadline("scan workspace")
+          reportContextDeadline({ interruptedOperation: "scan workspace" })
           return filePaths
         }
         if (fileStats.size > config.maxScanBytes) {
@@ -669,7 +673,7 @@ export const createContextReader = (
     const importers: ImporterCandidate[] = []
     for (const scannedPath of scannedPaths) {
       if (reviewDeadlineReached()) {
-        reportContextDeadline("trace related files")
+        reportContextDeadline({ interruptedOperation: "trace related files" })
         break
       }
       if (changedPathSet.has(scannedPath)) continue
@@ -680,7 +684,7 @@ export const createContextReader = (
         run: (signal) => readScannedFileOrNull(scannedPath, signal),
       })
       if (reviewDeadlineReached()) {
-        reportContextDeadline("trace related files")
+        reportContextDeadline({ interruptedOperation: "trace related files" })
         break
       }
       if (!content) continue
@@ -721,7 +725,7 @@ export const createContextReader = (
     let capBreakIndex: number | undefined
     for (const [importerIndex, importer] of rankedImporters.entries()) {
       if (reviewDeadlineReached()) {
-        reportContextDeadline("select related files")
+        reportContextDeadline({ interruptedOperation: "select related files" })
         break
       }
       if (relatedFiles.length >= config.relatedFilesMax) {
@@ -789,7 +793,7 @@ export const createContextReader = (
 
     for (const docPath of priorityDocs) {
       if (reviewDeadlineReached()) {
-        reportContextDeadline("read priority docs")
+        reportContextDeadline({ interruptedOperation: "read priority docs" })
         break
       }
       const normalizedDocPath = posix.normalize(docPath)
@@ -818,7 +822,7 @@ export const createContextReader = (
         },
       })
       if (reviewDeadlineReached()) {
-        reportContextDeadline("read priority docs")
+        reportContextDeadline({ interruptedOperation: "read priority docs" })
         break
       }
       if (!content) continue
@@ -860,7 +864,7 @@ export const createContextReader = (
     const candidates: DocCandidate[] = []
     for (const scannedPath of scannedPaths) {
       if (reviewDeadlineReached()) {
-        reportContextDeadline("trace related docs")
+        reportContextDeadline({ interruptedOperation: "trace related docs" })
         break
       }
       const normalizedScannedPath = posix.normalize(scannedPath)
@@ -874,7 +878,7 @@ export const createContextReader = (
         run: (signal) => readScannedFileOrNull(scannedPath, signal),
       })
       if (reviewDeadlineReached()) {
-        reportContextDeadline("trace related docs")
+        reportContextDeadline({ interruptedOperation: "trace related docs" })
         break
       }
       if (!content) continue
@@ -903,7 +907,7 @@ export const createContextReader = (
     let capBreakIndex: number | undefined
     for (const [candidateIndex, candidate] of rankedCandidates.entries()) {
       if (reviewDeadlineReached()) {
-        reportContextDeadline("select related docs")
+        reportContextDeadline({ interruptedOperation: "select related docs" })
         break
       }
       if (relatedDocs.length >= config.relatedDocsMax) {
