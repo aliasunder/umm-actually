@@ -1,6 +1,11 @@
 import { randomBytes } from "node:crypto"
 import type { PrContext } from "../github/event.js"
-import type { Finding } from "./finding.js"
+import {
+  FINDING_CATEGORIES,
+  FINDING_CONFIDENCES,
+  FINDING_SEVERITIES,
+  type Finding,
+} from "./finding.js"
 import type { ReviewPhase } from "./phases.js"
 
 /** A file's content prepared for the prompt, with how/why it was included. */
@@ -61,6 +66,24 @@ Every finding must include failure_scenario: the concrete input or state that
 triggers the problem and what goes wrong. If you cannot state a concrete
 failure scenario, do not report the finding.`
 
+/** Rendered as `"a"|"b"|…` so the prompt's enum unions read like the schema. */
+const enumUnion = (values: readonly string[]): string =>
+  values.map((value) => `"${value}"`).join("|")
+
+/** The wire schema also travels as response_format json_schema, but providers
+ *  without structured-output support silently drop that parameter — this prose
+ *  copy is the only shape statement those attempts ever see. Keep it in
+ *  lockstep with reviewResponseSchema. */
+const RESPONSE_ENVELOPE = `RESPONSE ENVELOPE — respond with exactly one JSON object of this shape:
+{"analysis": string, "findings": [{"file": string, "line": integer,
+"end_line": integer|null, "category": ${enumUnion(FINDING_CATEGORIES)},
+"severity": ${enumUnion(FINDING_SEVERITIES)}, "confidence": ${enumUnion(FINDING_CONFIDENCES)},
+"title": string, "description": string, "suggestion": string|null,
+"failure_scenario": string}]}
+Every key is required on every finding. When there is nothing to report,
+"findings" must be the empty array [] — never omit the key. Output only the
+JSON object: no markdown fences, no text before or after it.`
+
 const OUTPUT_DISCIPLINE = `OUTPUT DISCIPLINE — field constraints:
 - "title": imperative fix statement, under 80 characters (e.g. "Trim keys
   before inserting into the registry"). Do not start with "Issue:" or
@@ -110,6 +133,7 @@ export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string =>
     ...phase.instructionSections,
     PROOF_OF_WORK,
     SEVERITY_RUBRIC,
+    RESPONSE_ENVELOPE,
     OUTPUT_DISCIPLINE,
     ANCHORING_CONTRACT,
   ].join("\n\n")

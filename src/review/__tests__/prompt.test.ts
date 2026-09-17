@@ -160,6 +160,35 @@ describe("buildSystemPrompt", () => {
     )
   })
 
+  it("states the response envelope so schema-dropping providers still see the shape", () => {
+    const systemPrompt = buildSystemPrompt({ phase: combinedPhase })
+
+    expect(systemPrompt).toContain(
+      [
+        "RESPONSE ENVELOPE — respond with exactly one JSON object of this shape:",
+        '{"analysis": string, "findings": [{"file": string, "line": integer,',
+        '"end_line": integer|null, "category": "correctness"|"security"|"conventions"|"tests"|"subtle_bugs"|"ci",',
+        '"severity": "critical"|"high"|"medium"|"low", "confidence": "high"|"medium"|"low",',
+        '"title": string, "description": string, "suggestion": string|null,',
+        '"failure_scenario": string}]}',
+        "Every key is required on every finding. When there is nothing to report,",
+        '"findings" must be the empty array [] — never omit the key. Output only the',
+        "JSON object: no markdown fences, no text before or after it.",
+      ].join("\n"),
+    )
+  })
+
+  it("places the response envelope between SEVERITY_RUBRIC and OUTPUT_DISCIPLINE", () => {
+    const systemPrompt = buildSystemPrompt({ phase: combinedPhase })
+
+    const severityIndex = systemPrompt.indexOf("Severity rubric:")
+    const envelopeIndex = systemPrompt.indexOf("RESPONSE ENVELOPE")
+    const outputDisciplineIndex = systemPrompt.indexOf("OUTPUT DISCIPLINE")
+
+    expect(envelopeIndex).toBeGreaterThan(severityIndex)
+    expect(outputDisciplineIndex).toBeGreaterThan(envelopeIndex)
+  })
+
   it("requires suggestion-field code to comply with the conventions file", () => {
     const systemPrompt = buildSystemPrompt({ phase: combinedPhase })
     expect(systemPrompt.replace(/\s+/g, " ")).toContain(
