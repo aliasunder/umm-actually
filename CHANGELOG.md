@@ -5,6 +5,17 @@
 
 
 
+
+## [0.4.6] — 2026-09-17
+
+### Bug Fixes
+
+- **prompt:** State the response envelope in prose for schema-dropping providers (#96)
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.5
+
 ## [0.4.5] — 2026-09-17
 
 ### Bug Fixes
