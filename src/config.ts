@@ -23,6 +23,13 @@ const optionalPositiveInteger = z
 
 const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
 
+const positiveIntegerOrDefault = (defaultValue: number) => {
+  return z.string().transform((value, ctx) => {
+    if (!value) return defaultValue
+    return parsePositiveInteger(value, ctx)
+  })
+}
+
 /** Ceiling that keeps seconds × 1000 within the 2^31−1 ms timer cap.
  *  Beyond it, setTimeout clamps the delay to 1 ms and every request
  *  would time out instantly. https://nodejs.org/api/timers.html#settimeoutcallback-delay-args */
@@ -144,7 +151,7 @@ const configSchema = z.object({
   // (review/finding.ts resolveSeverityThreshold) at startup
   severityThreshold: z.string().min(1, "severity_threshold must not be empty"),
   conventionsFile: z.string().min(1, "conventions_file must not be empty"),
-  conventionsBudgetTokens: requiredPositiveInteger,
+  conventionsBudgetTokens: positiveIntegerOrDefault(8_000),
   phases: phasesOrDefault,
   contextBudgetTokens: requiredPositiveInteger,
   traceRelatedFiles: z.boolean(),

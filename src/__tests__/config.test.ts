@@ -146,6 +146,12 @@ describe("parseConfig", () => {
     expect(config.requestTimeoutSeconds).toBe(900)
   })
 
+  it("falls back to 8000 for an empty conventions_budget_tokens", () => {
+    const config = parseConfig(makeRawInputs({ conventionsBudgetTokens: "" }))
+
+    expect(config.conventionsBudgetTokens).toBe(8000)
+  })
+
   it("falls back to combined for an empty phases", () => {
     const config = parseConfig(makeRawInputs({ phases: "" }))
 

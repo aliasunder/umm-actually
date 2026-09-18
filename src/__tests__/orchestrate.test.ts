@@ -1455,6 +1455,25 @@ describe("orchestrate", () => {
       ])
     })
 
+    it("renders a changed conventions file diff-only when a raised budget fits the file", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          conventionsFile: "AGENTS.md",
+          conventionsBudgetTokens: 16_000,
+        },
+        contextReader: {
+          readConventions: async () => "c".repeat(32_001),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual([
+        "AGENTS.md",
+      ])
+    })
+
     it("keeps a changed conventions file full when its own section is truncated", async () => {
       // Over the 8k-token conventions cap: the conventions section holds only
       // a truncated head, so the changed-files copy is the sole full text and
