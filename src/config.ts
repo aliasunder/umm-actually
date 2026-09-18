@@ -144,6 +144,7 @@ const configSchema = z.object({
   // (review/finding.ts resolveSeverityThreshold) at startup
   severityThreshold: z.string().min(1, "severity_threshold must not be empty"),
   conventionsFile: z.string().min(1, "conventions_file must not be empty"),
+  conventionsBudgetTokens: requiredPositiveInteger,
   phases: phasesOrDefault,
   contextBudgetTokens: requiredPositiveInteger,
   traceRelatedFiles: z.boolean(),

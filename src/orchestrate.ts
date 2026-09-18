@@ -60,7 +60,6 @@ import {
 import {
   buildSystemPrompt,
   buildUserPrompt,
-  CONVENTIONS_TOKEN_CAP,
   conventionsRenderInFull,
   estimateTokens,
   generateDelimiterNonce,
@@ -86,6 +85,7 @@ export type ReviewContext = {
   prContext: PrContext
   phase: ReviewPhase
   conventions: string | null
+  conventionsBudgetTokens: number
   changedFiles: PromptFile[]
   relatedFiles: PromptFile[]
   relatedDocs: PromptFile[]
@@ -633,7 +633,8 @@ const runReviewPipeline = async (
   // changed-files channel carries it diff-only. When the section is truncated
   // instead, the changed-files copy is the only full one and stays full.
   const conventionsAlreadyRenderedInFull =
-    conventions !== null && conventionsRenderInFull(conventions)
+    conventions !== null &&
+    conventionsRenderInFull(conventions, config.conventionsBudgetTokens)
 
   const fileBudgetTokens = config.contextBudgetTokens - diffTokens
   const { files: changedFiles, remainingTokens } =
@@ -726,7 +727,7 @@ const runReviewPipeline = async (
       "conventions file read in full by priority-doc channel — suppressing truncated conventions section to avoid duplication",
       {
         conventionsFile: config.conventionsFile,
-        conventionsTokenCap: CONVENTIONS_TOKEN_CAP,
+        conventionsTokenCap: config.conventionsBudgetTokens,
         conventionsLength: conventions.length,
       },
     )
@@ -835,6 +836,7 @@ const runReviewPipeline = async (
       prContext,
       phase,
       conventions: conventionsForPrompt,
+      conventionsBudgetTokens: config.conventionsBudgetTokens,
       changedFiles,
       relatedFiles,
       relatedDocs,

@@ -37,9 +37,13 @@ inputs:
     required: false
     default: low
   conventions_file:
-    description: Repo-relative path to the conventions file included in the prompt (truncated at ~8000 tokens)
+    description: Repo-relative path to the conventions file included in the prompt (truncated at conventions_budget_tokens)
     required: false
     default: AGENTS.md
+  conventions_budget_tokens:
+    description: Approximate token budget for the conventions file section of the prompt. Files exceeding this are truncated with a notice; the full file may still reach the model via the priority_docs channel. Empty = the 8000 default, so workflows can wire an unset repo variable directly
+    required: false
+    default: "8000"
   phases:
     description: "How the review dimensions are dispatched: combined (one model call carrying every dimension) | parallel (three focused calls at once — each reads deeper than the single call; wall clock is the slowest of the three and prompt tokens roughly triple) | sequential (the same three calls in order, each seeing the earlier findings). Empty = combined, so workflows can wire an unset repo variable directly"
     required: false
