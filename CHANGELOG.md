@@ -6,6 +6,17 @@
 
 
 
+
+## [0.4.7] — 2026-09-19
+
+### Features
+
+- Add conventions_budget_tokens input (#99)
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.6
+
 ## [0.4.6] — 2026-09-17
 
 ### Bug Fixes
