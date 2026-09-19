@@ -231,6 +231,7 @@ const baseConfig: ActionConfig = {
   maxFindings: undefined,
   severityThreshold: "low",
   conventionsFile: "AGENTS.md",
+  conventionsBudgetTokens: 8_000,
   phases: "combined",
   contextBudgetTokens: 80_000,
   traceRelatedFiles: true,
@@ -1444,6 +1445,25 @@ describe("orchestrate", () => {
     it("renders a changed conventions file diff-only when its own section carries it whole", async () => {
       const stubs = makeOrchestrateDeps({
         config: { conventionsFile: "AGENTS.md" },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual([
+        "AGENTS.md",
+      ])
+    })
+
+    it("renders a changed conventions file diff-only when a raised budget fits the file", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: {
+          conventionsFile: "AGENTS.md",
+          conventionsBudgetTokens: 16_000,
+        },
+        contextReader: {
+          readConventions: async () => "c".repeat(32_001),
+        },
       })
       const logger = createTestLogger()
 
@@ -3642,6 +3662,7 @@ describe("createPromptedGenerateFindings", () => {
       prContext: fixturePrContext,
       phase,
       conventions: "test conventions",
+      conventionsBudgetTokens: 8_000,
       changedFiles: [fixtureChangedFile],
       relatedFiles: [],
       relatedDocs: [],
@@ -3686,6 +3707,7 @@ describe("createPromptedGenerateFindings", () => {
       prContext: fixturePrContext,
       phase,
       conventions: null,
+      conventionsBudgetTokens: 8_000,
       changedFiles: [],
       relatedFiles: [],
       relatedDocs: [],
@@ -3725,6 +3747,7 @@ describe("createPromptedGenerateFindings", () => {
       prContext: fixturePrContext,
       phase,
       conventions: null,
+      conventionsBudgetTokens: 8_000,
       changedFiles: [],
       relatedFiles: [],
       relatedDocs: [],

@@ -71,6 +71,7 @@ const collectRawInputs = (): RawInputs => ({
   maxFindings: core.getInput("max_findings"),
   severityThreshold: core.getInput("severity_threshold"),
   conventionsFile: core.getInput("conventions_file"),
+  conventionsBudgetTokens: core.getInput("conventions_budget_tokens"),
   phases: core.getInput("phases"),
   contextBudgetTokens: core.getInput("context_budget_tokens"),
   traceRelatedFiles: core.getBooleanInput("trace_related_files"),

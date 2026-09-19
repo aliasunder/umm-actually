@@ -15,6 +15,7 @@ const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   maxFindings: "",
   severityThreshold: "low",
   conventionsFile: "AGENTS.md",
+  conventionsBudgetTokens: "8000",
   phases: "combined",
   contextBudgetTokens: "80000",
   traceRelatedFiles: true,
@@ -45,6 +46,7 @@ describe("parseConfig", () => {
       maxFindings: undefined,
       severityThreshold: "low",
       conventionsFile: "AGENTS.md",
+      conventionsBudgetTokens: 8000,
       phases: "combined",
       contextBudgetTokens: 80000,
       traceRelatedFiles: true,
@@ -142,6 +144,12 @@ describe("parseConfig", () => {
     const config = parseConfig(makeRawInputs({ requestTimeoutSeconds: "" }))
 
     expect(config.requestTimeoutSeconds).toBe(900)
+  })
+
+  it("falls back to 8000 for an empty conventions_budget_tokens", () => {
+    const config = parseConfig(makeRawInputs({ conventionsBudgetTokens: "" }))
+
+    expect(config.conventionsBudgetTokens).toBe(8000)
   })
 
   it("falls back to combined for an empty phases", () => {

@@ -22,6 +22,7 @@ const prContext: PrContext = {
 const makeUserPromptParts = () => ({
   prContext,
   conventions: "# AGENTS.md\n\nUse explicit names.",
+  conventionsBudgetTokens: 8_000,
   changedFiles: [
     {
       path: "src/greeter.ts",
@@ -499,18 +500,25 @@ describe("estimateTokens", () => {
 })
 
 describe("conventionsRenderInFull", () => {
+  const budgetTokens = 8_000
   // 8_000 tokens × 4 chars/token — the same cap buildUserPrompt truncates at.
   const conventionsCharacterCap = 32_000
 
   it("reports full rendering for conventions exactly at the cap", () => {
-    expect(conventionsRenderInFull("c".repeat(conventionsCharacterCap))).toBe(
-      true,
-    )
+    expect(
+      conventionsRenderInFull(
+        "c".repeat(conventionsCharacterCap),
+        budgetTokens,
+      ),
+    ).toBe(true)
   })
 
   it("reports truncated rendering one character past the cap", () => {
     expect(
-      conventionsRenderInFull("c".repeat(conventionsCharacterCap + 1)),
+      conventionsRenderInFull(
+        "c".repeat(conventionsCharacterCap + 1),
+        budgetTokens,
+      ),
     ).toBe(false)
   })
 
@@ -522,7 +530,36 @@ describe("conventionsRenderInFull", () => {
       conventions: oversizedConventions,
     })
 
-    expect(conventionsRenderInFull(oversizedConventions)).toBe(false)
+    expect(conventionsRenderInFull(oversizedConventions, budgetTokens)).toBe(
+      false,
+    )
     expect(prompt).toContain("[conventions truncated at ~8000 tokens]")
+  })
+
+  it("respects a custom budget", () => {
+    const customBudget = 16_000
+    const customCharacterCap = customBudget * 4
+
+    expect(
+      conventionsRenderInFull("c".repeat(customCharacterCap), customBudget),
+    ).toBe(true)
+    expect(
+      conventionsRenderInFull("c".repeat(customCharacterCap + 1), customBudget),
+    ).toBe(false)
+  })
+
+  it("truncates at a custom budget in buildUserPrompt", () => {
+    const customBudget = 16_000
+    const customCharacterCap = customBudget * 4
+    const oversizedConventions = "c".repeat(customCharacterCap + 1)
+
+    const prompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      conventions: oversizedConventions,
+      conventionsBudgetTokens: customBudget,
+    })
+
+    expect(prompt).toContain("[conventions truncated at ~16000 tokens]")
+    expect(prompt).not.toContain("[conventions truncated at ~8000 tokens]")
   })
 })

@@ -4,6 +4,7 @@ import { z } from "zod"
 
 const parsePositiveInteger = (value: string, ctx: z.RefinementCtx): number => {
   const parsed = Number(value)
+
   if (!Number.isInteger(parsed) || parsed <= 0) {
     ctx.addIssue({
       code: "custom",
@@ -15,11 +16,9 @@ const parsePositiveInteger = (value: string, ctx: z.RefinementCtx): number => {
 }
 
 /** Empty string means "not provided"; anything else must parse as a positive integer. */
-const optionalPositiveInteger = z
-  .string()
-  .transform((value, ctx) =>
-    value === "" ? undefined : parsePositiveInteger(value, ctx),
-  )
+const optionalPositiveInteger = z.string().transform((value, ctx) => {
+  return value === "" ? undefined : parsePositiveInteger(value, ctx)
+})
 
 const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
 
@@ -38,6 +37,7 @@ const timerSafeSeconds = (defaultSeconds: number) => {
     // variable pass "", which would otherwise override the action.yml default.
     if (!value) return defaultSeconds
     const parsed = parsePositiveInteger(value, ctx)
+
     if (parsed > maxTimeoutSeconds) {
       ctx.addIssue({
         code: "custom",
@@ -110,6 +110,7 @@ const diffExcludePathsInput = z.string().transform((value, ctx) => {
     .filter((pattern) => pattern !== "" && pattern !== ".")
 
   const unsafePatterns = diffExcludePathPatterns.filter(hasExcessiveWildcards)
+
   if (unsafePatterns.length > 0) {
     ctx.addIssue({
       code: "custom",
@@ -144,6 +145,9 @@ const configSchema = z.object({
   // (review/finding.ts resolveSeverityThreshold) at startup
   severityThreshold: z.string().min(1, "severity_threshold must not be empty"),
   conventionsFile: z.string().min(1, "conventions_file must not be empty"),
+  conventionsBudgetTokens: z.string().transform((value, ctx) => {
+    return value === "" ? 8_000 : parsePositiveInteger(value, ctx)
+  }),
   phases: phasesOrDefault,
   contextBudgetTokens: requiredPositiveInteger,
   traceRelatedFiles: z.boolean(),
@@ -152,18 +156,18 @@ const configSchema = z.object({
   maxRelatedFiles: requiredPositiveInteger,
   maxRelatedDocs: requiredPositiveInteger,
   // normalizeWorkspacePath("") yields "." — strip it alongside empty entries
-  priorityDocs: z.string().transform((value) =>
-    value
+  priorityDocs: z.string().transform((value) => {
+    return value
       .split(",")
       .map(normalizeWorkspacePath)
-      .filter((segment) => segment !== "" && segment !== "."),
-  ),
-  excludePaths: z.string().transform((value) =>
-    value
+      .filter((segment) => segment !== "" && segment !== ".")
+  }),
+  excludePaths: z.string().transform((value) => {
+    return value
       .split(",")
       .map(normalizeWorkspacePath)
-      .filter((segment) => segment !== "" && segment !== "."),
-  ),
+      .filter((segment) => segment !== "" && segment !== ".")
+  }),
   diffExcludePaths: diffExcludePathsInput,
   respectLinguistGenerated: z.boolean(),
   costSummary: z.boolean(),
@@ -192,6 +196,7 @@ export type RawInputs = Omit<
 
 export const parseConfig = (rawInputs: RawInputs): ActionConfig => {
   const result = configSchema.safeParse(rawInputs)
+
   if (!result.success) {
     const issueSummaries = result.error.issues.map(
       (issue) => `${issue.path.join(".")}: ${issue.message}`,
