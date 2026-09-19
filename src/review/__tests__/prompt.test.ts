@@ -547,4 +547,19 @@ describe("conventionsRenderInFull", () => {
       conventionsRenderInFull("c".repeat(customCharacterCap + 1), customBudget),
     ).toBe(false)
   })
+
+  it("truncates at a custom budget in buildUserPrompt", () => {
+    const customBudget = 16_000
+    const customCharacterCap = customBudget * 4
+    const oversizedConventions = "c".repeat(customCharacterCap + 1)
+
+    const prompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      conventions: oversizedConventions,
+      conventionsBudgetTokens: customBudget,
+    })
+
+    expect(prompt).toContain("[conventions truncated at ~16000 tokens]")
+    expect(prompt).not.toContain("[conventions truncated at ~8000 tokens]")
+  })
 })

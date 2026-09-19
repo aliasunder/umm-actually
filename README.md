@@ -21,7 +21,7 @@ umm-actually runs as a Docker-based action. It needs a GitHub token (for fetchin
 
 For the best experience, use a [GitHub App](https://docs.github.com/en/apps/creating-github-apps) installation token so reviews are attributed to a bot identity rather than a personal account.
 
-Granting the App **Checks: Read & write** additionally puts the review in the PR checks list as a branded check run (the App's avatar instead of the generic Actions logo). The permission is optional — without `checks: write` on the token, the review runs unbranded and everything else works the same. The usage example below requests no permission narrowing on the token step, so the token picks up the Checks scope automatically once the App grants it; a workflow that does narrow permissions must list `permission-checks: write` explicitly (and only once the App has the grant — requesting an ungranted permission fails the token step).
+Granting the App **Checks: Read & write** additionally puts the review in the PR checks list as a branded check run (the App's avatar instead of the generic Actions logo). The permission is optional — without `checks: write` on the token, the review runs unbranded and everything else works the same. The usage example below requests no permission narrowing on the token step, so the token picks up the Checks scope automatically once the App grants it; a workflow that does narrow permissions must list `checks: write` explicitly (and only once the App has the grant — requesting an ungranted permission fails the token step).
 
 ## Usage
 
