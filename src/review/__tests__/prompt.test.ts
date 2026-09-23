@@ -83,7 +83,7 @@ describe("buildSystemPrompt", () => {
         "the annotated diff. For inline placement, reference only numbers that appear",
         "there, and keep end_line in the same hunk as line. Findings in code outside",
         "the diff (traced regressions, pre-existing bugs) are still valuable — report",
-        "them with their real file and line; they are rendered in the review body",
+        "them with their real file and line; they are posted as standalone PR comments",
         "instead of inline.",
         "",
         'File anchoring: when you fill "file", copy the exact path="…" attribute of one',

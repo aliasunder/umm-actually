@@ -960,12 +960,13 @@ const runReviewPipeline = async (
   // new finding is a visible event. All narration lives in the status
   // comment. Unposted findings carry no anchor and re-report next run.
   const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
-  const { comments, bodyFindings } = mapFindingsToReview({
-    findings: selected,
-    commentableByPath,
-  })
+  const { comments, standaloneFindings: unanchoredFindings } =
+    mapFindingsToReview({
+      findings: selected,
+      commentableByPath,
+    })
   const inlineFindings = selected.filter(
-    (finding) => !bodyFindings.includes(finding),
+    (finding) => !unanchoredFindings.includes(finding),
   )
 
   const inlineOutcome = await postInlineFindings(
@@ -979,7 +980,7 @@ const runReviewPipeline = async (
     logger,
   )
 
-  const standaloneFindings = [...bodyFindings, ...inlineOutcome.rerouted]
+  const standaloneFindings = [...unanchoredFindings, ...inlineOutcome.rerouted]
   // Sequential posting with per-comment fallback is inherently stateful —
   // each failure drops only its own finding from the posted tally.
   let postedStandalone = 0

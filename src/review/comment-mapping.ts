@@ -14,15 +14,11 @@ export type ReviewComment = {
 
 export type MappedReview = {
   comments: ReviewComment[]
-  bodyFindings: AttributedFinding[]
+  standaloneFindings: AttributedFinding[]
 }
 
-/**
- * How far outside a hunk a finding's line may fall and still snap to it.
- * 3 lines absorbs the common LLM anchoring drift (off-by-one from fence
- * lines or hunk headers) without capturing findings that genuinely belong
- * to distant, unchanged code — those go to the review body instead.
- */
+/** Limits snap-to-diff anchoring to three lines, keeping model drift inline
+ * without attaching a finding to unrelated code. */
 const SNAP_DISTANCE = 3
 
 /** Matches `<!-- umm-actually:KEY -->` only at the end of a body — the
@@ -322,16 +318,12 @@ const multiLineEnd = (
   return sharedHunk ? endLine : undefined
 }
 
-/**
- * Routes one finding: inline comment when its line is verifiably anchorable
- * (exact or snapped), review-body finding otherwise.
- */
 const classifyFinding = (
   finding: AttributedFinding,
   commentableByPath: Map<string, CommentableFile>,
-): { comment?: ReviewComment; bodyFinding?: AttributedFinding } => {
+): { comment?: ReviewComment; standaloneFinding?: AttributedFinding } => {
   const commentable = commentableByPath.get(finding.file)
-  if (!commentable) return { bodyFinding: finding }
+  if (!commentable) return { standaloneFinding: finding }
 
   if (commentable.rightLines.has(finding.line)) {
     const endLine = multiLineEnd(finding, commentable)
@@ -366,16 +358,11 @@ const classifyFinding = (
     }
   }
 
-  return { bodyFinding: finding }
+  return { standaloneFinding: finding }
 }
 
-/**
- * Splits findings into inline review comments (anchored to commentable diff
- * lines) and body findings (traced regressions / pre-existing bugs outside
- * the diff — expected output, posted as individual issue comments). GitHub
- * rejects the whole review on one bad anchor, so anything not verifiably
- * anchorable is kept out of the inline batch.
- */
+/** Separates findings GitHub can anchor to the diff from those that must post
+ * as standalone issue comments, so one bad anchor cannot reject the review. */
 export const mapFindingsToReview = ({
   findings,
   commentableByPath,
@@ -390,10 +377,10 @@ export const mapFindingsToReview = ({
   const comments = mapped.flatMap((entry) =>
     entry.comment ? [entry.comment] : [],
   )
-  const bodyFindings = mapped.flatMap((entry) =>
-    entry.bodyFinding ? [entry.bodyFinding] : [],
+  const standaloneFindings = mapped.flatMap((entry) =>
+    entry.standaloneFinding ? [entry.standaloneFinding] : [],
   )
-  return { comments, bodyFindings }
+  return { comments, standaloneFindings }
 }
 
 /** Invisible body for the review that carries inline findings — the review

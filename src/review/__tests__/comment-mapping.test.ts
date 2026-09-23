@@ -47,7 +47,7 @@ describe("mapFindingsToReview", () => {
       commentableByPath: makeCommentableByPath(),
     })
 
-    expect(mapped.bodyFindings).toEqual([])
+    expect(mapped.standaloneFindings).toEqual([])
     // Exact whole-comment assertion: pins the full rendered body format and
     // proves the absence of start_line and of any extra comments
     expect(mapped.comments).toEqual([
@@ -120,7 +120,7 @@ The guard rejects only the exact empty string.
 <!-- umm-actually:src/greeter.ts:correctness:146 -->`,
         },
       ],
-      bodyFindings: [],
+      standaloneFindings: [],
     })
   })
 
@@ -136,7 +136,7 @@ The guard rejects only the exact empty string.
       commentableByPath: makeCommentableByPath(),
     })
 
-    expect(mapped).toEqual({ comments: [], bodyFindings: [finding] })
+    expect(mapped).toEqual({ comments: [], standaloneFindings: [finding] })
     expect(renderStandaloneFinding(finding))
       .toBe(`**Whitespace-only keys pass the empty-key guard**
 Medium severity · correctness · high confidence
@@ -244,10 +244,10 @@ The guard rejects only the exact empty string.
     })
 
     expect(mapped.comments[0]).toMatchObject({ line: 147, side: "RIGHT" })
-    expect(mapped.bodyFindings).toEqual([])
+    expect(mapped.standaloneFindings).toEqual([])
   })
 
-  it("routes to the body when the nearest commentable line exceeds SNAP_DISTANCE, even near a hunk", () => {
+  it("routes to a standalone comment when the nearest commentable line exceeds SNAP_DISTANCE, even near a hunk", () => {
     // A pure-deletion hunk contributes a hunkRanges entry but no rightLines —
     // the finding is near that hunk, but every candidate line is distant
     const commentableByPath = new Map<string, CommentableFile>([
@@ -270,10 +270,10 @@ The guard rejects only the exact empty string.
     })
 
     expect(mapped.comments).toEqual([])
-    expect(mapped.bodyFindings).toEqual([finding])
+    expect(mapped.standaloneFindings).toEqual([finding])
   })
 
-  it("routes a finding one line beyond SNAP_DISTANCE to the review body", () => {
+  it("routes a finding one line beyond SNAP_DISTANCE to a standalone comment", () => {
     const finding = makeFinding({ line: 151 })
 
     const mapped = mapFindingsToReview({
@@ -282,10 +282,10 @@ The guard rejects only the exact empty string.
     })
 
     expect(mapped.comments).toEqual([])
-    expect(mapped.bodyFindings).toEqual([finding])
+    expect(mapped.standaloneFindings).toEqual([finding])
   })
 
-  it("routes a finding in a file outside the diff to the review body", () => {
+  it("routes a finding in a file outside the diff to a standalone comment", () => {
     const finding = makeFinding({ file: "src/untouched.ts", line: 30 })
 
     const mapped = mapFindingsToReview({
@@ -294,10 +294,10 @@ The guard rejects only the exact empty string.
     })
 
     expect(mapped.comments).toEqual([])
-    expect(mapped.bodyFindings).toEqual([finding])
+    expect(mapped.standaloneFindings).toEqual([finding])
   })
 
-  it("routes a finding far outside every hunk to the review body", () => {
+  it("routes a finding far outside every hunk to a standalone comment", () => {
     const finding = makeFinding({ line: 400 })
 
     const mapped = mapFindingsToReview({
@@ -306,7 +306,7 @@ The guard rejects only the exact empty string.
     })
 
     expect(mapped.comments).toEqual([])
-    expect(mapped.bodyFindings).toEqual([finding])
+    expect(mapped.standaloneFindings).toEqual([finding])
   })
 
   it("renders a diff fence only when the finding carries a suggestion", () => {

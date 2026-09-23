@@ -944,7 +944,7 @@ describe("orchestrate", () => {
         expectedFindingsReview(expectedSelection.selected),
       ])
       expect(stubs.postIssueCommentCalls).toEqual(
-        expectedMapped.bodyFindings.map((finding) => ({
+        expectedMapped.standaloneFindings.map((finding) => ({
           prNumber: fixturePrContext.prNumber,
           body: renderStandaloneFinding(finding),
         })),
@@ -1899,12 +1899,14 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.reviewUrl).toBe("")
-      expect(result.findingsCount).toBe(expectedMapped.bodyFindings.length)
+      expect(result.findingsCount).toBe(
+        expectedMapped.standaloneFindings.length,
+      )
       // Unposted findings are NOT re-routed — their missing anchors make the
       // next run re-report them, and the status comment says so instead of
       // claiming they were posted.
       expect(stubs.postIssueCommentCalls).toEqual(
-        expectedMapped.bodyFindings.map((finding) => ({
+        expectedMapped.standaloneFindings.map((finding) => ({
           prNumber: 7,
           body: renderStandaloneFinding(finding),
         })),
@@ -1912,11 +1914,11 @@ describe("orchestrate", () => {
       expect(stubs.upsertSummaryCommentCalls).toEqual([
         expectedStatus({
           isFirstRun: true,
-          postedCount: expectedMapped.bodyFindings.length,
+          postedCount: expectedMapped.standaloneFindings.length,
           unpostedCount:
             expectedSelection.selected.length -
-            expectedMapped.bodyFindings.length,
-          totalCount: expectedMapped.bodyFindings.length,
+            expectedMapped.standaloneFindings.length,
+          totalCount: expectedMapped.standaloneFindings.length,
         }),
       ])
       expect(logger.messages).toContainEqual({
