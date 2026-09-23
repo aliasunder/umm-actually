@@ -254,10 +254,10 @@ const suggestionBlock = (finding: Finding): string => {
 
 const renderCommentBody = (
   finding: AttributedFinding,
-  snappedFromLine?: number,
+  snappedLine?: number,
 ): string => {
-  const snapNote = snappedFromLine
-    ? `\n\n_Anchored near line ${snappedFromLine} (the reported line is not part of the diff)._`
+  const snapNote = snappedLine
+    ? `\n\n_Reported at line ${finding.line} (outside the diff); anchored at nearby changed line ${snappedLine}._`
     : ""
   const anchor = `\n\n<!-- umm-actually:${computeAnchorKey(finding)} -->`
   return `${findingHeader(finding)}
@@ -353,7 +353,7 @@ const classifyFinding = (
         path: finding.file,
         line: snappedLine,
         side: "RIGHT",
-        body: renderCommentBody(finding, finding.line),
+        body: renderCommentBody(finding, snappedLine),
       },
     }
   }

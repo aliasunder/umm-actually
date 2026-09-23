@@ -218,7 +218,7 @@ The guard rejects only the exact empty string.
     expect(mapped.comments[0]?.start_line).toBeUndefined()
   })
 
-  it("snaps a near-miss line to the nearest commentable line and notes the original", () => {
+  it("notes the reported and changed lines when snapping an inline comment", () => {
     const finding = makeFinding({ line: 149 })
 
     const mapped = mapFindingsToReview({
@@ -226,13 +226,29 @@ The guard rejects only the exact empty string.
       commentableByPath: makeCommentableByPath(),
     })
 
-    expect(mapped.comments[0]).toMatchObject({ line: 147, side: "RIGHT" })
-    expect(mapped.comments[0]?.body).toContain(
-      "_Anchored near line 149 (the reported line is not part of the diff)._",
-    )
-    expect(mapped.comments[0]?.body).toContain(
-      `<!-- umm-actually:${computeAnchorKey(finding)} -->`,
-    )
+    expect(mapped).toEqual({
+      comments: [
+        {
+          path: "src/greeter.ts",
+          line: 147,
+          side: "RIGHT",
+          body: `**Whitespace-only keys pass the empty-key guard**
+Medium severity · correctness · high confidence
+
+The guard rejects only the exact empty string.
+
+**Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
+
+_Reported at line 149 (outside the diff); anchored at nearby changed line 147._
+
+---
+*umm-actually · test/model*
+
+<!-- umm-actually:src/greeter.ts:correctness:149 -->`,
+        },
+      ],
+      standaloneFindings: [],
+    })
   })
 
   it("snaps a finding exactly SNAP_DISTANCE (3) beyond the hunk end", () => {
