@@ -1061,6 +1061,18 @@ describe("orchestrate", () => {
       )
     })
 
+    it("does not reserve or read a priority doc already fully rendered as conventions", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: ["AGENTS.md"] },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(stubs.readPriorityDocsCalls).toEqual([])
+      expect(first(stubs.findRelatedFilesCalls).budgetTokens).toBe(40_000)
+      expect(first(stubs.generateFindingsCalls).relatedDocs).toEqual([])
+    })
+
     it("keeps an early priority doc out of the related-file scan", async () => {
       const priorityDoc: PromptFile = {
         path: "src/caller.ts",
