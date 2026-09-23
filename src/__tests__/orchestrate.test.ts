@@ -16,7 +16,11 @@ import {
   type OpenRouterClient,
   type StructuredReviewResult,
 } from "../openrouter/client.js"
-import { estimateTokens, type PromptFile } from "../review/prompt.js"
+import {
+  buildUserPrompt,
+  estimateTokens,
+  type PromptFile,
+} from "../review/prompt.js"
 import { annotateDiff } from "../diff/annotate-diff.js"
 import { computeCommentableLines } from "../diff/commentable-lines.js"
 import type {
@@ -983,6 +987,232 @@ describe("orchestrate", () => {
   })
 
   describe("context wiring", () => {
+    it("keeps a priority doc in the rendered prompt when changed files use the rest of the budget", async () => {
+      const priorityDocContent = "# Review reference\nCheck API behavior."
+      const priorityDocTokens = estimateTokens(priorityDocContent)
+      const priorityDoc: PromptFile = {
+        path: "docs/reference.md",
+        content: priorityDocContent,
+        includedAs: "full",
+        reason: "priority documentation",
+      }
+      const readChangedFilesCalls: ReadChangedFilesParams[] = []
+      const readPriorityDocsCalls: ReadPriorityDocsParams[] = []
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: [priorityDoc.path] },
+        contextReader: {
+          readChangedFiles: async (params) => {
+            readChangedFilesCalls.push(params)
+            return {
+              files: [
+                {
+                  path: fixtureChangedFile.path,
+                  content: "x".repeat(params.budgetTokens * 4),
+                  includedAs: "full",
+                },
+              ],
+              remainingTokens: 0,
+            }
+          },
+          readPriorityDocs: async (params) => {
+            readPriorityDocsCalls.push(params)
+            if (
+              params.excludePaths.includes(priorityDoc.path) ||
+              params.budgetTokens < priorityDocTokens
+            ) {
+              return { files: [], remainingTokens: params.budgetTokens }
+            }
+            return {
+              files: [priorityDoc],
+              remainingTokens: params.budgetTokens - priorityDocTokens,
+            }
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const reviewContext = first(stubs.generateFindingsCalls)
+      const prompt = buildUserPrompt({
+        ...reviewContext,
+        delimiterNonce: "testnonce123",
+      })
+      expect(reviewContext.relatedDocs).toEqual([priorityDoc])
+      expect(prompt.split(priorityDocContent)).toHaveLength(2)
+      expect(first(readPriorityDocsCalls).budgetTokens).toBe(8_000)
+      expect(first(readChangedFilesCalls).budgetTokens).toBe(
+        baseConfig.contextBudgetTokens - sampleDiffTokens - priorityDocTokens,
+      )
+    })
+
+    it("returns an unused early doc floor to changed files", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: ["MISSING.md"] },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(
+        stubs.readPriorityDocsCalls.map((call) => call.budgetTokens),
+      ).toEqual([8_000, 40_000])
+      expect(first(stubs.readChangedFilesCalls).budgetTokens).toBe(
+        baseConfig.contextBudgetTokens - sampleDiffTokens,
+      )
+    })
+
+    it("keeps an early priority doc out of the related-file scan", async () => {
+      const priorityDoc: PromptFile = {
+        path: "src/caller.ts",
+        content: "import { greet } from './greeter.js'",
+        includedAs: "full",
+        reason: "priority documentation",
+      }
+      const relatedFileCalls: FindRelatedFilesParams[] = []
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: [priorityDoc.path] },
+        contextReader: {
+          readPriorityDocs: async (params) => ({
+            files: [priorityDoc],
+            remainingTokens:
+              params.budgetTokens - estimateTokens(priorityDoc.content),
+          }),
+          findRelatedFiles: async (params) => {
+            relatedFileCalls.push(params)
+            return {
+              files: params.excludePaths.includes(priorityDoc.path)
+                ? []
+                : [priorityDoc],
+              excludedByCapPaths: [],
+            }
+          },
+        },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(relatedFileCalls.map((call) => call.excludePaths)).toEqual([
+        [priorityDoc.path],
+      ])
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.relatedFiles).toEqual([])
+      expect(reviewContext.relatedDocs).toEqual([priorityDoc])
+      const prompt = buildUserPrompt({
+        ...reviewContext,
+        delimiterNonce: "testnonce123",
+      })
+      expect(prompt.split(priorityDoc.content)).toHaveLength(2)
+    })
+
+    it("restores configured doc order when a larger doc fits only in the late pass", async () => {
+      const firstDoc: PromptFile = {
+        path: "docs/first.md",
+        content: "a".repeat(16_000),
+        includedAs: "full",
+        reason: "priority documentation",
+      }
+      const middleDoc: PromptFile = {
+        path: "docs/middle.md",
+        content: "b".repeat(20_000),
+        includedAs: "full",
+        reason: "priority documentation",
+      }
+      const lastDoc: PromptFile = {
+        path: "docs/last.md",
+        content: "c".repeat(8_000),
+        includedAs: "full",
+        reason: "priority documentation",
+      }
+      const readPriorityDocsCalls: ReadPriorityDocsParams[] = []
+      const stubs = makeOrchestrateDeps({
+        config: {
+          priorityDocs: [firstDoc.path, middleDoc.path, lastDoc.path],
+        },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [fixtureChangedFile],
+            remainingTokens: 10_000,
+          }),
+          readPriorityDocs: async (params) => {
+            readPriorityDocsCalls.push(params)
+            if (readPriorityDocsCalls.length === 1) {
+              return {
+                files: [firstDoc, lastDoc],
+                remainingTokens: params.budgetTokens - 6_000,
+              }
+            }
+            return {
+              files: [middleDoc],
+              remainingTokens: params.budgetTokens - 5_000,
+            }
+          },
+        },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(readPriorityDocsCalls.map((call) => call.budgetTokens)).toEqual([
+        8_000, 10_000,
+      ])
+      expect(first(stubs.findRelatedFilesCalls).budgetTokens).toBe(8_000)
+      expect(first(stubs.generateFindingsCalls).relatedDocs).toEqual([
+        firstDoc,
+        middleDoc,
+        lastDoc,
+      ])
+    })
+
+    it("fails the check when an early priority-doc read reaches the review deadline", async () => {
+      const operations: string[] = []
+      // The first priority-doc read advances this test's controllable deadline.
+      const deadline = { remainingMs: 1 }
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: ["README.md"] },
+        remainingReviewMs: () => deadline.remainingMs,
+        contextReader: {
+          readPriorityDocs: async (params) => {
+            operations.push("read priority docs")
+            deadline.remainingMs = 0
+            return { files: [], remainingTokens: params.budgetTokens }
+          },
+          readChangedFiles: async (params) => {
+            operations.push("read changed files")
+            return {
+              files: params.changedPaths.map((path) => ({
+                path,
+                content: "",
+                includedAs: "diff-only" as const,
+              })),
+              remainingTokens: params.budgetTokens,
+            }
+          },
+        },
+      })
+
+      await expect(orchestrate(stubs.deps, createTestLogger())).rejects.toThrow(
+        "every review phase failed: combined: [Error]: not attempted: review deadline exceeded",
+      )
+
+      expect(operations.slice(0, 2)).toEqual([
+        "read priority docs",
+        "read changed files",
+      ])
+      expect(stubs.generateFindingsCalls).toEqual([])
+      expect(stubs.postFindingsReviewCalls).toEqual([])
+      expect(stubs.upsertSummaryCommentCalls).toEqual([])
+      expect(stubs.updateCheckRunCalls).toEqual([
+        {
+          checkRunId: 555,
+          conclusion: "failure",
+          output: {
+            title: "Error — review did not complete",
+            summary:
+              "[AllPhasesFailedError]: every review phase failed: combined: [Error]: not attempted: review deadline exceeded",
+          },
+        },
+      ])
+    })
+
     it("passes budget minus diff tokens to readChangedFiles", async () => {
       const localReadChangedFilesCalls: ReadChangedFilesParams[] = []
       const stubs = makeOrchestrateDeps({
@@ -1124,7 +1354,7 @@ describe("orchestrate", () => {
       const largeRelatedFileTokens = estimateTokens(largeRelatedFileContent)
       const localPriorityDocsCalls: ReadPriorityDocsParams[] = []
       const stubs = makeOrchestrateDeps({
-        config: { traceRelatedFiles: true },
+        config: { traceRelatedFiles: true, priorityDocs: ["README.md"] },
         contextReader: {
           readChangedFiles: async () => ({
             files: [fixtureChangedFile],
@@ -1151,9 +1381,11 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(localPriorityDocsCalls).toHaveLength(1)
+      expect(localPriorityDocsCalls).toHaveLength(2)
       // remainingTokens (10) < relatedFilesTokens (25) → Math.max(0, -15) = 0
-      expect(first(localPriorityDocsCalls).budgetTokens).toBe(0)
+      expect(localPriorityDocsCalls.map((call) => call.budgetTokens)).toEqual([
+        8_000, 0,
+      ])
       expect(largeRelatedFileTokens).toBeGreaterThan(10)
     })
 
@@ -1195,9 +1427,7 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(localDocCalls).toHaveLength(1)
-      expect(first(localDocCalls).budgetTokens).toBe(
-        expectedRemainingTokens - priorityDocTokens,
-      )
+      expect(first(localDocCalls).budgetTokens).toBe(expectedRemainingTokens)
     })
 
     it("passes relatedDocs into generateFindings review context", async () => {
@@ -1422,9 +1652,9 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
-        "AGENTS.md",
-      ])
+      expect(
+        stubs.readPriorityDocsCalls.map((call) => call.excludePaths),
+      ).toEqual([[], ["AGENTS.md"]])
     })
 
     it("excludes changed files, related files, and conventions from the priority-doc read", async () => {
@@ -1451,11 +1681,9 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
-        "src/greeter.ts",
-        "src/caller.ts",
-        "AGENTS.md",
-      ])
+      expect(
+        stubs.readPriorityDocsCalls.map((call) => call.excludePaths),
+      ).toEqual([[], ["src/greeter.ts", "src/caller.ts", "AGENTS.md"]])
     })
 
     it("renders a changed conventions file diff-only when its own section carries it whole", async () => {
@@ -1522,9 +1750,9 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
-        "src/greeter.ts",
-      ])
+      expect(
+        stubs.readPriorityDocsCalls.map((call) => call.excludePaths),
+      ).toEqual([[], ["src/greeter.ts"]])
     })
 
     it("excludes an over-cap conventions file from priority docs when it is changed in the PR", async () => {
@@ -1555,10 +1783,18 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
-        "src/greeter.ts",
-        "AGENTS.md",
+      expect(
+        stubs.readPriorityDocsCalls.map((call) => call.excludePaths),
+      ).toEqual([[]])
+      expect(first(stubs.generateFindingsCalls).changedFiles).toEqual([
+        fixtureChangedFile,
+        {
+          path: "AGENTS.md",
+          content: "c".repeat(32_001),
+          includedAs: "full",
+        },
       ])
+      expect(first(stubs.generateFindingsCalls).relatedDocs).toEqual([])
     })
 
     it("suppresses the truncated conventions section when priority docs read the full file", async () => {
@@ -1622,9 +1858,9 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(first(stubs.readPriorityDocsCalls).excludePaths).toEqual([
-        "src/greeter.ts",
-      ])
+      expect(
+        stubs.readPriorityDocsCalls.map((call) => call.excludePaths),
+      ).toEqual([[], ["src/greeter.ts"]])
     })
   })
 
@@ -1637,7 +1873,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(stubs.readPriorityDocsCalls).toHaveLength(1)
+      expect(stubs.readPriorityDocsCalls).toHaveLength(2)
       expect(first(stubs.readPriorityDocsCalls).priorityDocs).toEqual([
         "README.md",
       ])

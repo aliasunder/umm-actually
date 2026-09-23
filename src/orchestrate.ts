@@ -78,8 +78,7 @@ import {
 } from "./review/run-stages.js"
 import { selectFindings } from "./review/select-findings.js"
 
-/** Fraction of contextBudgetTokens reserved for priority docs — related files
- *  cannot consume this slice, preventing budget starvation on large PRs. */
+/** Priority docs use this share before full changed-file reads. */
 const PRIORITY_DOCS_BUDGET_FLOOR_RATIO = 0.1
 
 export type ReviewContext = {
@@ -641,20 +640,45 @@ const runReviewPipeline = async (
     conventionsRenderInFull(conventions, config.conventionsBudgetTokens)
 
   const fileBudgetTokens = config.contextBudgetTokens - diffTokens
+  const priorityDocFloorLimit = Math.min(
+    Math.floor(config.contextBudgetTokens * PRIORITY_DOCS_BUDGET_FLOOR_RATIO),
+    fileBudgetTokens,
+  )
+  const priorityDocsNeedingFullCopy = reviewablePriorityDocs.filter(
+    (docPath) => {
+      return !(
+        conventionsAlreadyRenderedInFull &&
+        posix.normalize(docPath) === posix.normalize(config.conventionsFile)
+      )
+    },
+  )
+  const earlyPriorityDocBudget =
+    priorityDocsNeedingFullCopy.length > 0 ? priorityDocFloorLimit : 0
+  const earlyPriorityDocsResult =
+    earlyPriorityDocBudget > 0
+      ? await contextReader.readPriorityDocs({
+          priorityDocs: priorityDocsNeedingFullCopy,
+          budgetTokens: earlyPriorityDocBudget,
+          excludePaths: [],
+        })
+      : { files: [], remainingTokens: earlyPriorityDocBudget }
+  const earlyPriorityDocFiles = earlyPriorityDocsResult.files
+  const earlyPriorityDocTokens =
+    earlyPriorityDocBudget - earlyPriorityDocsResult.remainingTokens
   const { files: changedFiles, remainingTokens } =
     await contextReader.readChangedFiles({
       changedPaths,
-      budgetTokens: fileBudgetTokens,
-      diffOnlyPaths: conventionsAlreadyRenderedInFull
-        ? [config.conventionsFile]
-        : [],
+      budgetTokens: fileBudgetTokens - earlyPriorityDocTokens,
+      diffOnlyPaths: [
+        ...(conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []),
+        ...earlyPriorityDocFiles.map((file) => file.path),
+      ],
     })
 
-  // Reserve a budget floor for priority docs so related files can't starve
-  // them on large PRs. The floor only constrains related files — changed files
-  // (the review subject) are never restricted. Skip when every priority doc is
-  // already satisfied by channels known before the floor decision.
+  // Keep only the unspent part of the floor for docs still missing after
+  // changed-file reads, so related files cannot consume it.
   const preFloorInContext = new Set([
+    ...earlyPriorityDocFiles.map((file) => posix.normalize(file.path)),
     ...changedFiles
       .filter((file) => file.includedAs === "full")
       .map((file) => posix.normalize(file.path)),
@@ -667,24 +691,20 @@ const runReviewPipeline = async (
     reviewablePriorityDocs.some(
       (docPath) => !preFloorInContext.has(posix.normalize(docPath)),
     )
-  const rawFloor = Math.floor(
-    config.contextBudgetTokens * PRIORITY_DOCS_BUDGET_FLOOR_RATIO,
-  )
-  // Floor cannot exceed what's left — it constrains related files, not
-  // the total budget
-  const priorityDocFloor = needsPriorityDocFloor
-    ? Math.min(rawFloor, remainingTokens)
+  const remainingPriorityDocFloor = needsPriorityDocFloor
+    ? Math.min(priorityDocFloorLimit - earlyPriorityDocTokens, remainingTokens)
     : 0
-  const relatedFilesBudgetTokens = Math.max(
-    0,
-    remainingTokens - priorityDocFloor,
-  )
+  const priorityDocFloor = earlyPriorityDocTokens + remainingPriorityDocFloor
+  const relatedFilesBudgetTokens = remainingTokens - remainingPriorityDocFloor
 
   const relatedFilesResult = config.traceRelatedFiles
     ? await contextReader.findRelatedFiles({
         changedPaths,
         budgetTokens: relatedFilesBudgetTokens,
-        excludePaths: diffExcludedPaths,
+        excludePaths: [
+          ...diffExcludedPaths,
+          ...earlyPriorityDocFiles.map((file) => file.path),
+        ],
       })
     : { files: [], excludedByCapPaths: [] }
 
@@ -708,12 +728,29 @@ const runReviewPipeline = async (
     ...(conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []),
   ]
 
-  const { files: priorityDocFiles, remainingTokens: docRemainingTokens } =
-    await contextReader.readPriorityDocs({
-      priorityDocs: reviewablePriorityDocs,
-      budgetTokens: docBudgetTokens,
-      excludePaths: priorityDocsInContext,
-    })
+  const latePriorityDocsResult = needsPriorityDocFloor
+    ? await contextReader.readPriorityDocs({
+        priorityDocs: reviewablePriorityDocs,
+        budgetTokens: docBudgetTokens,
+        excludePaths: [
+          ...earlyPriorityDocFiles.map((file) => file.path),
+          ...priorityDocsInContext,
+        ],
+      })
+    : { files: [], remainingTokens: docBudgetTokens }
+  const priorityDocPathsInOrder = reviewablePriorityDocs.map((docPath) => {
+    return posix.normalize(docPath)
+  })
+  const priorityDocFiles = [
+    ...earlyPriorityDocFiles,
+    ...latePriorityDocsResult.files,
+  ].toSorted((leftFile, rightFile) => {
+    return (
+      priorityDocPathsInOrder.indexOf(posix.normalize(leftFile.path)) -
+      priorityDocPathsInOrder.indexOf(posix.normalize(rightFile.path))
+    )
+  })
+  const docRemainingTokens = latePriorityDocsResult.remainingTokens
 
   // When the conventions section truncated but priority docs read the full
   // file, suppress the truncated head — the full copy in the priority-docs
