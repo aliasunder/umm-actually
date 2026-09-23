@@ -1,11 +1,11 @@
 import type { Finding, FindingSeverity } from "./finding.js"
 import { SEVERITY_RANK } from "./finding.js"
 
-export type SelectionResult = {
-  selected: Finding[]
+export type SelectionResult<FindingType extends Finding> = {
+  selected: FindingType[]
   droppedBelowThreshold: number
   droppedAsOverlapping: number
-  droppedByCap: Finding[]
+  droppedByCap: FindingType[]
 }
 
 // The model can emit an inverted range (end_line before line); order the ends
@@ -41,15 +41,15 @@ const isDuplicate = (candidate: Finding, kept: Finding): boolean => {
  * category overlap in the same file. Duplicates between review phases are
  * collapsed earlier, by merge-phase-findings.ts, without the category match.
  */
-export const selectFindings = ({
+export const selectFindings = <FindingType extends Finding>({
   findings,
   severityThreshold,
   maxFindings,
 }: {
-  findings: Finding[]
+  findings: FindingType[]
   severityThreshold: FindingSeverity
   maxFindings: number | undefined
-}): SelectionResult => {
+}): SelectionResult<FindingType> => {
   const aboveThreshold = findings.filter(
     (finding) =>
       SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[severityThreshold],
@@ -67,7 +67,7 @@ export const selectFindings = ({
     if (first.file !== second.file) return first.file.localeCompare(second.file)
     return first.line - second.line
   })
-  const deduplicated = sorted.reduce<Finding[]>((kept, candidate) => {
+  const deduplicated = sorted.reduce<FindingType[]>((kept, candidate) => {
     const duplicateOfKept = kept.some((existing) =>
       isDuplicate(candidate, existing),
     )

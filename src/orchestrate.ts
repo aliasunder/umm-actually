@@ -49,6 +49,7 @@ import {
 } from "./review/context-notes.js"
 import {
   resolveSeverityThreshold,
+  type AttributedFinding,
   type Finding,
   type FindingSeverity,
 } from "./review/finding.js"
@@ -223,7 +224,7 @@ const fetchIssueCommentState = async (
 type InlinePostOutcome = {
   url: string
   /** Findings whose anchors GitHub rejected — re-routed to issue comments. */
-  rerouted: Finding[]
+  rerouted: AttributedFinding[]
   /** Inline comments that actually landed — zero when the post failed. */
   postedCount: number
 }
@@ -244,7 +245,7 @@ const postInlineFindings = async (
     prNumber: number
     commitId: string
     comments: ReviewComment[]
-    inlineFindings: Finding[]
+    inlineFindings: AttributedFinding[]
   },
   logger: Logger,
 ): Promise<InlinePostOutcome> => {
@@ -432,7 +433,7 @@ const phaseAttempts = (outcome: PhaseOutcome): PhaseAttempt[] => {
 }
 
 type FilteredPhaseFindings = {
-  findings: Finding[]
+  findings: AttributedFinding[]
   droppedAsNonFinding: number
   droppedAsUnknownFile: number
 }
@@ -459,7 +460,10 @@ const filterPhaseFindings = (
     })
   }
   return {
-    findings,
+    findings: findings.map((finding) => ({
+      ...finding,
+      modelUsed: outcome.result.modelUsed,
+    })),
     droppedAsNonFinding,
     droppedAsUnknownFile: droppedAsUnknownFile.length,
   }
@@ -900,7 +904,7 @@ const runReviewPipeline = async (
   // inline comments (live positions) and its beyond-diff issue comments
   // (anchor lines). Runs before the cap so duplicates don't consume slots.
   const existingAnchors = [...inlineState.anchors, ...issueState.anchors]
-  const newFindings: Finding[] = []
+  const newFindings: AttributedFinding[] = []
   const dedupCounts = { positional: 0, content: 0, title: 0 }
   for (const finding of realFindings) {
     const tier = classifyDuplicate(finding, existingAnchors)
@@ -959,7 +963,6 @@ const runReviewPipeline = async (
   const { comments, bodyFindings } = mapFindingsToReview({
     findings: selected,
     commentableByPath,
-    model: modelUsed,
   })
   const inlineFindings = selected.filter(
     (finding) => !bodyFindings.includes(finding),
@@ -984,7 +987,7 @@ const runReviewPipeline = async (
     try {
       await githubClient.postIssueComment({
         prNumber: prContext.prNumber,
-        body: renderStandaloneFinding(finding, modelUsed),
+        body: renderStandaloneFinding(finding),
       })
       postedStandalone += 1
     } catch (postError) {

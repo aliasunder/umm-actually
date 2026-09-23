@@ -2,20 +2,23 @@ import type { Finding } from "./finding.js"
 import { SEVERITY_RANK } from "./finding.js"
 import { rangesOverlap } from "./select-findings.js"
 
-export type MergedPhaseFindings = {
-  findings: Finding[]
+export type MergedPhaseFindings<FindingType extends Finding> = {
+  findings: FindingType[]
   duplicatesAcrossPhases: number
 }
 
-type PhasedFinding = { finding: Finding; phaseIndex: number }
+type PhasedFinding<FindingType extends Finding> = {
+  finding: FindingType
+  phaseIndex: number
+}
 
 /** Category is ignored on purpose: two phases reporting overlapping lines of
  *  one file are almost always one defect under two labels. Findings from the
  *  same phase never compare — the model deduplicates within its own call, and
  *  a one-phase run must pass through unchanged. */
-const isCrossPhaseDuplicate = (
-  candidate: PhasedFinding,
-  kept: PhasedFinding,
+const isCrossPhaseDuplicate = <FindingType extends Finding>(
+  candidate: PhasedFinding<FindingType>,
+  kept: PhasedFinding<FindingType>,
 ): boolean => {
   return (
     candidate.phaseIndex !== kept.phaseIndex &&
@@ -36,27 +39,30 @@ const outranks = (candidate: Finding, kept: Finding): boolean =>
  * (a range spanning two earlier single-line findings): it must outrank all
  * of them to be kept, and then every one of them goes.
  */
-export const mergePhaseFindings = (
-  findingsByPhase: Finding[][],
-): MergedPhaseFindings => {
+export const mergePhaseFindings = <FindingType extends Finding>(
+  findingsByPhase: FindingType[][],
+): MergedPhaseFindings<FindingType> => {
   const phased = findingsByPhase.flatMap((phaseFindings, phaseIndex) => {
     return phaseFindings.map((finding) => ({ finding, phaseIndex }))
   })
 
-  const kept = phased.reduce<PhasedFinding[]>((keptSoFar, candidate) => {
-    const overlapping = keptSoFar.filter((entry) =>
-      isCrossPhaseDuplicate(candidate, entry),
-    )
-    if (overlapping.length === 0) return [...keptSoFar, candidate]
-    const outranksAll = overlapping.every((entry) =>
-      outranks(candidate.finding, entry.finding),
-    )
-    if (!outranksAll) return keptSoFar
-    return keptSoFar.flatMap((entry) => {
-      if (entry === overlapping[0]) return [candidate]
-      return overlapping.includes(entry) ? [] : [entry]
-    })
-  }, [])
+  const kept = phased.reduce<PhasedFinding<FindingType>[]>(
+    (keptSoFar, candidate) => {
+      const overlapping = keptSoFar.filter((entry) =>
+        isCrossPhaseDuplicate(candidate, entry),
+      )
+      if (overlapping.length === 0) return [...keptSoFar, candidate]
+      const outranksAll = overlapping.every((entry) =>
+        outranks(candidate.finding, entry.finding),
+      )
+      if (!outranksAll) return keptSoFar
+      return keptSoFar.flatMap((entry) => {
+        if (entry === overlapping[0]) return [candidate]
+        return overlapping.includes(entry) ? [] : [entry]
+      })
+    },
+    [],
+  )
 
   return {
     findings: kept.map((entry) => entry.finding),

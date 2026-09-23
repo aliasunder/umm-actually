@@ -1,5 +1,5 @@
 import type { CommentableFile } from "../diff/commentable-lines.js"
-import type { Finding } from "./finding.js"
+import type { AttributedFinding, Finding } from "./finding.js"
 import { normalizeTitle, titleSimilarity } from "./title-similarity.js"
 
 /** Wire shape for POST /pulls/{n}/reviews comments[] entries. */
@@ -14,7 +14,7 @@ export type ReviewComment = {
 
 export type MappedReview = {
   comments: ReviewComment[]
-  bodyFindings: Finding[]
+  bodyFindings: AttributedFinding[]
 }
 
 /**
@@ -257,8 +257,7 @@ const suggestionBlock = (finding: Finding): string => {
 }
 
 const renderCommentBody = (
-  finding: Finding,
-  model: string,
+  finding: AttributedFinding,
   snappedFromLine?: number,
 ): string => {
   const snapNote = snappedFromLine
@@ -271,7 +270,7 @@ ${finding.description}
 
 **Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}${snapNote}
 
-${attributionLine(model)}${anchor}`
+${attributionLine(finding.modelUsed)}${anchor}`
 }
 
 const nearestCommentableLine = (
@@ -328,10 +327,9 @@ const multiLineEnd = (
  * (exact or snapped), review-body finding otherwise.
  */
 const classifyFinding = (
-  finding: Finding,
+  finding: AttributedFinding,
   commentableByPath: Map<string, CommentableFile>,
-  model: string,
-): { comment?: ReviewComment; bodyFinding?: Finding } => {
+): { comment?: ReviewComment; bodyFinding?: AttributedFinding } => {
   const commentable = commentableByPath.get(finding.file)
   if (!commentable) return { bodyFinding: finding }
 
@@ -343,7 +341,7 @@ const classifyFinding = (
           path: finding.file,
           line: finding.line,
           side: "RIGHT",
-          body: renderCommentBody(finding, model),
+          body: renderCommentBody(finding),
         }
       : {
           path: finding.file,
@@ -351,7 +349,7 @@ const classifyFinding = (
           side: "RIGHT",
           start_line: finding.line,
           start_side: "RIGHT",
-          body: renderCommentBody(finding, model),
+          body: renderCommentBody(finding),
         }
     return { comment }
   }
@@ -363,7 +361,7 @@ const classifyFinding = (
         path: finding.file,
         line: snappedLine,
         side: "RIGHT",
-        body: renderCommentBody(finding, model, finding.line),
+        body: renderCommentBody(finding, finding.line),
       },
     }
   }
@@ -381,14 +379,12 @@ const classifyFinding = (
 export const mapFindingsToReview = ({
   findings,
   commentableByPath,
-  model,
 }: {
-  findings: Finding[]
+  findings: AttributedFinding[]
   commentableByPath: Map<string, CommentableFile>
-  model: string
 }): MappedReview => {
   const mapped = findings.map((finding) =>
-    classifyFinding(finding, commentableByPath, model),
+    classifyFinding(finding, commentableByPath),
   )
 
   const comments = mapped.flatMap((entry) =>
@@ -412,10 +408,7 @@ export const STATUS_ANCHOR = "<!-- umm-actually-status -->"
 /** A beyond-diff finding posted as its own issue comment — a new comment is
  *  a visible event to PR watchers, unlike an in-place status update. Carries
  *  its dedup anchor like any inline comment. */
-export const renderStandaloneFinding = (
-  finding: Finding,
-  model: string,
-): string => {
+export const renderStandaloneFinding = (finding: AttributedFinding): string => {
   return `${findingHeader(finding)}
 
 \`${finding.file}:${finding.line}\` — beyond the diff's line ranges, in code the changes touch or depend on.
@@ -424,7 +417,7 @@ ${finding.description}
 
 **Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}
 
-${attributionLine(model)}
+${attributionLine(finding.modelUsed)}
 
 <!-- umm-actually:${computeAnchorKey(finding)} -->`
 }

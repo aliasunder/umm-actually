@@ -12,7 +12,15 @@ import {
   STATUS_ANCHOR,
   type AnchorSource,
 } from "../comment-mapping.js"
-import { makeFinding } from "./make-finding.js"
+import type { AttributedFinding } from "../finding.js"
+import { makeFinding as makePlainFinding } from "./make-finding.js"
+
+const makeFinding = (
+  overrides: Partial<AttributedFinding> = {},
+): AttributedFinding => ({
+  ...makePlainFinding(overrides),
+  modelUsed: overrides.modelUsed ?? "test/model",
+})
 
 const makeCommentableByPath = (): Map<string, CommentableFile> =>
   new Map([
@@ -37,7 +45,6 @@ describe("mapFindingsToReview", () => {
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.bodyFindings).toEqual([])
@@ -63,13 +70,95 @@ The guard rejects only the exact empty string.
     ])
   })
 
+  it("renders each inline finding with the model that produced it", () => {
+    const primaryFinding = makeFinding({
+      line: 145,
+      modelUsed: "primary/model",
+    })
+    const fallbackFinding = makeFinding({
+      line: 146,
+      modelUsed: "fallback/model",
+    })
+
+    const mapped = mapFindingsToReview({
+      findings: [primaryFinding, fallbackFinding],
+      commentableByPath: makeCommentableByPath(),
+    })
+
+    expect(mapped).toEqual({
+      comments: [
+        {
+          path: "src/greeter.ts",
+          line: 145,
+          side: "RIGHT",
+          body: `**Whitespace-only keys pass the empty-key guard**
+Medium severity · correctness · high confidence
+
+The guard rejects only the exact empty string.
+
+**Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
+
+---
+*umm-actually · primary/model*
+
+<!-- umm-actually:src/greeter.ts:correctness:145 -->`,
+        },
+        {
+          path: "src/greeter.ts",
+          line: 146,
+          side: "RIGHT",
+          body: `**Whitespace-only keys pass the empty-key guard**
+Medium severity · correctness · high confidence
+
+The guard rejects only the exact empty string.
+
+**Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
+
+---
+*umm-actually · fallback/model*
+
+<!-- umm-actually:src/greeter.ts:correctness:146 -->`,
+        },
+      ],
+      bodyFindings: [],
+    })
+  })
+
+  it("preserves a beyond-diff finding's model for standalone rendering", () => {
+    const finding = makeFinding({
+      file: "src/untouched.ts",
+      line: 30,
+      modelUsed: "fallback/model",
+    })
+
+    const mapped = mapFindingsToReview({
+      findings: [finding],
+      commentableByPath: makeCommentableByPath(),
+    })
+
+    expect(mapped).toEqual({ comments: [], bodyFindings: [finding] })
+    expect(renderStandaloneFinding(finding))
+      .toBe(`**Whitespace-only keys pass the empty-key guard**
+Medium severity · correctness · high confidence
+
+\`src/untouched.ts:30\` — beyond the diff's line ranges, in code the changes touch or depend on.
+
+The guard rejects only the exact empty string.
+
+**Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
+
+---
+*umm-actually · fallback/model*
+
+<!-- umm-actually:src/untouched.ts:correctness:30 -->`)
+  })
+
   it("maps a valid multi-line finding with start_line first and line last, per GitHub's API", () => {
     const finding = makeFinding({ line: 143, end_line: 146 })
 
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments[0]).toMatchObject({
@@ -87,7 +176,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments[0]).toMatchObject({ line: 145, side: "RIGHT" })
@@ -100,7 +188,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments[0]).toMatchObject({ line: 145, side: "RIGHT" })
@@ -113,7 +200,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments[0]).toMatchObject({ line: 145, side: "RIGHT" })
@@ -126,7 +212,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments[0]).toMatchObject({ line: 5, side: "RIGHT" })
@@ -139,7 +224,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments[0]).toMatchObject({ line: 147, side: "RIGHT" })
@@ -157,7 +241,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments[0]).toMatchObject({ line: 147, side: "RIGHT" })
@@ -184,7 +267,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath,
-      model: "test/model",
     })
 
     expect(mapped.comments).toEqual([])
@@ -197,7 +279,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments).toEqual([])
@@ -210,7 +291,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments).toEqual([])
@@ -223,7 +303,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments).toEqual([])
@@ -240,7 +319,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [withSuggestion, withoutSuggestion],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments[0]?.body).toContain(
@@ -255,7 +333,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments[0]?.body).not.toContain("<details>")
@@ -269,7 +346,6 @@ The guard rejects only the exact empty string.
     const mapped = mapFindingsToReview({
       findings: [finding],
       commentableByPath: makeCommentableByPath(),
-      model: "test/model",
     })
 
     expect(mapped.comments[0]?.body).toContain(
@@ -282,7 +358,7 @@ describe("renderStandaloneFinding", () => {
   it("renders the full finding block with location note and anchor", () => {
     const finding = makeFinding({ file: "src/untouched.ts", line: 30 })
 
-    const body = renderStandaloneFinding(finding, "test/model")
+    const body = renderStandaloneFinding(finding)
 
     expect(body).toBe(`**Whitespace-only keys pass the empty-key guard**
 Medium severity · correctness · high confidence
@@ -306,7 +382,7 @@ The guard rejects only the exact empty string.
       category: "subtle_bugs",
     })
 
-    const body = renderStandaloneFinding(finding, "test/model")
+    const body = renderStandaloneFinding(finding)
 
     expect(body).toContain("Medium severity · subtle bugs · high confidence")
     expect(body).toContain(
@@ -321,7 +397,7 @@ The guard rejects only the exact empty string.
       suggestion: "-old line\n+new line",
     })
 
-    const body = renderStandaloneFinding(finding, "test/model")
+    const body = renderStandaloneFinding(finding)
 
     expect(body).toBe(`**Whitespace-only keys pass the empty-key guard**
 Medium severity · correctness · high confidence
@@ -620,7 +696,6 @@ describe("extractAnchors", () => {
   it("still finds the anchor behind the model attribution on a rendered comment", () => {
     const body = renderStandaloneFinding(
       makeFinding({ file: "src/untouched.ts", line: 30 }),
-      "test/model",
     )
 
     const anchors = extractAnchors([anchorSource(body)])

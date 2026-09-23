@@ -19,7 +19,11 @@ import {
 import { estimateTokens, type PromptFile } from "../review/prompt.js"
 import { annotateDiff } from "../diff/annotate-diff.js"
 import { computeCommentableLines } from "../diff/commentable-lines.js"
-import type { Finding, ReviewResponse } from "../review/finding.js"
+import type {
+  AttributedFinding,
+  Finding,
+  ReviewResponse,
+} from "../review/finding.js"
 import {
   buildStatusComment,
   computeAnchorKey,
@@ -102,15 +106,26 @@ const fixtureChangedFile: PromptFile = {
 const fixtureFiles = parseDiff(sampleDiff)
 const fixtureCommentableByPath = computeCommentableLines(fixtureFiles)
 
+const withRoutedModel = (
+  finding: Finding,
+  modelUsed: string,
+): AttributedFinding => ({ ...finding, modelUsed })
+
+const findingsWithRoutedModel = (
+  findings: Finding[],
+  modelUsed: string,
+): AttributedFinding[] => {
+  return findings.map((finding) => withRoutedModel(finding, modelUsed))
+}
+
 const expectedSelection = selectFindings({
   findings: fixtureReviewResponse.findings,
   severityThreshold: "low",
   maxFindings: undefined,
 })
 const expectedMapped = mapFindingsToReview({
-  findings: expectedSelection.selected,
+  findings: findingsWithRoutedModel(expectedSelection.selected, "test/model"),
   commentableByPath: fixtureCommentableByPath,
-  model: "test/model",
 })
 const expectedCostSummary = renderCostSummary({
   attempts: [{ ...fixtureAttempt, phase: "combined" }],
@@ -155,9 +170,11 @@ const expectedCappedSelection = selectFindings({
   maxFindings: 1,
 })
 const expectedCappedMapped = mapFindingsToReview({
-  findings: expectedCappedSelection.selected,
+  findings: findingsWithRoutedModel(
+    expectedCappedSelection.selected,
+    "test/model",
+  ),
   commentableByPath: fixtureCommentableByPath,
-  model: "test/model",
 })
 
 /** Full expected postFindingsReview params for a run posting `findings` as
@@ -165,9 +182,8 @@ const expectedCappedMapped = mapFindingsToReview({
  *  an incomplete payload that count-only checks would miss. */
 const expectedFindingsReview = (findings: Finding[]) => {
   const mapped = mapFindingsToReview({
-    findings,
+    findings: findingsWithRoutedModel(findings, "test/model"),
     commentableByPath: fixtureCommentableByPath,
-    model: "test/model",
   })
   return {
     prNumber: 7,
@@ -930,7 +946,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedMapped.bodyFindings.map((finding) => ({
           prNumber: fixturePrContext.prNumber,
-          body: renderStandaloneFinding(finding, "test/model"),
+          body: renderStandaloneFinding(finding),
         })),
       )
       expect(stubs.upsertSummaryCommentCalls).toEqual([
@@ -1816,8 +1832,37 @@ describe("orchestrate", () => {
       expect(result.costSummaryMarkdown).toBeNull()
     })
 
-    it("re-routes inline findings to issue comments when GitHub rejects the anchors", async () => {
+    it("keeps each routed model when GitHub re-routes a mixed-model inline review", async () => {
+      const fallbackFinding = makeFinding({
+        line: 2,
+        category: "subtle_bugs",
+        severity: "high",
+        title: "Fallback finding",
+      })
       const stubs = makeOrchestrateDeps({
+        config: { phases: "parallel" },
+        generateFindings: async (reviewContext) => {
+          stubs.generateFindingsCalls.push(reviewContext)
+          if (reviewContext.phase.id === "subtle-bugs") {
+            return {
+              review: { analysis: "checked", findings: [fallbackFinding] },
+              modelUsed: "fallback/model",
+              attempts: [fixtureAttempt],
+            }
+          }
+          if (reviewContext.phase.id === "correctness-security") {
+            return {
+              review: fixtureReviewResponse,
+              modelUsed: "test/model",
+              attempts: [fixtureAttempt],
+            }
+          }
+          return {
+            review: { analysis: "checked", findings: [] },
+            modelUsed: "test/model",
+            attempts: [fixtureAttempt],
+          }
+        },
         githubClient: {
           postFindingsReview: async () => ({ kind: "rejected" as const }),
         },
@@ -1827,11 +1872,16 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.reviewUrl).toBe("")
-      expect(result.findingsCount).toBe(expectedSelection.selected.length)
+      expect(result.findingsCount).toBe(expectedSelection.selected.length + 1)
+      expect(result.modelUsed).toBe("test/model, fallback/model")
+      const postedFindings = [
+        withRoutedModel(fallbackFinding, "fallback/model"),
+        ...findingsWithRoutedModel(expectedSelection.selected, "test/model"),
+      ]
       expect(stubs.postIssueCommentCalls).toEqual(
-        expectedSelection.selected.map((finding) => ({
+        postedFindings.map((finding) => ({
           prNumber: 7,
-          body: renderStandaloneFinding(finding, "test/model"),
+          body: renderStandaloneFinding(finding),
         })),
       )
     })
@@ -1856,7 +1906,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedMapped.bodyFindings.map((finding) => ({
           prNumber: 7,
-          body: renderStandaloneFinding(finding, "test/model"),
+          body: renderStandaloneFinding(finding),
         })),
       )
       expect(stubs.upsertSummaryCommentCalls).toEqual([
@@ -1963,9 +2013,11 @@ describe("orchestrate", () => {
         maxFindings: undefined,
       })
       const mixedMapped = mapFindingsToReview({
-        findings: mixedSelection.selected,
+        findings: findingsWithRoutedModel(
+          mixedSelection.selected,
+          "test/model",
+        ),
         commentableByPath: fixtureCommentableByPath,
-        model: "test/model",
       })
 
       const stubs = makeOrchestrateDeps({
@@ -2056,7 +2108,9 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(relatedFileFinding, "test/model"),
+          body: renderStandaloneFinding(
+            withRoutedModel(relatedFileFinding, "test/model"),
+          ),
         },
       ])
     })
@@ -2070,9 +2124,8 @@ describe("orchestrate", () => {
       })
       const realFinding = makeFinding({ line: 145 })
       const realMapped = mapFindingsToReview({
-        findings: [realFinding],
+        findings: [withRoutedModel(realFinding, "test/model")],
         commentableByPath: fixtureCommentableByPath,
-        model: "test/model",
       })
       const stubs = makeOrchestrateDeps({
         fixtureResult: {
@@ -2156,11 +2209,15 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(renamedFromFinding, "test/model"),
+          body: renderStandaloneFinding(
+            withRoutedModel(renamedFromFinding, "test/model"),
+          ),
         },
         {
           prNumber: 7,
-          body: renderStandaloneFinding(deletedFileFinding, "test/model"),
+          body: renderStandaloneFinding(
+            withRoutedModel(deletedFileFinding, "test/model"),
+          ),
         },
       ])
     })
@@ -2187,7 +2244,9 @@ describe("orchestrate", () => {
       expect(foundStubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(conventionsFinding, "test/model"),
+          body: renderStandaloneFinding(
+            withRoutedModel(conventionsFinding, "test/model"),
+          ),
         },
       ])
       expect(missingResult.findingsCount).toBe(0)
@@ -2273,6 +2332,62 @@ describe("orchestrate", () => {
           postedCount: findings.length - 1,
           totalCount: findings.length,
         }),
+      ])
+    })
+
+    it("keeps the surviving routed model after cross-run deduplication", async () => {
+      const duplicateFinding = makeFinding({ line: 145 })
+      const survivingFinding = makeFinding({
+        line: 2,
+        category: "subtle_bugs",
+        title: "New fallback finding",
+      })
+      const stubs = makeOrchestrateDeps({
+        config: { phases: "parallel" },
+        generateFindings: async (reviewContext) => {
+          stubs.generateFindingsCalls.push(reviewContext)
+          if (reviewContext.phase.id === "subtle-bugs") {
+            return {
+              review: { analysis: "checked", findings: [survivingFinding] },
+              modelUsed: "fallback/model",
+              attempts: [fixtureAttempt],
+            }
+          }
+          if (reviewContext.phase.id === "correctness-security") {
+            return {
+              review: { analysis: "checked", findings: [duplicateFinding] },
+              modelUsed: "test/model",
+              attempts: [fixtureAttempt],
+            }
+          }
+          return {
+            review: { analysis: "checked", findings: [] },
+            modelUsed: "test/model",
+            attempts: [fixtureAttempt],
+          }
+        },
+        githubClient: {
+          fetchBotReviewComments: async () => [
+            existingComment(
+              `prior finding\n\n<!-- umm-actually:${computeAnchorKey(duplicateFinding)} -->`,
+            ),
+          ],
+        },
+      })
+
+      const result = await orchestrate(stubs.deps, createTestLogger())
+
+      expect(result.modelUsed).toBe("test/model, fallback/model")
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        {
+          prNumber: 7,
+          commitId: fixturePrContext.headSha,
+          body: REVIEW_MARKER,
+          comments: mapFindingsToReview({
+            findings: [withRoutedModel(survivingFinding, "fallback/model")],
+            commentableByPath: fixtureCommentableByPath,
+          }).comments,
+        },
       ])
     })
 
@@ -3534,17 +3649,29 @@ describe("staged phases", () => {
     ])
   })
 
-  it("joins the routed models when phases were served by different models", async () => {
+  it("attributes a cross-phase winner to its routed model while reporting all run models", async () => {
+    const fixtureLowFinding = fixtureReviewResponse.findings.find(
+      (finding) => finding.line === 3,
+    )
+    if (!fixtureLowFinding) {
+      throw new Error("fixture finding on line 3 is missing")
+    }
+    const fallbackFinding = makeFinding({
+      line: 145,
+      category: "subtle_bugs",
+      severity: "high",
+      title: "Fallback phase winner",
+    })
     const stubs = makeOrchestrateDeps({
       config: { phases: "parallel" },
       generateFindings: async (reviewContext) => {
         stubs.generateFindingsCalls.push(reviewContext)
+        const isFallbackPhase = reviewContext.phase.id === "subtle-bugs"
         return {
-          review: fixtureReviewResponse,
-          modelUsed:
-            reviewContext.phase.id === "subtle-bugs"
-              ? "fallback/model"
-              : "test/model",
+          review: isFallbackPhase
+            ? { analysis: "checked", findings: [fallbackFinding] }
+            : fixtureReviewResponse,
+          modelUsed: isFallbackPhase ? "fallback/model" : "test/model",
           attempts: [fixtureAttempt],
         }
       },
@@ -3555,9 +3682,11 @@ describe("staged phases", () => {
 
     expect(result.modelUsed).toBe("test/model, fallback/model")
     const mapped = mapFindingsToReview({
-      findings: expectedSelection.selected,
+      findings: [
+        withRoutedModel(fallbackFinding, "fallback/model"),
+        withRoutedModel(fixtureLowFinding, "test/model"),
+      ],
       commentableByPath: fixtureCommentableByPath,
-      model: "test/model, fallback/model",
     })
     expect(stubs.postFindingsReviewCalls).toEqual([
       {

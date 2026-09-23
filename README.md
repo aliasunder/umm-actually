@@ -9,7 +9,7 @@ LLM-powered pull request review as a GitHub Action. One consolidated review per 
 - Posts one consolidated PR review when there are inline findings, with comments anchored to diff lines; completed runs also update a status comment, including when there are no findings
 - Structured output end to end: every finding carries a category, severity, confidence, and a concrete failure scenario
 - **Drops non-findings before they post** — findings that conclude "no bug here" (an `N/A — …` title, a "no action needed" suggestion, a "…is correct" title) are filtered deterministically
-- Model-agnostic via OpenRouter — pick your model, see your per-call costs; every posted comment carries an `umm-actually · <model>` byline listing the model(s) used by the completed review phases
+- Model-agnostic via OpenRouter — pick your model, see your per-call costs; every finding comment carries an `umm-actually · <model>` byline naming the model that produced that finding
 - Findings that can't be anchored to the diff (e.g. callers outside the changed files) are posted as standalone comments on the PR
 - PRs with oversized diffs are skipped gracefully with a body-only review stating the reason
 - Reports as its **own branded check run** in the PR checks list — the App's avatar, the outcome as the check title (findings count, clean pass, or skip reason), and a details page carrying the summary and per-run cost
