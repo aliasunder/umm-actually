@@ -23,8 +23,14 @@ describe("selectFindings", () => {
   })
 
   it("keeps the higher-severity finding when same-category findings overlap in a file", () => {
-    const lowDuplicate = makeFinding({ severity: "low", line: 145 })
-    const highOriginal = makeFinding({ severity: "high", line: 145 })
+    const lowDuplicate = {
+      ...makeFinding({ severity: "low", line: 145 }),
+      modelUsed: "model/low",
+    }
+    const highOriginal = {
+      ...makeFinding({ severity: "high", line: 145 }),
+      modelUsed: "model/high",
+    }
 
     const result = selectFindings({
       findings: [lowDuplicate, highOriginal],
@@ -183,9 +189,18 @@ describe("selectFindings", () => {
   })
 
   it("caps at max_findings keeping the most severe, and reports the dropped ones", () => {
-    const criticalFinding = makeFinding({ severity: "critical", line: 1 })
-    const highFinding = makeFinding({ severity: "high", line: 10 })
-    const lowFinding = makeFinding({ severity: "low", line: 20 })
+    const criticalFinding = {
+      ...makeFinding({ severity: "critical", line: 1 }),
+      modelUsed: "model/critical",
+    }
+    const highFinding = {
+      ...makeFinding({ severity: "high", line: 10 }),
+      modelUsed: "model/high",
+    }
+    const lowFinding = {
+      ...makeFinding({ severity: "low", line: 20 }),
+      modelUsed: "model/low",
+    }
 
     const result = selectFindings({
       findings: [lowFinding, highFinding, criticalFinding],

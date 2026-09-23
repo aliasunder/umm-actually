@@ -1,5 +1,5 @@
 import type { CommentableFile } from "../diff/commentable-lines.js"
-import type { Finding } from "./finding.js"
+import type { AttributedFinding, Finding } from "./finding.js"
 import { normalizeTitle, titleSimilarity } from "./title-similarity.js"
 
 /** Wire shape for POST /pulls/{n}/reviews comments[] entries. */
@@ -14,15 +14,11 @@ export type ReviewComment = {
 
 export type MappedReview = {
   comments: ReviewComment[]
-  bodyFindings: Finding[]
+  standaloneFindings: AttributedFinding[]
 }
 
-/**
- * How far outside a hunk a finding's line may fall and still snap to it.
- * 3 lines absorbs the common LLM anchoring drift (off-by-one from fence
- * lines or hunk headers) without capturing findings that genuinely belong
- * to distant, unchanged code — those go to the review body instead.
- */
+/** Limits snap-to-diff anchoring to three lines, keeping model drift inline
+ * without attaching a finding to unrelated code. */
 const SNAP_DISTANCE = 3
 
 /** Matches `<!-- umm-actually:KEY -->` only at the end of a body — the
@@ -257,12 +253,11 @@ const suggestionBlock = (finding: Finding): string => {
 }
 
 const renderCommentBody = (
-  finding: Finding,
-  model: string,
-  snappedFromLine?: number,
+  finding: AttributedFinding,
+  snappedLine?: number,
 ): string => {
-  const snapNote = snappedFromLine
-    ? `\n\n_Anchored near line ${snappedFromLine} (the reported line is not part of the diff)._`
+  const snapNote = snappedLine
+    ? `\n\n_Reported at line ${finding.line} (outside the diff); anchored at nearby changed line ${snappedLine}._`
     : ""
   const anchor = `\n\n<!-- umm-actually:${computeAnchorKey(finding)} -->`
   return `${findingHeader(finding)}
@@ -271,7 +266,7 @@ ${finding.description}
 
 **Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}${snapNote}
 
-${attributionLine(model)}${anchor}`
+${attributionLine(finding.modelUsed)}${anchor}`
 }
 
 const nearestCommentableLine = (
@@ -323,17 +318,12 @@ const multiLineEnd = (
   return sharedHunk ? endLine : undefined
 }
 
-/**
- * Routes one finding: inline comment when its line is verifiably anchorable
- * (exact or snapped), review-body finding otherwise.
- */
 const classifyFinding = (
-  finding: Finding,
+  finding: AttributedFinding,
   commentableByPath: Map<string, CommentableFile>,
-  model: string,
-): { comment?: ReviewComment; bodyFinding?: Finding } => {
+): { comment?: ReviewComment; standaloneFinding?: AttributedFinding } => {
   const commentable = commentableByPath.get(finding.file)
-  if (!commentable) return { bodyFinding: finding }
+  if (!commentable) return { standaloneFinding: finding }
 
   if (commentable.rightLines.has(finding.line)) {
     const endLine = multiLineEnd(finding, commentable)
@@ -343,7 +333,7 @@ const classifyFinding = (
           path: finding.file,
           line: finding.line,
           side: "RIGHT",
-          body: renderCommentBody(finding, model),
+          body: renderCommentBody(finding),
         }
       : {
           path: finding.file,
@@ -351,7 +341,7 @@ const classifyFinding = (
           side: "RIGHT",
           start_line: finding.line,
           start_side: "RIGHT",
-          body: renderCommentBody(finding, model),
+          body: renderCommentBody(finding),
         }
     return { comment }
   }
@@ -363,41 +353,34 @@ const classifyFinding = (
         path: finding.file,
         line: snappedLine,
         side: "RIGHT",
-        body: renderCommentBody(finding, model, finding.line),
+        body: renderCommentBody(finding, snappedLine),
       },
     }
   }
 
-  return { bodyFinding: finding }
+  return { standaloneFinding: finding }
 }
 
-/**
- * Splits findings into inline review comments (anchored to commentable diff
- * lines) and body findings (traced regressions / pre-existing bugs outside
- * the diff — expected output, posted as individual issue comments). GitHub
- * rejects the whole review on one bad anchor, so anything not verifiably
- * anchorable is kept out of the inline batch.
- */
+/** Separates findings GitHub can anchor to the diff from those that must post
+ * as standalone issue comments, so one bad anchor cannot reject the review. */
 export const mapFindingsToReview = ({
   findings,
   commentableByPath,
-  model,
 }: {
-  findings: Finding[]
+  findings: AttributedFinding[]
   commentableByPath: Map<string, CommentableFile>
-  model: string
 }): MappedReview => {
   const mapped = findings.map((finding) =>
-    classifyFinding(finding, commentableByPath, model),
+    classifyFinding(finding, commentableByPath),
   )
 
   const comments = mapped.flatMap((entry) =>
     entry.comment ? [entry.comment] : [],
   )
-  const bodyFindings = mapped.flatMap((entry) =>
-    entry.bodyFinding ? [entry.bodyFinding] : [],
+  const standaloneFindings = mapped.flatMap((entry) =>
+    entry.standaloneFinding ? [entry.standaloneFinding] : [],
   )
-  return { comments, bodyFindings }
+  return { comments, standaloneFindings }
 }
 
 /** Invisible body for the review that carries inline findings — the review
@@ -412,10 +395,7 @@ export const STATUS_ANCHOR = "<!-- umm-actually-status -->"
 /** A beyond-diff finding posted as its own issue comment — a new comment is
  *  a visible event to PR watchers, unlike an in-place status update. Carries
  *  its dedup anchor like any inline comment. */
-export const renderStandaloneFinding = (
-  finding: Finding,
-  model: string,
-): string => {
+export const renderStandaloneFinding = (finding: AttributedFinding): string => {
   return `${findingHeader(finding)}
 
 \`${finding.file}:${finding.line}\` — beyond the diff's line ranges, in code the changes touch or depend on.
@@ -424,7 +404,7 @@ ${finding.description}
 
 **Failure scenario:** ${finding.failure_scenario}${suggestionBlock(finding)}
 
-${attributionLine(model)}
+${attributionLine(finding.modelUsed)}
 
 <!-- umm-actually:${computeAnchorKey(finding)} -->`
 }

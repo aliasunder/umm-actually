@@ -4,19 +4,28 @@ import { makeFinding } from "./make-finding.js"
 
 describe("mergePhaseFindings", () => {
   it("collapses a cross-phase overlap across categories, keeping the higher severity in the earlier position", () => {
-    const correctnessFinding = makeFinding({
-      line: 10,
-      category: "correctness",
-      severity: "medium",
-      title: "Correctness phase",
-    })
-    const subtleBugsFinding = makeFinding({
-      line: 10,
-      category: "subtle_bugs",
-      severity: "high",
-      title: "Subtle bugs phase",
-    })
-    const unrelatedFinding = makeFinding({ line: 40, title: "Unrelated" })
+    const correctnessFinding = {
+      ...makeFinding({
+        line: 10,
+        category: "correctness",
+        severity: "medium",
+        title: "Correctness phase",
+      }),
+      modelUsed: "model/correctness",
+    }
+    const subtleBugsFinding = {
+      ...makeFinding({
+        line: 10,
+        category: "subtle_bugs",
+        severity: "high",
+        title: "Subtle bugs phase",
+      }),
+      modelUsed: "model/subtle-bugs",
+    }
+    const unrelatedFinding = {
+      ...makeFinding({ line: 40, title: "Unrelated" }),
+      modelUsed: "model/correctness",
+    }
 
     const merged = mergePhaseFindings([
       [correctnessFinding, unrelatedFinding],
@@ -30,12 +39,18 @@ describe("mergePhaseFindings", () => {
   })
 
   it("keeps the earlier phase's finding on an equal-severity overlap", () => {
-    const earlierFinding = makeFinding({ line: 10, title: "Earlier phase" })
-    const laterFinding = makeFinding({
-      line: 10,
-      category: "subtle_bugs",
-      title: "Later phase",
-    })
+    const earlierFinding = {
+      ...makeFinding({ line: 10, title: "Earlier phase" }),
+      modelUsed: "model/earlier",
+    }
+    const laterFinding = {
+      ...makeFinding({
+        line: 10,
+        category: "subtle_bugs",
+        title: "Later phase",
+      }),
+      modelUsed: "model/later",
+    }
 
     const merged = mergePhaseFindings([[earlierFinding], [laterFinding]])
 
