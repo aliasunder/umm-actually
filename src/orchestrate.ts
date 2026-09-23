@@ -652,12 +652,25 @@ const runReviewPipeline = async (
       )
     },
   )
+  const changedPathSet = new Set(
+    changedPaths.map((changedPath) => posix.normalize(changedPath)),
+  )
+  // Unchanged docs have no changed-file channel, so give them first claim
+  // on the floor while keeping configured order within each group.
+  const earlyPriorityDocsInReadOrder = [
+    ...priorityDocsNeedingFullCopy.filter(
+      (docPath) => !changedPathSet.has(posix.normalize(docPath)),
+    ),
+    ...priorityDocsNeedingFullCopy.filter((docPath) => {
+      return changedPathSet.has(posix.normalize(docPath))
+    }),
+  ]
   const earlyPriorityDocBudget =
-    priorityDocsNeedingFullCopy.length > 0 ? priorityDocFloorLimit : 0
+    earlyPriorityDocsInReadOrder.length > 0 ? priorityDocFloorLimit : 0
   const earlyPriorityDocsResult =
     earlyPriorityDocBudget > 0
       ? await contextReader.readPriorityDocs({
-          priorityDocs: priorityDocsNeedingFullCopy,
+          priorityDocs: earlyPriorityDocsInReadOrder,
           budgetTokens: earlyPriorityDocBudget,
           excludePaths: [],
         })

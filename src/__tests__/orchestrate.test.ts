@@ -1061,6 +1061,124 @@ describe("orchestrate", () => {
       )
     })
 
+    it("gives unchanged priority docs first use of the floor when a listed doc changed", async () => {
+      const changedDoc: PromptFile = {
+        path: fixtureChangedFile.path,
+        content: "c".repeat(16_000),
+        includedAs: "full",
+      }
+      const unchangedDoc: PromptFile = {
+        path: "docs/reference.md",
+        content: "u".repeat(20_000),
+        includedAs: "full",
+        reason: "priority documentation",
+      }
+      const readPriorityDocsCalls: ReadPriorityDocsParams[] = []
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: [changedDoc.path, unchangedDoc.path] },
+        contextReader: {
+          readPriorityDocs: async (params) => {
+            readPriorityDocsCalls.push(params)
+            const firstPath = first(params.priorityDocs)
+            const selectedDoc =
+              firstPath === unchangedDoc.path ? unchangedDoc : changedDoc
+            const selectedTokens = estimateTokens(selectedDoc.content)
+            if (selectedTokens > params.budgetTokens) {
+              return { files: [], remainingTokens: params.budgetTokens }
+            }
+            return {
+              files: [selectedDoc],
+              remainingTokens: params.budgetTokens - selectedTokens,
+            }
+          },
+          readChangedFiles: async (params) => {
+            const changedWasReadEarly = params.diffOnlyPaths.includes(
+              changedDoc.path,
+            )
+            return {
+              files: [
+                changedWasReadEarly
+                  ? {
+                      path: changedDoc.path,
+                      content: "",
+                      includedAs: "diff-only",
+                    }
+                  : changedDoc,
+              ],
+              remainingTokens: 4_000,
+            }
+          },
+        },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(first(readPriorityDocsCalls).priorityDocs).toEqual([
+        unchangedDoc.path,
+        changedDoc.path,
+      ])
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.changedFiles).toEqual([changedDoc])
+      expect(reviewContext.relatedDocs).toEqual([unchangedDoc])
+      const prompt = buildUserPrompt({
+        ...reviewContext,
+        delimiterNonce: "testnonce123",
+      })
+      expect(prompt.split(changedDoc.content)).toHaveLength(2)
+      expect(prompt.split(unchangedDoc.content)).toHaveLength(2)
+    })
+
+    it("renders an early-read changed priority doc only once", async () => {
+      const changedDoc: PromptFile = {
+        path: fixtureChangedFile.path,
+        content: "export const reviewed = true",
+        includedAs: "full",
+        reason: "priority documentation",
+      }
+      const readChangedFilesCalls: ReadChangedFilesParams[] = []
+      const stubs = makeOrchestrateDeps({
+        config: { priorityDocs: [changedDoc.path] },
+        contextReader: {
+          readPriorityDocs: async (params) => ({
+            files: [changedDoc],
+            remainingTokens:
+              params.budgetTokens - estimateTokens(changedDoc.content),
+          }),
+          readChangedFiles: async (params) => {
+            readChangedFilesCalls.push(params)
+            const isDiffOnly = params.diffOnlyPaths.includes(changedDoc.path)
+            return {
+              files: [
+                {
+                  path: changedDoc.path,
+                  content: isDiffOnly ? "" : changedDoc.content,
+                  includedAs: isDiffOnly ? "diff-only" : "full",
+                },
+              ],
+              remainingTokens: params.budgetTokens,
+            }
+          },
+        },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(first(readChangedFilesCalls).diffOnlyPaths).toEqual([
+        "AGENTS.md",
+        changedDoc.path,
+      ])
+      const reviewContext = first(stubs.generateFindingsCalls)
+      expect(reviewContext.changedFiles).toEqual([
+        { path: changedDoc.path, content: "", includedAs: "diff-only" },
+      ])
+      expect(reviewContext.relatedDocs).toEqual([changedDoc])
+      const prompt = buildUserPrompt({
+        ...reviewContext,
+        delimiterNonce: "testnonce123",
+      })
+      expect(prompt.split(changedDoc.content)).toHaveLength(2)
+    })
+
     it("does not reserve or read a priority doc already fully rendered as conventions", async () => {
       const stubs = makeOrchestrateDeps({
         config: { priorityDocs: ["AGENTS.md"] },

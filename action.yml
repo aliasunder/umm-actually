@@ -59,11 +59,11 @@ inputs:
   priority_docs:
     description: >-
       Comma-separated repo-relative paths prioritized for review context,
-      attempted as whole files in configured order. Up to 10% of the context
-      budget is used before full changed-file reads; unused floor capacity
-      flows back to changed files. Docs that do not fit the floor are
-      attempted again after changed and related files, using any remaining
-      budget.
+      attempted as whole files. The initial 10% context-budget slice tries
+      unchanged docs first, then changed docs, in configured order within
+      each group. Unused floor capacity flows back to changed files. Docs
+      that do not fit the floor are attempted again after changed and
+      related files, using any remaining budget.
       Docs already present in full from other context channels are not
       re-read. exclude_paths only controls workspace scans and never
       suppresses priority docs. A changed priority doc excluded by
