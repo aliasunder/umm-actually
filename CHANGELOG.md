@@ -7,6 +7,23 @@
 
 
 
+
+## [0.4.8] — 2026-09-24
+
+### Bug Fixes
+
+- **context:** Reserve priority-doc budget before changed files (#101)
+- **review:** Attribute findings to their routed model (#100)
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.7
+
+### Maintenance
+
+- **deps:** Bump the production group with 2 updates (#97)
+- **deps-dev:** Bump the development group with 3 updates (#98)
+
 ## [0.4.7] — 2026-09-19
 
 ### Features
