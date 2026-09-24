@@ -117,8 +117,12 @@ const PRIOR_COMMENT_CAP = 30
 
 /** Strips the trailing dedup anchor from a comment body so the model
  *  doesn't see the dedup infrastructure in the prior-comments section. */
-const stripAnchorComment = (body: string): string =>
-  body.replace(/\n*<!-- umm-actually:.+? -->\s*$/, "")
+const stripAnchorComment = (body: string): string => {
+  /** The hidden `<!-- umm-actually:… -->` anchor at the end of a comment,
+   *  plus the newlines before it. */
+  const TRAILING_ANCHOR_PATTERN = /\n*<!-- umm-actually:.+? -->\s*$/
+  return body.replace(TRAILING_ANCHOR_PATTERN, "")
+}
 
 /** detail carries multi-line context (e.g. the excluded-file list) that
  *  belongs in the review body but not in the one-line check-run title. */
@@ -263,8 +267,8 @@ const SKIPPED_RESULT_BASE: Omit<OrchestrateResult, "reviewUrl" | "skippedReason"
 
 type CheckRunHandle = { checkRunId: number } | null
 
-/** Best-effort: a token without `checks: write` (the permission is optional
- *  for consumers) must degrade to an unbranded run, never fail the review. */
+/** A token without `checks: write` (the permission is optional for consumers)
+ *  degrades to an unbranded run and never fails the review. */
 const createCheckRunSafely = async (
   { githubClient, headSha }: { githubClient: GithubClient; headSha: string },
   logger: Logger,
@@ -422,8 +426,9 @@ const filterPhaseFindings = (
     findings: nonFindingFiltered,
     knownPaths,
   })
-  // Per-drop warn on purpose: each one is a model-quality event, not loop
-  // chatter, and the title is omitted because it may be garbage
+
+  // Each drop warns on its own because it is a model-quality event, not loop
+  // chatter. The title is omitted because it may be garbage.
   for (const finding of droppedAsUnknownFile) {
     logger.warn("dropping finding: file not in prompt context", {
       phase: outcome.phase.id,
@@ -593,10 +598,7 @@ const runReviewPipeline = async (
       // parse-diff: from is undefined for binary files, "/dev/null" for
       // added files — neither is a pre-rename path worth tracing
       const isRename =
-        toPath !== null &&
-        fromPath !== undefined &&
-        fromPath !== "/dev/null" &&
-        fromPath !== file.to
+        toPath !== null && fromPath && fromPath !== "/dev/null" && fromPath !== file.to
       return isRename ? [toPath, fromPath] : [toPath]
     })
     .filter((path) => path !== null)
@@ -1007,8 +1009,8 @@ const runReviewPipeline = async (
     isFirstRun: !issueState.statusCommentExists,
     postedCount,
     unpostedCount: selected.length - postedCount,
-    // Coalesced: fail-open reposts can leave two anchors for one finding,
-    // and the tracked count reports findings, not comment anchors.
+    // Anchors are coalesced because fail-open reposts can leave two anchors for
+    // one finding, and the tracked count reports findings, not comment anchors.
     totalCount: coalesceAnchors(existingAnchors).length + postedCount,
     droppedByCap,
     model: modelUsed,
