@@ -640,10 +640,16 @@ const runReviewPipeline = async (
     conventionsRenderInFull(conventions, config.conventionsBudgetTokens)
 
   const fileBudgetTokens = config.contextBudgetTokens - diffTokens
+
+  // The floor is a share of the whole context budget, but never more than the
+  // budget the diff leaves over.
   const priorityDocFloorLimit = Math.min(
     Math.floor(config.contextBudgetTokens * PRIORITY_DOCS_BUDGET_FLOOR_RATIO),
     fileBudgetTokens,
   )
+
+  // A conventions file whose section already carries it whole needs no second
+  // full copy from the priority-doc channel.
   const priorityDocsNeedingFullCopy = reviewablePriorityDocs.filter(
     (docPath) => {
       return !(
@@ -652,11 +658,12 @@ const runReviewPipeline = async (
       )
     },
   )
+
+  // Unchanged docs have no changed-file channel, so give them first claim
+  // on the floor while keeping configured order within each group.
   const changedPathSet = new Set(
     changedPaths.map((changedPath) => posix.normalize(changedPath)),
   )
-  // Unchanged docs have no changed-file channel, so give them first claim
-  // on the floor while keeping configured order within each group.
   const earlyPriorityDocsInReadOrder = [
     ...priorityDocsNeedingFullCopy.filter(
       (docPath) => !changedPathSet.has(posix.normalize(docPath)),
@@ -665,6 +672,9 @@ const runReviewPipeline = async (
       return changedPathSet.has(posix.normalize(docPath))
     }),
   ]
+
+  // The early read runs before changed files can spend the budget. Only the
+  // tokens these docs actually use come out of the changed-file budget.
   const earlyPriorityDocBudget =
     earlyPriorityDocsInReadOrder.length > 0 ? priorityDocFloorLimit : 0
   const earlyPriorityDocsResult =
@@ -678,6 +688,9 @@ const runReviewPipeline = async (
   const earlyPriorityDocFiles = earlyPriorityDocsResult.files
   const earlyPriorityDocTokens =
     earlyPriorityDocBudget - earlyPriorityDocsResult.remainingTokens
+
+  // A changed doc already read in full above is sent diff-only here, so its
+  // full text reaches the prompt once.
   const { files: changedFiles, remainingTokens } =
     await contextReader.readChangedFiles({
       changedPaths,
@@ -730,9 +743,9 @@ const runReviewPipeline = async (
 
   // Every path whose full text a higher-priority channel already sent.
   // Diff-only changed files are excluded — only diff hunks reached the
-  // prompt, so the priority-doc channel should still attempt a full read. The conventions
-  // file counts only when its section carries the whole file — when that
-  // section truncates, its full text has NOT been sent.
+  // prompt, so the priority-doc channel should still attempt a full read.
+  // The conventions file counts only when its section carries the whole
+  // file — when that section truncates, its full text has NOT been sent.
   const priorityDocsInContext = [
     ...changedFiles
       .filter((file) => file.includedAs === "full")
@@ -741,6 +754,8 @@ const runReviewPipeline = async (
     ...(conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []),
   ]
 
+  // The late read retries any doc the early read couldn't fit, using whatever
+  // budget changed and related files left.
   const latePriorityDocsResult = needsPriorityDocFloor
     ? await contextReader.readPriorityDocs({
         priorityDocs: reviewablePriorityDocs,
@@ -751,6 +766,9 @@ const runReviewPipeline = async (
         ],
       })
     : { files: [], remainingTokens: docBudgetTokens }
+
+  // The two reads return docs in read order (unchanged docs first), so sort
+  // the merged list back into the order the priority_docs input lists them.
   const priorityDocPathsInOrder = reviewablePriorityDocs.map((docPath) => {
     return posix.normalize(docPath)
   })
