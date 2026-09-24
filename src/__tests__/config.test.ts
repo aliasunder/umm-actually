@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-  DEFAULT_DIFF_EXCLUDE_PATTERNS,
-  parseConfig,
-  type RawInputs,
-} from "../config.js"
+import { DEFAULT_DIFF_EXCLUDE_PATTERNS, parseConfig, type RawInputs } from "../config.js"
 
 const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   githubToken: "ghs_testtoken",
@@ -83,31 +79,20 @@ describe("parseConfig", () => {
     })
   })
 
-  it.each(["1", "2400", "2147483"])(
-    "accepts review_timeout_seconds %s",
-    (value) => {
-      expect(
-        parseConfig(makeRawInputs({ reviewTimeoutSeconds: value }))
-          .reviewTimeoutSeconds,
-      ).toBe(Number(value))
-    },
-  )
+  it.each(["1", "2400", "2147483"])("accepts review_timeout_seconds %s", (value) => {
+    expect(parseConfig(makeRawInputs({ reviewTimeoutSeconds: value })).reviewTimeoutSeconds).toBe(
+      Number(value),
+    )
+  })
 
-  it.each(["0", "-1", "1.5", "never"])(
-    "rejects invalid review_timeout_seconds %s",
-    (value) => {
-      expect(() =>
-        parseConfig(makeRawInputs({ reviewTimeoutSeconds: value })),
-      ).toThrow(
-        `invalid action inputs — reviewTimeoutSeconds: "${value}" is not a positive integer`,
-      )
-    },
-  )
+  it.each(["0", "-1", "1.5", "never"])("rejects invalid review_timeout_seconds %s", (value) => {
+    expect(() => parseConfig(makeRawInputs({ reviewTimeoutSeconds: value }))).toThrow(
+      `invalid action inputs — reviewTimeoutSeconds: "${value}" is not a positive integer`,
+    )
+  })
 
   it("rejects a review timeout beyond the timer limit", () => {
-    expect(() =>
-      parseConfig(makeRawInputs({ reviewTimeoutSeconds: "2147484" })),
-    ).toThrow(
+    expect(() => parseConfig(makeRawInputs({ reviewTimeoutSeconds: "2147484" }))).toThrow(
       'invalid action inputs — reviewTimeoutSeconds: "2147484" exceeds the 2147483-second cap (2^31−1 ms timer limit)',
     )
   })
@@ -166,31 +151,27 @@ describe("parseConfig", () => {
   })
 
   it("rejects a zero request_timeout_seconds", () => {
-    expect(() =>
-      parseConfig(makeRawInputs({ requestTimeoutSeconds: "0" })),
-    ).toThrow('requestTimeoutSeconds: "0" is not a positive integer')
+    expect(() => parseConfig(makeRawInputs({ requestTimeoutSeconds: "0" }))).toThrow(
+      'requestTimeoutSeconds: "0" is not a positive integer',
+    )
   })
 
   it("accepts a request_timeout_seconds at the timer-cap ceiling", () => {
-    const config = parseConfig(
-      makeRawInputs({ requestTimeoutSeconds: "2147483" }),
-    )
+    const config = parseConfig(makeRawInputs({ requestTimeoutSeconds: "2147483" }))
 
     expect(config.requestTimeoutSeconds).toBe(2147483)
   })
 
   it("rejects a request_timeout_seconds whose milliseconds exceed the timer cap", () => {
-    expect(() =>
-      parseConfig(makeRawInputs({ requestTimeoutSeconds: "2147484" })),
-    ).toThrow(
+    expect(() => parseConfig(makeRawInputs({ requestTimeoutSeconds: "2147484" }))).toThrow(
       'requestTimeoutSeconds: "2147484" exceeds the 2147483-second cap (2^31−1 ms timer limit)',
     )
   })
 
   it("rejects an empty context_budget_tokens", () => {
-    expect(() =>
-      parseConfig(makeRawInputs({ contextBudgetTokens: "" })),
-    ).toThrow('contextBudgetTokens: "" is not a positive integer')
+    expect(() => parseConfig(makeRawInputs({ contextBudgetTokens: "" }))).toThrow(
+      'contextBudgetTokens: "" is not a positive integer',
+    )
   })
 
   it("passes a false trace_related_files through unchanged", () => {
@@ -230,11 +211,7 @@ describe("parseConfig", () => {
       makeRawInputs({ priorityDocs: "README.md, CHANGELOG.md, docs/guide.md" }),
     )
 
-    expect(config.priorityDocs).toEqual([
-      "README.md",
-      "CHANGELOG.md",
-      "docs/guide.md",
-    ])
+    expect(config.priorityDocs).toEqual(["README.md", "CHANGELOG.md", "docs/guide.md"])
   })
 
   it("parses empty priority_docs as empty array", () => {
@@ -244,25 +221,19 @@ describe("parseConfig", () => {
   })
 
   it("trims whitespace and filters empty segments from priority_docs", () => {
-    const config = parseConfig(
-      makeRawInputs({ priorityDocs: "README.md, , CHANGELOG.md," }),
-    )
+    const config = parseConfig(makeRawInputs({ priorityDocs: "README.md, , CHANGELOG.md," }))
 
     expect(config.priorityDocs).toEqual(["README.md", "CHANGELOG.md"])
   })
 
   it("normalizes leading slashes and ./ prefixes in priority_docs entries", () => {
-    const config = parseConfig(
-      makeRawInputs({ priorityDocs: "/README.md, ./docs/guide.md" }),
-    )
+    const config = parseConfig(makeRawInputs({ priorityDocs: "/README.md, ./docs/guide.md" }))
 
     expect(config.priorityDocs).toEqual(["README.md", "docs/guide.md"])
   })
 
   it("parses comma-separated exclude_paths into an array", () => {
-    const config = parseConfig(
-      makeRawInputs({ excludePaths: "evals, fixtures, __snapshots__" }),
-    )
+    const config = parseConfig(makeRawInputs({ excludePaths: "evals, fixtures, __snapshots__" }))
 
     expect(config.excludePaths).toEqual(["evals", "fixtures", "__snapshots__"])
   })
@@ -274,17 +245,13 @@ describe("parseConfig", () => {
   })
 
   it("trims whitespace and filters empty segments from exclude_paths", () => {
-    const config = parseConfig(
-      makeRawInputs({ excludePaths: "evals, , __snapshots__," }),
-    )
+    const config = parseConfig(makeRawInputs({ excludePaths: "evals, , __snapshots__," }))
 
     expect(config.excludePaths).toEqual(["evals", "__snapshots__"])
   })
 
   it("strips trailing slashes from exclude_paths entries", () => {
-    const config = parseConfig(
-      makeRawInputs({ excludePaths: "evals/, fixtures//" }),
-    )
+    const config = parseConfig(makeRawInputs({ excludePaths: "evals/, fixtures//" }))
 
     expect(config.excludePaths).toEqual(["evals", "fixtures"])
   })
@@ -298,19 +265,12 @@ describe("parseConfig", () => {
   })
 
   it("extends the default diff_exclude_paths list with supplied patterns", () => {
-    const config = parseConfig(
-      makeRawInputs({ diffExcludePaths: "evals/**, **/*.snap" }),
-    )
+    const config = parseConfig(makeRawInputs({ diffExcludePaths: "evals/**, **/*.snap" }))
 
-    expect(config.diffExcludePaths.diffExcludePathPatterns).toEqual([
-      "evals/**",
-      "**/*.snap",
-    ])
+    expect(config.diffExcludePaths.diffExcludePathPatterns).toEqual(["evals/**", "**/*.snap"])
     // The behavioral claim is tier preservation — supplied patterns must not
     // replace the built-in list, so identity with the constant is the spec
-    expect(config.diffExcludePaths.defaultPatterns).toEqual(
-      DEFAULT_DIFF_EXCLUDE_PATTERNS,
-    )
+    expect(config.diffExcludePaths.defaultPatterns).toEqual(DEFAULT_DIFF_EXCLUDE_PATTERNS)
   })
 
   it("disables the default list with a leading none", () => {
@@ -323,9 +283,7 @@ describe("parseConfig", () => {
   })
 
   it("replaces the default list via none followed by patterns", () => {
-    const config = parseConfig(
-      makeRawInputs({ diffExcludePaths: "none, evals/**" }),
-    )
+    const config = parseConfig(makeRawInputs({ diffExcludePaths: "none, evals/**" }))
 
     expect(config.diffExcludePaths).toEqual({
       defaultPatterns: [],
@@ -334,9 +292,7 @@ describe("parseConfig", () => {
   })
 
   it("rejects a non-leading none in diff_exclude_paths", () => {
-    expect(() =>
-      parseConfig(makeRawInputs({ diffExcludePaths: "evals/**, none" })),
-    ).toThrow(
+    expect(() => parseConfig(makeRawInputs({ diffExcludePaths: "evals/**, none" }))).toThrow(
       'diffExcludePaths: "none" disables the default list only in leading position — move it first or remove it',
     )
   })
@@ -354,17 +310,13 @@ describe("parseConfig", () => {
   })
 
   it("rejects a diff_exclude_paths pattern over the wildcard cap", () => {
-    expect(() =>
-      parseConfig(makeRawInputs({ diffExcludePaths: "*a*a*a*b" })),
-    ).toThrow(
+    expect(() => parseConfig(makeRawInputs({ diffExcludePaths: "*a*a*a*b" }))).toThrow(
       'diffExcludePaths: pattern(s) exceed the wildcard cap (at most 2 "*" per path segment; "**" segments exempt): *a*a*a*b',
     )
   })
 
   it("passes a false respect_linguist_generated through unchanged", () => {
-    const config = parseConfig(
-      makeRawInputs({ respectLinguistGenerated: false }),
-    )
+    const config = parseConfig(makeRawInputs({ respectLinguistGenerated: false }))
 
     expect(config.respectLinguistGenerated).toBe(false)
   })
@@ -382,8 +334,8 @@ describe("parseConfig", () => {
   })
 
   it("aggregates multiple input errors into one message", () => {
-    expect(() =>
-      parseConfig(makeRawInputs({ githubToken: "", maxFindings: "-1" })),
-    ).toThrow(/githubToken: github_token is required.*maxFindings/)
+    expect(() => parseConfig(makeRawInputs({ githubToken: "", maxFindings: "-1" }))).toThrow(
+      /githubToken: github_token is required.*maxFindings/,
+    )
   })
 })

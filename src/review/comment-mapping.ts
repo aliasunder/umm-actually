@@ -81,9 +81,8 @@ export type AnchorSource = {
 }
 
 /** Deterministic dedup key for a finding — file + category + line. */
-export const computeAnchorKey = (
-  finding: Pick<Finding, "file" | "category" | "line">,
-): string => `${finding.file}:${finding.category}:${finding.line}`
+export const computeAnchorKey = (finding: Pick<Finding, "file" | "category" | "line">): string =>
+  `${finding.file}:${finding.category}:${finding.line}`
 
 /** Splits a `file:category:line` key from the right (greedy `.+` captures
  *  all colons except the final two): the file segment may itself contain
@@ -95,8 +94,10 @@ const ANCHOR_KEY_PATTERN = /^(?<file>.+):(?<category>[^:]+):(?<line>[1-9]\d*)$/
  *  Returns null for bodies without an anchor and for old-format keys. */
 const parseAnchorKey = (body: string): AnchorEntry | null => {
   const key = ANCHOR_PATTERN.exec(body)?.[1]
+
   if (!key) return null
   const segments = ANCHOR_KEY_PATTERN.exec(key)?.groups
+
   if (!segments?.file || !segments.category || !segments.line) return null
   return {
     file: segments.file,
@@ -115,6 +116,7 @@ const parseAnchorKey = (body: string): AnchorEntry | null => {
 export const extractAnchors = (comments: AnchorSource[]): AnchorEntry[] => {
   return comments.flatMap((comment) => {
     const anchor = parseAnchorKey(comment.body)
+
     if (anchor === null) return []
     const line = comment.line ?? comment.originalLine ?? anchor.line
     const titleMatch = TITLE_PATTERN.exec(comment.body)?.[1]
@@ -147,8 +149,7 @@ const isContentDuplicate = ({
 }): boolean => {
   if (!finding.title || !anchor.title) return false
   if (anchor.file !== finding.file) return false
-  if (Math.abs(anchor.line - finding.line) > CONTENT_LINE_PROXIMITY)
-    return false
+  if (Math.abs(anchor.line - finding.line) > CONTENT_LINE_PROXIMITY) return false
   return (
     titleSimilarity({
       leftTokens: normalizeTitle(finding.title),
@@ -171,6 +172,7 @@ const isTitleDuplicate = ({
   if (!finding.title || !anchor.title) return false
   const findingTokens = normalizeTitle(finding.title)
   const anchorTokens = normalizeTitle(anchor.title)
+
   if (findingTokens.length < MIN_TITLE_TOKENS) return false
   if (anchorTokens.length < MIN_TITLE_TOKENS) return false
   return (
@@ -203,10 +205,8 @@ export const classifyDuplicate = (
   return null
 }
 
-export const isDuplicateFinding = (
-  finding: AnchorEntry,
-  anchors: AnchorEntry[],
-): boolean => classifyDuplicate(finding, anchors) !== null
+export const isDuplicateFinding = (finding: AnchorEntry, anchors: AnchorEntry[]): boolean =>
+  classifyDuplicate(finding, anchors) !== null
 
 /** Collapses positionally overlapping anchors for the tracked-findings
  *  count. Uses positional dedup only — content similarity must not
@@ -217,6 +217,7 @@ export const coalesceAnchors = (anchors: AnchorEntry[]): AnchorEntry[] => {
     const positionalMatch = kept.some((existing) => {
       return isPositionalDuplicate({ finding: anchor, anchor: existing })
     })
+
     if (positionalMatch) return kept
     return [...kept, anchor]
   }, [])
@@ -225,8 +226,7 @@ export const coalesceAnchors = (anchors: AnchorEntry[]): AnchorEntry[] => {
 /** Trailing byline on every bot comment — names the model so a reader can
  *  tell which model produced which comment when a PR accumulates runs
  *  across model or fallback changes. */
-const attributionLine = (model: string): string =>
-  `---\n*umm-actually · ${model}*`
+const attributionLine = (model: string): string => `---\n*umm-actually · ${model}*`
 
 /** Title-first header: bold title, then one plain-language metadata line.
  *  Every axis names itself ("Medium severity", "high confidence") because
@@ -252,10 +252,7 @@ const suggestionBlock = (finding: Finding): string => {
   return `\n\n<details>\n<summary>Suggested fix</summary>\n\n${fence}diff\n${finding.suggestion}\n${fence}\n\n</details>`
 }
 
-const renderCommentBody = (
-  finding: AttributedFinding,
-  snappedLine?: number,
-): string => {
+const renderCommentBody = (finding: AttributedFinding, snappedLine?: number): string => {
   const snapNote = snappedLine
     ? `\n\n_Reported at line ${finding.line} (outside the diff); anchored at nearby changed line ${snappedLine}._`
     : ""
@@ -274,37 +271,31 @@ const nearestCommentableLine = (
   commentable: CommentableFile,
 ): number | undefined => {
   const withinSnapDistanceOfHunk = commentable.hunkRanges.some(
-    (range) =>
-      targetLine >= range.start - SNAP_DISTANCE &&
-      targetLine <= range.end + SNAP_DISTANCE,
+    (range) => targetLine >= range.start - SNAP_DISTANCE && targetLine <= range.end + SNAP_DISTANCE,
   )
+
   if (!withinSnapDistanceOfHunk) return undefined
 
   const candidateLines = [...commentable.rightLines]
+
   if (candidateLines.length === 0) return undefined
   const nearestLine = candidateLines.reduce((nearest, candidate) =>
-    Math.abs(candidate - targetLine) < Math.abs(nearest - targetLine)
-      ? candidate
-      : nearest,
+    Math.abs(candidate - targetLine) < Math.abs(nearest - targetLine) ? candidate : nearest,
   )
   // Hunk proximity alone isn't enough: a nearby zero-newLines hunk (pure
   // deletion) has no rightLines, so the nearest candidate can come from a
   // distant hunk — bound the snap itself to SNAP_DISTANCE
-  return Math.abs(nearestLine - targetLine) <= SNAP_DISTANCE
-    ? nearestLine
-    : undefined
+  return Math.abs(nearestLine - targetLine) <= SNAP_DISTANCE ? nearestLine : undefined
 }
 
 /**
  * A multi-line comment is only valid when both ends are commentable and fall
  * inside the same hunk; otherwise degrade to a single-line comment at `line`.
  */
-const multiLineEnd = (
-  finding: Finding,
-  commentable: CommentableFile,
-): number | undefined => {
+const multiLineEnd = (finding: Finding, commentable: CommentableFile): number | undefined => {
   // Local capture keeps the null-narrowing visible inside the .some() closure
   const endLine = finding.end_line
+
   if (endLine === null || endLine === finding.line) return undefined
   if (endLine < finding.line) return undefined
   if (!commentable.rightLines.has(endLine)) return undefined
@@ -323,6 +314,7 @@ const classifyFinding = (
   commentableByPath: Map<string, CommentableFile>,
 ): { comment?: ReviewComment; standaloneFinding?: AttributedFinding } => {
   const commentable = commentableByPath.get(finding.file)
+
   if (!commentable) return { standaloneFinding: finding }
 
   if (commentable.rightLines.has(finding.line)) {
@@ -347,6 +339,7 @@ const classifyFinding = (
   }
 
   const snappedLine = nearestCommentableLine(finding.line, commentable)
+
   if (snappedLine) {
     return {
       comment: {
@@ -370,13 +363,9 @@ export const mapFindingsToReview = ({
   findings: AttributedFinding[]
   commentableByPath: Map<string, CommentableFile>
 }): MappedReview => {
-  const mapped = findings.map((finding) =>
-    classifyFinding(finding, commentableByPath),
-  )
+  const mapped = findings.map((finding) => classifyFinding(finding, commentableByPath))
 
-  const comments = mapped.flatMap((entry) =>
-    entry.comment ? [entry.comment] : [],
-  )
+  const comments = mapped.flatMap((entry) => (entry.comment ? [entry.comment] : []))
   const standaloneFindings = mapped.flatMap((entry) =>
     entry.standaloneFinding ? [entry.standaloneFinding] : [],
   )
@@ -490,9 +479,7 @@ export const buildStatusComment = ({
   const incompleteNote = [
     buildIncompleteNote(incompletePhases),
     ...(reviewDeadlineExceeded
-      ? [
-          "_The review deadline expired; results from completed phases are shown._",
-        ]
+      ? ["_The review deadline expired; results from completed phases are shown._"]
       : []),
   ]
     .filter(Boolean)

@@ -42,9 +42,7 @@ export class AllPhasesFailedError extends Error {
   readonly outcomes: PhaseOutcome[]
 
   constructor(outcomes: PhaseOutcome[]) {
-    super(
-      `every review phase failed: ${outcomes.map(describeFailure).join("; ")}`,
-    )
+    super(`every review phase failed: ${outcomes.map(describeFailure).join("; ")}`)
     this.name = "AllPhasesFailedError"
     this.outcomes = outcomes
   }
@@ -53,12 +51,7 @@ export class AllPhasesFailedError extends Error {
 /** The client marks an auth/credit failure as aborted: the key is bad for
  *  every model, so no later stage can succeed either. */
 const isAbortedRequest = (error: unknown): boolean => {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "aborted" in error &&
-    error.aborted === true
-  )
+  return typeof error === "object" && error !== null && "aborted" in error && error.aborted === true
 }
 
 /** Fires one stage's phases concurrently. Each phase is tried
@@ -112,9 +105,7 @@ const notAttempted = (phase: ReviewPhase): PhaseOutcome => {
   return {
     phase,
     status: "failed",
-    error: new Error(
-      "not attempted: an earlier phase aborted on an auth/credit error",
-    ),
+    error: new Error("not attempted: an earlier phase aborted on an auth/credit error"),
   }
 }
 
@@ -159,12 +150,9 @@ export const runStages = async (
   for (const [stageIndex, stage] of stages.entries()) {
     if (remainingReviewMs() <= 0) {
       const skippedPhases = stages.slice(stageIndex).flat()
-      logger.warn(
-        "skipping remaining review stages after the review deadline",
-        {
-          skippedPhases: skippedPhases.map((phase) => phase.id),
-        },
-      )
+      logger.warn("skipping remaining review stages after the review deadline", {
+        skippedPhases: skippedPhases.map((phase) => phase.id),
+      })
       outcomes = [
         ...outcomes,
         ...skippedPhases.map((phase): PhaseOutcome => ({
@@ -183,26 +171,22 @@ export const runStages = async (
     outcomes = [...outcomes, ...stageOutcomes]
 
     const aborted = stageOutcomes.some(
-      (outcome) =>
-        outcome.status === "failed" && isAbortedRequest(outcome.error),
+      (outcome) => outcome.status === "failed" && isAbortedRequest(outcome.error),
     )
     const remainingStages = stages.slice(stageIndex + 1)
+
     if (aborted && remainingStages.length > 0) {
       const skippedPhases = remainingStages.flat()
-      logger.warn(
-        "skipping remaining review stages after an auth/credit abort",
-        {
-          skippedPhases: skippedPhases.map((phase) => phase.id),
-        },
-      )
+      logger.warn("skipping remaining review stages after an auth/credit abort", {
+        skippedPhases: skippedPhases.map((phase) => phase.id),
+      })
       outcomes = [...outcomes, ...skippedPhases.map(notAttempted)]
       break
     }
   }
 
-  const anyCompleted = outcomes.some(
-    (outcome) => outcome.status === "completed",
-  )
+  const anyCompleted = outcomes.some((outcome) => outcome.status === "completed")
+
   if (anyCompleted) return outcomes
   throw new AllPhasesFailedError(outcomes)
 }

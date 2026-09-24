@@ -371,18 +371,10 @@ export const SUBTLE_BUGS_PHASE: ReviewPhase = {
 export const resolveStages = (phasesInput: string): ReviewStage[] => {
   if (phasesInput === "combined") return [[COMBINED_PHASE]]
   if (phasesInput === "parallel") {
-    return [
-      [CORRECTNESS_SECURITY_PHASE, CONVENTIONS_TESTS_PHASE, SUBTLE_BUGS_PHASE],
-    ]
+    return [[CORRECTNESS_SECURITY_PHASE, CONVENTIONS_TESTS_PHASE, SUBTLE_BUGS_PHASE]]
   }
   if (phasesInput === "sequential") {
-    return [
-      [CORRECTNESS_SECURITY_PHASE],
-      [CONVENTIONS_TESTS_PHASE],
-      [SUBTLE_BUGS_PHASE],
-    ]
+    return [[CORRECTNESS_SECURITY_PHASE], [CONVENTIONS_TESTS_PHASE], [SUBTLE_BUGS_PHASE]]
   }
-  throw new Error(
-    `unknown phases value "${phasesInput}" — valid: combined | parallel | sequential`,
-  )
+  throw new Error(`unknown phases value "${phasesInput}" — valid: combined | parallel | sequential`)
 }

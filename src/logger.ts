@@ -21,14 +21,11 @@ const LEVELS: Record<LogLevel, number> = {
   error: 3,
 }
 
-const isLogLevel = (value: string): value is LogLevel =>
-  Object.hasOwn(LEVELS, value)
+const isLogLevel = (value: string): value is LogLevel => Object.hasOwn(LEVELS, value)
 
 /** An unrecognized LOG_LEVEL degrades to "info" rather than throwing — a
  *  typo in workflow env must not break the action. */
-const resolveThreshold = (
-  envRecord: Record<string, string | undefined>,
-): number => {
+const resolveThreshold = (envRecord: Record<string, string | undefined>): number => {
   const configuredLevel = envVar
     .from(envRecord)
     .get("LOG_LEVEL")
@@ -53,6 +50,7 @@ const getCallerSource = (): string => {
   if (!capturedStack) return "unknown"
   // V8 stack: [0] getCallerSource → [1] emit → [2] debug/info/warn/error → [3] actual caller
   const frame = capturedStack[3]
+
   if (!frame) return "unknown"
   const file = frame.getFileName()?.split("/").pop() ?? "unknown"
   return `${file}:${frame.getLineNumber()}`
@@ -89,21 +87,18 @@ const resolveLazyValue = (value: unknown): unknown => {
 
 /** Resolves function-valued props at emit time — lets a child logger
  *  carry context that doesn't exist yet at child creation. */
-const resolveLazyProps = (
-  props: Record<string, unknown>,
-): Record<string, unknown> => {
-  const resolvedEntries = Object.entries(props).map(
-    ([key, value]): [string, unknown] => [key, resolveLazyValue(value)],
-  )
+const resolveLazyProps = (props: Record<string, unknown>): Record<string, unknown> => {
+  const resolvedEntries = Object.entries(props).map(([key, value]): [string, unknown] => [
+    key,
+    resolveLazyValue(value),
+  ])
   return Object.fromEntries(resolvedEntries)
 }
 
 /** `[ErrorName]: message` for log fields and user-facing summaries; a thrown
  *  non-Error value is stringified. */
 export const describeError = (error: unknown): string => {
-  return error instanceof Error
-    ? `[${error.name}]: ${error.message}`
-    : String(error)
+  return error instanceof Error ? `[${error.name}]: ${error.message}` : String(error)
 }
 
 export const createLogger = (
@@ -117,11 +112,7 @@ export const createLogger = (
   const baseProps = options?.props ?? {}
   const threshold = resolveThreshold(options?.env ?? processEnv)
 
-  const emit = (
-    level: LogLevel,
-    message: string,
-    data?: Record<string, unknown>,
-  ): void => {
+  const emit = (level: LogLevel, message: string, data?: Record<string, unknown>): void => {
     if (LEVELS[level] < threshold) return
 
     // Capture source location for info/warn/error (skip debug to avoid overhead)

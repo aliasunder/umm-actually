@@ -19,15 +19,11 @@ describe("normalizeWorkspacePath", () => {
   })
 
   it("collapses repeated separators", () => {
-    expect(normalizeWorkspacePath("src//review///prompt.ts")).toBe(
-      "src/review/prompt.ts",
-    )
+    expect(normalizeWorkspacePath("src//review///prompt.ts")).toBe("src/review/prompt.ts")
   })
 
   it("resolves redundant segments", () => {
-    expect(normalizeWorkspacePath("src/../src/./greeter.ts")).toBe(
-      "src/greeter.ts",
-    )
+    expect(normalizeWorkspacePath("src/../src/./greeter.ts")).toBe("src/greeter.ts")
   })
 
   it("trims surrounding whitespace", () => {

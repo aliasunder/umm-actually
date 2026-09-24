@@ -4,16 +4,10 @@ import { createTestLogger } from "../../__tests__/test-logger.js"
 import { resolvePullRequestEvent } from "../event.js"
 
 const pullRequestPayload: unknown = JSON.parse(
-  readFileSync(
-    new URL("../../../fixtures/pull_request.opened.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL("../../../fixtures/pull_request.opened.json", import.meta.url), "utf8"),
 )
 const issueCommentPayload: unknown = JSON.parse(
-  readFileSync(
-    new URL("../../../fixtures/issue_comment.review.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL("../../../fixtures/issue_comment.review.json", import.meta.url), "utf8"),
 )
 
 describe("resolvePullRequestEvent", () => {

@@ -70,8 +70,7 @@ describe("filterNonFindings", () => {
 
   it("keeps a finding that mentions 'by design' as a qualifier", () => {
     const finding = makeFinding({
-      failure_scenario:
-        "The function returns null by design, but the caller never null-checks.",
+      failure_scenario: "The function returns null by design, but the caller never null-checks.",
     })
 
     const result = filterNonFindings([finding])
@@ -81,8 +80,7 @@ describe("filterNonFindings", () => {
 
   it("keeps a finding that mentions 'this is correct' as a qualifier", () => {
     const finding = makeFinding({
-      failure_scenario:
-        "This is correct for ASCII but breaks on multi-byte UTF-8.",
+      failure_scenario: "This is correct for ASCII but breaks on multi-byte UTF-8.",
     })
 
     const result = filterNonFindings([finding])
@@ -104,13 +102,11 @@ describe("filterNonFindings", () => {
     const findings = [
       makeFinding({
         line: 1,
-        failure_scenario:
-          'register(" ", "value") succeeds and the entry is orphaned.',
+        failure_scenario: 'register(" ", "value") succeeds and the entry is orphaned.',
       }),
       makeFinding({
         line: 10,
-        failure_scenario:
-          "A user configures the threshold to 'extreme' and the action crashes.",
+        failure_scenario: "A user configures the threshold to 'extreme' and the action crashes.",
       }),
     ]
 
@@ -138,8 +134,7 @@ describe("filterNonFindings", () => {
   it("filters selectively in a mixed set of findings", () => {
     const realFinding = makeFinding({
       line: 1,
-      failure_scenario:
-        'register(" ", "value") succeeds and the entry is orphaned.',
+      failure_scenario: 'register(" ", "value") succeeds and the entry is orphaned.',
     })
     const nonFinding = makeFinding({
       line: 2,
@@ -156,8 +151,7 @@ describe("filterNonFindings", () => {
 
   it("does not drop a finding that contains 'None' mid-sentence", () => {
     const finding = makeFinding({
-      failure_scenario:
-        "Returns None instead of an empty list when the input is empty.",
+      failure_scenario: "Returns None instead of an empty list when the input is empty.",
     })
 
     const result = filterNonFindings([finding])
@@ -280,8 +274,7 @@ describe("filterNonFindings", () => {
 
   it("drops a finding whose failure_scenario ends with 'analysis was wrong.'", () => {
     const finding = makeFinding({
-      failure_scenario:
-        "On closer inspection, the boundary check is fine. My analysis was wrong.",
+      failure_scenario: "On closer inspection, the boundary check is fine. My analysis was wrong.",
     })
 
     const result = filterNonFindings([finding])
@@ -349,8 +342,7 @@ describe("filterNonFindings", () => {
 
   it("keeps a finding whose failure_scenario starts with 'No failure occurs until'", () => {
     const finding = makeFinding({
-      failure_scenario:
-        "No failure occurs until the third retry aborts the batch.",
+      failure_scenario: "No failure occurs until the third retry aborts the batch.",
     })
 
     const result = filterNonFindings([finding])
@@ -551,8 +543,7 @@ describe("filterNonFindings", () => {
 
   it("keeps a finding whose failure_scenario mentions 'defect' mid-sentence", () => {
     const finding = makeFinding({
-      failure_scenario:
-        "The defect causes silent data loss when the buffer overflows.",
+      failure_scenario: "The defect causes silent data loss when the buffer overflows.",
     })
 
     const result = filterNonFindings([finding])
@@ -562,8 +553,7 @@ describe("filterNonFindings", () => {
 
   it("keeps a finding whose title qualifies the negation with a continuation", () => {
     const finding = makeFinding({
-      title:
-        "Record leak is not a bug on single-threaded builds but races under concurrency",
+      title: "Record leak is not a bug on single-threaded builds but races under concurrency",
     })
 
     const result = filterNonFindings([finding])
@@ -585,8 +575,7 @@ describe("filterNonFindings", () => {
 
   it("drops a finding whose failure_scenario ends with 'Not actionable.'", () => {
     const finding = makeFinding({
-      failure_scenario:
-        "The boundary exists to cover this path. Not actionable.",
+      failure_scenario: "The boundary exists to cover this path. Not actionable.",
     })
 
     const result = filterNonFindings([finding])
@@ -596,8 +585,7 @@ describe("filterNonFindings", () => {
 
   it("drops a finding whose failure_scenario ends with 'Not a real issue.'", () => {
     const finding = makeFinding({
-      failure_scenario:
-        "After re-tracing, the check handles this correctly. Not a real issue.",
+      failure_scenario: "After re-tracing, the check handles this correctly. Not a real issue.",
     })
 
     const result = filterNonFindings([finding])

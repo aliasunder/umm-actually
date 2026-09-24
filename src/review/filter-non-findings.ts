@@ -27,8 +27,7 @@ const SELF_NEGATING_TITLE =
 /** Prior-finding resolution confirmations — "Prior bot finding addressed: …"
  *  — start-anchored with a required resolution verb, so real findings about
  *  prior-comment handling ("Prior bot comments cap drops newest…") survive. */
-const CONFIRMATION_TITLE_PREFIX =
-  /^prior (?:bot )?findings? (?:addressed|resolved|fixed)\b/i
+const CONFIRMATION_TITLE_PREFIX = /^prior (?:bot )?findings? (?:addressed|resolved|fixed)\b/i
 
 /** Conclusions leaked to the end of a rambling failure_scenario
  *  ("…No bug here.", "…my analysis was wrong.") — self-referential verdicts
@@ -47,6 +46,7 @@ const hasNonFindingSignal = (text: string): boolean => {
 const isNonFinding = (finding: Finding): boolean => {
   const title = finding.title.trim()
   const failureScenario = finding.failure_scenario.trim()
+
   if (hasNonFindingSignal(title)) return true
   if (CONFIRMATION_TITLE_SUFFIX.test(title)) return true
   if (CONFIRMATION_TITLE_PREFIX.test(title)) return true

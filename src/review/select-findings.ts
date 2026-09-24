@@ -22,9 +22,7 @@ const lineRange = (finding: Finding): { start: number; end: number } => {
 export const rangesOverlap = (first: Finding, second: Finding): boolean => {
   const firstRange = lineRange(first)
   const secondRange = lineRange(second)
-  return (
-    firstRange.start <= secondRange.end && secondRange.start <= firstRange.end
-  )
+  return firstRange.start <= secondRange.end && secondRange.start <= firstRange.end
 }
 
 const isDuplicate = (candidate: Finding, kept: Finding): boolean => {
@@ -51,8 +49,7 @@ export const selectFindings = <FindingType extends Finding>({
   maxFindings: number | undefined
 }): SelectionResult<FindingType> => {
   const aboveThreshold = findings.filter(
-    (finding) =>
-      SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[severityThreshold],
+    (finding) => SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[severityThreshold],
   )
   const droppedBelowThreshold = findings.length - aboveThreshold.length
 
@@ -61,16 +58,14 @@ export const selectFindings = <FindingType extends Finding>({
   // (ties broken deterministically by file, then line) and the result needs
   // no second sort.
   const sorted = [...aboveThreshold].sort((first, second) => {
-    const severityDifference =
-      SEVERITY_RANK[second.severity] - SEVERITY_RANK[first.severity]
+    const severityDifference = SEVERITY_RANK[second.severity] - SEVERITY_RANK[first.severity]
+
     if (severityDifference !== 0) return severityDifference
     if (first.file !== second.file) return first.file.localeCompare(second.file)
     return first.line - second.line
   })
   const deduplicated = sorted.reduce<FindingType[]>((kept, candidate) => {
-    const duplicateOfKept = kept.some((existing) =>
-      isDuplicate(candidate, existing),
-    )
+    const duplicateOfKept = kept.some((existing) => isDuplicate(candidate, existing))
     return duplicateOfKept ? kept : [...kept, candidate]
   }, [])
 

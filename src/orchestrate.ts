@@ -1,10 +1,7 @@
 import { posix } from "node:path"
 import parseDiff from "parse-diff"
 import type { ActionConfig } from "./config.js"
-import {
-  computeCommentableLines,
-  newFilePath,
-} from "./diff/commentable-lines.js"
+import { computeCommentableLines, newFilePath } from "./diff/commentable-lines.js"
 import { annotateDiff } from "./diff/annotate-diff.js"
 import {
   createExclusionMatcher,
@@ -14,21 +11,14 @@ import {
   summarizeExclusionSources,
 } from "./diff/exclusion.js"
 import { describeError, type Logger } from "./logger.js"
-import type {
-  CheckRunConclusion,
-  CheckRunOutput,
-  GithubClient,
-} from "./github/client.js"
+import type { CheckRunConclusion, CheckRunOutput, GithubClient } from "./github/client.js"
 import { resolvePullRequestEvent, type PrContext } from "./github/event.js"
 import {
   ReviewRequestError,
   type OpenRouterClient,
   type StructuredReviewResult,
 } from "./openrouter/client.js"
-import {
-  renderCostSummary,
-  type PhaseAttempt,
-} from "./openrouter/cost-summary.js"
+import { renderCostSummary, type PhaseAttempt } from "./openrouter/cost-summary.js"
 import type { ContextReader } from "./context/workspace.js"
 import {
   buildStatusComment,
@@ -53,11 +43,7 @@ import {
   type Finding,
   type FindingSeverity,
 } from "./review/finding.js"
-import {
-  resolveStages,
-  type ReviewPhase,
-  type ReviewStage,
-} from "./review/phases.js"
+import { resolveStages, type ReviewPhase, type ReviewStage } from "./review/phases.js"
 import {
   buildSystemPrompt,
   buildUserPrompt,
@@ -94,15 +80,12 @@ export type ReviewContext = {
   priorBotComments: string[]
 }
 
-export type GenerateFindings = (
-  reviewContext: ReviewContext,
-) => Promise<StructuredReviewResult>
+export type GenerateFindings = (reviewContext: ReviewContext) => Promise<StructuredReviewResult>
 
 /** How each review phase ended; a failed phase's findings are absent from
  *  the run and its reason is the error text, not a remediation. */
 export type PhaseStatus =
-  | { phase: string; status: "completed" }
-  | { phase: string; status: "failed"; reason: string }
+  { phase: string; status: "completed" } | { phase: string; status: "failed"; reason: string }
 
 export type OrchestrateResult = {
   findingsCount: number
@@ -134,8 +117,12 @@ const PRIOR_COMMENT_CAP = 30
 
 /** Strips the trailing dedup anchor from a comment body so the model
  *  doesn't see the dedup infrastructure in the prior-comments section. */
-const stripAnchorComment = (body: string): string =>
-  body.replace(/\n*<!-- umm-actually:.+? -->\s*$/, "")
+const stripAnchorComment = (body: string): string => {
+  /** The hidden `<!-- umm-actually:… -->` anchor at the end of a comment,
+   *  plus the newlines before it. */
+  const TRAILING_ANCHOR_PATTERN = /\n*<!-- umm-actually:.+? -->\s*$/
+  return body.replace(TRAILING_ANCHOR_PATTERN, "")
+}
 
 /** detail carries multi-line context (e.g. the excluded-file list) that
  *  belongs in the review body but not in the one-line check-run title. */
@@ -170,10 +157,9 @@ const fetchInlineCommentState = async (
       commentBodies: existingComments.map((comment) => comment.body),
     }
   } catch (fetchError) {
-    logger.warn(
-      "failed to fetch inline comments — treating their findings as new",
-      { error: describeError(fetchError) },
-    )
+    logger.warn("failed to fetch inline comments — treating their findings as new", {
+      error: describeError(fetchError),
+    })
     return { anchors: [], commentBodies: [] }
   }
 }
@@ -194,9 +180,7 @@ const fetchIssueCommentState = async (
 ): Promise<IssueCommentState> => {
   try {
     const comments = await githubClient.fetchBotIssueComments({ prNumber })
-    const findingComments = comments.filter(
-      (comment) => !comment.body.startsWith(STATUS_ANCHOR),
-    )
+    const findingComments = comments.filter((comment) => !comment.body.startsWith(STATUS_ANCHOR))
     return {
       // startsWith, not includes: a finding comment's model-generated text
       // could quote the marker mid-body and misclassify the run as a re-run.
@@ -256,6 +240,7 @@ const postInlineFindings = async (
       body: REVIEW_MARKER,
       comments,
     })
+
     if (result.kind === "rejected") {
       return { url: "", rerouted: inlineFindings, postedCount: 0 }
     }
@@ -265,18 +250,14 @@ const postInlineFindings = async (
     })
     return { url: result.url, rerouted: [], postedCount: comments.length }
   } catch (postError) {
-    logger.warn(
-      "failed to post findings review — findings will re-report next run",
-      { error: describeError(postError) },
-    )
+    logger.warn("failed to post findings review — findings will re-report next run", {
+      error: describeError(postError),
+    })
     return { url: "", rerouted: [], postedCount: 0 }
   }
 }
 
-const SKIPPED_RESULT_BASE: Omit<
-  OrchestrateResult,
-  "reviewUrl" | "skippedReason"
-> = {
+const SKIPPED_RESULT_BASE: Omit<OrchestrateResult, "reviewUrl" | "skippedReason"> = {
   findingsCount: 0,
   modelUsed: "",
   phases: [],
@@ -286,8 +267,8 @@ const SKIPPED_RESULT_BASE: Omit<
 
 type CheckRunHandle = { checkRunId: number } | null
 
-/** Best-effort: a token without `checks: write` (the permission is optional
- *  for consumers) must degrade to an unbranded run, never fail the review. */
+/** A token without `checks: write` (the permission is optional for consumers)
+ *  degrades to an unbranded run and never fails the review. */
 const createCheckRunSafely = async (
   { githubClient, headSha }: { githubClient: GithubClient; headSha: string },
   logger: Logger,
@@ -359,6 +340,7 @@ const resolveCheckRunCompletion = ({
   costSummaryMarkdown: string | null
 }): { conclusion: CheckRunConclusion; output: CheckRunOutput } => {
   const costSection = costSummaryMarkdown ? `\n\n${costSummaryMarkdown}` : ""
+
   if (result.skippedReason) {
     return {
       conclusion: "neutral",
@@ -369,9 +351,7 @@ const resolveCheckRunCompletion = ({
     }
   }
 
-  const incompletePhases = result.phases.filter(
-    (phase) => phase.status === "failed",
-  )
+  const incompletePhases = result.phases.filter((phase) => phase.status === "failed")
   const incompleteSuffix =
     incompletePhases.length === 0
       ? ""
@@ -393,9 +373,7 @@ const resolveCheckRunCompletion = ({
     }
   }
   const findingsLabel =
-    result.findingsCount === 1
-      ? "1 finding"
-      : `${result.findingsCount} findings`
+    result.findingsCount === 1 ? "1 finding" : `${result.findingsCount} findings`
   return {
     conclusion: "success",
     output: {
@@ -426,8 +404,7 @@ const phaseAttempts = (outcome: PhaseOutcome): PhaseAttempt[] => {
   }
 
   if (outcome.status === "completed") return tag(outcome.result.attempts)
-  if (outcome.error instanceof ReviewRequestError)
-    return tag(outcome.error.attempts)
+  if (outcome.error instanceof ReviewRequestError) return tag(outcome.error.attempts)
   return []
 }
 
@@ -442,14 +419,16 @@ const filterPhaseFindings = (
   { outcome, knownPaths }: { outcome: CompletedPhase; knownPaths: string[] },
   logger: Logger,
 ): FilteredPhaseFindings => {
-  const { findings: nonFindingFiltered, droppedAsNonFinding } =
-    filterNonFindings(outcome.result.review.findings)
+  const { findings: nonFindingFiltered, droppedAsNonFinding } = filterNonFindings(
+    outcome.result.review.findings,
+  )
   const { findings, droppedAsUnknownFile } = filterUnknownFileFindings({
     findings: nonFindingFiltered,
     knownPaths,
   })
-  // Per-drop warn on purpose: each one is a model-quality event, not loop
-  // chatter, and the title is omitted because it may be garbage
+
+  // Each drop warns on its own because it is a model-quality event, not loop
+  // chatter. The title is omitted because it may be garbage.
   for (const finding of droppedAsUnknownFile) {
     logger.warn("dropping finding: file not in prompt context", {
       phase: outcome.phase.id,
@@ -478,27 +457,24 @@ const describePipelineFailure = ({
   costSummary: boolean
 }): string => {
   const description = describeError(pipelineError)
+
   if (!costSummary || !(pipelineError instanceof AllPhasesFailedError)) {
     return description
   }
   const attempts = pipelineError.outcomes.flatMap(phaseAttempts)
+
   if (attempts.length === 0) return description
   const models = [...new Set(attempts.map((attempt) => attempt.model))]
   const modelUsed = models.length > 0 ? models.join(", ") : "none"
   return `${description}\n\n${renderCostSummary({ attempts, modelUsed })}`
 }
 
-const sumBy = <Item>(
-  items: Item[],
-  valueOf: (item: Item) => number,
-): number => {
+const sumBy = <Item>(items: Item[], valueOf: (item: Item) => number): number => {
   return items.reduce((sum, item) => sum + valueOf(item), 0)
 }
 
 const incompletePhaseIds = (phases: PhaseStatus[]): string[] => {
-  return phases
-    .filter((phase) => phase.status === "failed")
-    .map((phase) => phase.phase)
+  return phases.filter((phase) => phase.status === "failed").map((phase) => phase.phase)
 }
 
 /** Steps 4–14: diff fetch through status comment — everything downstream of
@@ -541,12 +517,14 @@ const runReviewPipeline = async (
   const diffResult = await githubClient.fetchDiff({
     prNumber: prContext.prNumber,
   })
+
   if (diffResult.kind === "too_large") {
     return postSkipReview({ reason: "diff exceeds GitHub's diff API limits" })
   }
 
   // Step 5: parse diff
   const files = parseDiff(diffResult.diff)
+
   if (files.length === 0) {
     return postSkipReview({ reason: "empty diff" })
   }
@@ -561,14 +539,15 @@ const runReviewPipeline = async (
     { ...config.diffExcludePaths, gitAttributesContent },
     logger,
   )
-  const { kept: reviewableFiles, excluded: excludedDiffFiles } =
-    partitionExcludedFiles({ files, matcher: exclusionMatcher })
+  const { kept: reviewableFiles, excluded: excludedDiffFiles } = partitionExcludedFiles({
+    files,
+    matcher: exclusionMatcher,
+  })
+
   if (excludedDiffFiles.length > 0) {
     logger.info("changed files excluded from the review diff", {
       excludedCount: excludedDiffFiles.length,
-      excludedPaths: excludedDiffFiles
-        .map((file) => `${file.path} (${file.source})`)
-        .join(", "),
+      excludedPaths: excludedDiffFiles.map((file) => `${file.path} (${file.source})`).join(", "),
     })
   }
   if (reviewableFiles.length === 0) {
@@ -589,6 +568,7 @@ const runReviewPipeline = async (
   const diffTokens = estimateTokens(annotatedDiff)
   // The diff gets half the budget; the other half is for context files.
   const budgetHalf = Math.floor(config.contextBudgetTokens / 2)
+
   if (diffTokens > budgetHalf) {
     return postSkipReview({
       reason: `diff too large for context budget (${diffTokens} tokens, limit ${budgetHalf} of ${config.contextBudgetTokens})`,
@@ -618,10 +598,7 @@ const runReviewPipeline = async (
       // parse-diff: from is undefined for binary files, "/dev/null" for
       // added files — neither is a pre-rename path worth tracing
       const isRename =
-        toPath !== null &&
-        fromPath !== undefined &&
-        fromPath !== "/dev/null" &&
-        fromPath !== file.to
+        toPath !== null && fromPath && fromPath !== "/dev/null" && fromPath !== file.to
       return isRename ? [toPath, fromPath] : [toPath]
     })
     .filter((path) => path !== null)
@@ -636,8 +613,7 @@ const runReviewPipeline = async (
   // changed-files channel carries it diff-only. When the section is truncated
   // instead, the changed-files copy is the only full one and stays full.
   const conventionsAlreadyRenderedInFull =
-    conventions !== null &&
-    conventionsRenderInFull(conventions, config.conventionsBudgetTokens)
+    conventions !== null && conventionsRenderInFull(conventions, config.conventionsBudgetTokens)
 
   const fileBudgetTokens = config.contextBudgetTokens - diffTokens
 
@@ -650,20 +626,16 @@ const runReviewPipeline = async (
 
   // A conventions file whose section already carries it whole needs no second
   // full copy from the priority-doc channel.
-  const priorityDocsNeedingFullCopy = reviewablePriorityDocs.filter(
-    (docPath) => {
-      return !(
-        conventionsAlreadyRenderedInFull &&
-        posix.normalize(docPath) === posix.normalize(config.conventionsFile)
-      )
-    },
-  )
+  const priorityDocsNeedingFullCopy = reviewablePriorityDocs.filter((docPath) => {
+    return !(
+      conventionsAlreadyRenderedInFull &&
+      posix.normalize(docPath) === posix.normalize(config.conventionsFile)
+    )
+  })
 
   // Unchanged docs have no changed-file channel, so give them first claim
   // on the floor while keeping configured order within each group.
-  const changedPathSet = new Set(
-    changedPaths.map((changedPath) => posix.normalize(changedPath)),
-  )
+  const changedPathSet = new Set(changedPaths.map((changedPath) => posix.normalize(changedPath)))
   const earlyPriorityDocsInReadOrder = [
     ...priorityDocsNeedingFullCopy.filter(
       (docPath) => !changedPathSet.has(posix.normalize(docPath)),
@@ -675,8 +647,7 @@ const runReviewPipeline = async (
 
   // The early read runs before changed files can spend the budget. Only the
   // tokens these docs actually use come out of the changed-file budget.
-  const earlyPriorityDocBudget =
-    earlyPriorityDocsInReadOrder.length > 0 ? priorityDocFloorLimit : 0
+  const earlyPriorityDocBudget = earlyPriorityDocsInReadOrder.length > 0 ? priorityDocFloorLimit : 0
   const earlyPriorityDocsResult =
     earlyPriorityDocBudget > 0
       ? await contextReader.readPriorityDocs({
@@ -686,20 +657,18 @@ const runReviewPipeline = async (
         })
       : { files: [], remainingTokens: earlyPriorityDocBudget }
   const earlyPriorityDocFiles = earlyPriorityDocsResult.files
-  const earlyPriorityDocTokens =
-    earlyPriorityDocBudget - earlyPriorityDocsResult.remainingTokens
+  const earlyPriorityDocTokens = earlyPriorityDocBudget - earlyPriorityDocsResult.remainingTokens
 
   // A changed doc already read in full above is sent diff-only here, so its
   // full text reaches the prompt once.
-  const { files: changedFiles, remainingTokens } =
-    await contextReader.readChangedFiles({
-      changedPaths,
-      budgetTokens: fileBudgetTokens - earlyPriorityDocTokens,
-      diffOnlyPaths: [
-        ...(conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []),
-        ...earlyPriorityDocFiles.map((file) => file.path),
-      ],
-    })
+  const { files: changedFiles, remainingTokens } = await contextReader.readChangedFiles({
+    changedPaths,
+    budgetTokens: fileBudgetTokens - earlyPriorityDocTokens,
+    diffOnlyPaths: [
+      ...(conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []),
+      ...earlyPriorityDocFiles.map((file) => file.path),
+    ],
+  })
 
   // Keep only the unspent part of the floor for docs still missing after
   // changed-file reads, so related files cannot consume it.
@@ -708,15 +677,11 @@ const runReviewPipeline = async (
     ...changedFiles
       .filter((file) => file.includedAs === "full")
       .map((file) => posix.normalize(file.path)),
-    ...(conventionsAlreadyRenderedInFull
-      ? [posix.normalize(config.conventionsFile)]
-      : []),
+    ...(conventionsAlreadyRenderedInFull ? [posix.normalize(config.conventionsFile)] : []),
   ])
   const needsPriorityDocFloor =
     reviewablePriorityDocs.length > 0 &&
-    reviewablePriorityDocs.some(
-      (docPath) => !preFloorInContext.has(posix.normalize(docPath)),
-    )
+    reviewablePriorityDocs.some((docPath) => !preFloorInContext.has(posix.normalize(docPath)))
   const remainingPriorityDocFloor = needsPriorityDocFloor
     ? Math.min(priorityDocFloorLimit - earlyPriorityDocTokens, remainingTokens)
     : 0
@@ -727,10 +692,7 @@ const runReviewPipeline = async (
     ? await contextReader.findRelatedFiles({
         changedPaths,
         budgetTokens: relatedFilesBudgetTokens,
-        excludePaths: [
-          ...diffExcludedPaths,
-          ...earlyPriorityDocFiles.map((file) => file.path),
-        ],
+        excludePaths: [...diffExcludedPaths, ...earlyPriorityDocFiles.map((file) => file.path)],
       })
     : { files: [], excludedByCapPaths: [] }
 
@@ -747,9 +709,7 @@ const runReviewPipeline = async (
   // The conventions file counts only when its section carries the whole
   // file — when that section truncates, its full text has NOT been sent.
   const priorityDocsInContext = [
-    ...changedFiles
-      .filter((file) => file.includedAs === "full")
-      .map((file) => file.path),
+    ...changedFiles.filter((file) => file.includedAs === "full").map((file) => file.path),
     ...relatedFiles.map((file) => file.path),
     ...(conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []),
   ]
@@ -760,10 +720,7 @@ const runReviewPipeline = async (
     ? await contextReader.readPriorityDocs({
         priorityDocs: reviewablePriorityDocs,
         budgetTokens: docBudgetTokens,
-        excludePaths: [
-          ...earlyPriorityDocFiles.map((file) => file.path),
-          ...priorityDocsInContext,
-        ],
+        excludePaths: [...earlyPriorityDocFiles.map((file) => file.path), ...priorityDocsInContext],
       })
     : { files: [], remainingTokens: docBudgetTokens }
 
@@ -772,15 +729,14 @@ const runReviewPipeline = async (
   const priorityDocPathsInOrder = reviewablePriorityDocs.map((docPath) => {
     return posix.normalize(docPath)
   })
-  const priorityDocFiles = [
-    ...earlyPriorityDocFiles,
-    ...latePriorityDocsResult.files,
-  ].toSorted((leftFile, rightFile) => {
-    return (
-      priorityDocPathsInOrder.indexOf(posix.normalize(leftFile.path)) -
-      priorityDocPathsInOrder.indexOf(posix.normalize(rightFile.path))
-    )
-  })
+  const priorityDocFiles = [...earlyPriorityDocFiles, ...latePriorityDocsResult.files].toSorted(
+    (leftFile, rightFile) => {
+      return (
+        priorityDocPathsInOrder.indexOf(posix.normalize(leftFile.path)) -
+        priorityDocPathsInOrder.indexOf(posix.normalize(rightFile.path))
+      )
+    },
+  )
   const docRemainingTokens = latePriorityDocsResult.remainingTokens
 
   // When the conventions section truncated but priority docs read the full
@@ -790,8 +746,7 @@ const runReviewPipeline = async (
     conventions !== null &&
     !conventionsAlreadyRenderedInFull &&
     priorityDocFiles.some(
-      (file) =>
-        posix.normalize(file.path) === posix.normalize(config.conventionsFile),
+      (file) => posix.normalize(file.path) === posix.normalize(config.conventionsFile),
     )
 
   if (conventionsReadInFullByPriorityDocs) {
@@ -844,21 +799,16 @@ const runReviewPipeline = async (
     changedFilesCount: changedFiles.length,
     changedFilePaths: changedFiles.map((file) => file.path).join(", "),
     relatedFilesCount: relatedFiles.length,
-    relatedFilePaths:
-      relatedFiles.map((file) => file.path).join(", ") || "none",
+    relatedFilePaths: relatedFiles.map((file) => file.path).join(", ") || "none",
     relatedFilesExcludedCount: relatedFilesResult.excludedByCapPaths.length,
-    relatedFilesExcludedPaths:
-      relatedFilesResult.excludedByCapPaths.join(", ") || "none",
+    relatedFilesExcludedPaths: relatedFilesResult.excludedByCapPaths.join(", ") || "none",
     priorityDocsReadCount: priorityDocFiles.length,
-    priorityDocPaths:
-      priorityDocFiles.map((file) => file.path).join(", ") || "none",
+    priorityDocPaths: priorityDocFiles.map((file) => file.path).join(", ") || "none",
     mentionMatchedDocsCount: mentionMatchedDocsResult.files.length,
     mentionMatchedDocPaths:
-      mentionMatchedDocsResult.files.map((file) => file.path).join(", ") ||
-      "none",
+      mentionMatchedDocsResult.files.map((file) => file.path).join(", ") || "none",
     docsExcludedCount: mentionMatchedDocsResult.excludedByCapPaths.length,
-    docsExcludedPaths:
-      mentionMatchedDocsResult.excludedByCapPaths.join(", ") || "none",
+    docsExcludedPaths: mentionMatchedDocsResult.excludedByCapPaths.join(", ") || "none",
     tokenBudgetTotal: config.contextBudgetTokens,
     tokenBudgetUsedByDiff: diffTokens,
     tokenBudgetPriorityDocFloor: priorityDocFloor,
@@ -895,10 +845,7 @@ const runReviewPipeline = async (
     { githubClient, prNumber: prContext.prNumber },
     logger,
   )
-  const priorBotComments = [
-    ...inlineState.commentBodies,
-    ...issueState.findingBodies,
-  ]
+  const priorBotComments = [...inlineState.commentBodies, ...issueState.findingBodies]
     .map(stripAnchorComment)
     .slice(-PRIOR_COMMENT_CAP)
 
@@ -921,17 +868,15 @@ const runReviewPipeline = async (
     { stages, runPhase, remainingReviewMs: deps.remainingReviewMs },
     logger,
   )
-  const completedPhases = phaseOutcomes.filter(
-    (outcome) => outcome.status === "completed",
-  )
+  const completedPhases = phaseOutcomes.filter((outcome) => outcome.status === "completed")
   const phases = phaseOutcomes.map(describePhaseOutcome)
   /** Cost lookup expiry alone does not lose review coverage. */
   const coverageLostToReviewDeadline = phaseOutcomes.some(
     (outcome) => outcome.status === "failed" && outcome.deadlineExceeded,
   )
-  const modelUsed = [
-    ...new Set(completedPhases.map((outcome) => outcome.result.modelUsed)),
-  ].join(", ")
+  const modelUsed = [...new Set(completedPhases.map((outcome) => outcome.result.modelUsed))].join(
+    ", ",
+  )
   const attempts = phaseOutcomes.flatMap(phaseAttempts)
   logger.info("review phases finished", {
     completed: completedPhases.map((outcome) => outcome.phase.id),
@@ -944,18 +889,9 @@ const runReviewPipeline = async (
   const filteredPhases = completedPhases.map((outcome) => {
     return filterPhaseFindings({ outcome, knownPaths: promptFilePaths }, logger)
   })
-  const totalFromModel = sumBy(
-    completedPhases,
-    (outcome) => outcome.result.review.findings.length,
-  )
-  const droppedAsNonFinding = sumBy(
-    filteredPhases,
-    (filtered) => filtered.droppedAsNonFinding,
-  )
-  const droppedAsUnknownFile = sumBy(
-    filteredPhases,
-    (filtered) => filtered.droppedAsUnknownFile,
-  )
+  const totalFromModel = sumBy(completedPhases, (outcome) => outcome.result.review.findings.length)
+  const droppedAsNonFinding = sumBy(filteredPhases, (filtered) => filtered.droppedAsNonFinding)
+  const droppedAsUnknownFile = sumBy(filteredPhases, (filtered) => filtered.droppedAsUnknownFile)
   const { findings: realFindings, duplicatesAcrossPhases } = mergePhaseFindings(
     filteredPhases.map((filtered) => filtered.findings),
   )
@@ -976,6 +912,7 @@ const runReviewPipeline = async (
   const dedupCounts = { positional: 0, content: 0, title: 0 }
   for (const finding of realFindings) {
     const tier = classifyDuplicate(finding, existingAnchors)
+
     if (tier) {
       dedupCounts[tier]++
       // Positional is the common case and would be noisy — log only the
@@ -1004,12 +941,7 @@ const runReviewPipeline = async (
     droppedByTitle: dedupCounts.title,
   })
 
-  const {
-    selected,
-    droppedBelowThreshold,
-    droppedAsOverlapping,
-    droppedByCap,
-  } = selectFindings({
+  const { selected, droppedBelowThreshold, droppedAsOverlapping, droppedByCap } = selectFindings({
     findings: newFindings,
     severityThreshold,
     maxFindings: config.maxFindings,
@@ -1028,14 +960,11 @@ const runReviewPipeline = async (
   // new finding is a visible event. All narration lives in the status
   // comment. Unposted findings carry no anchor and re-report next run.
   const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
-  const { comments, standaloneFindings: unanchoredFindings } =
-    mapFindingsToReview({
-      findings: selected,
-      commentableByPath,
-    })
-  const inlineFindings = selected.filter(
-    (finding) => !unanchoredFindings.includes(finding),
-  )
+  const { comments, standaloneFindings: unanchoredFindings } = mapFindingsToReview({
+    findings: selected,
+    commentableByPath,
+  })
+  const inlineFindings = selected.filter((finding) => !unanchoredFindings.includes(finding))
 
   const inlineOutcome = await postInlineFindings(
     {
@@ -1060,14 +989,11 @@ const runReviewPipeline = async (
       })
       postedStandalone += 1
     } catch (postError) {
-      logger.warn(
-        "failed to post beyond-diff finding — it will re-report next run",
-        {
-          error: describeError(postError),
-          file: finding.file,
-          line: finding.line,
-        },
-      )
+      logger.warn("failed to post beyond-diff finding — it will re-report next run", {
+        error: describeError(postError),
+        file: finding.file,
+        line: finding.line,
+      })
     }
   }
   if (postedStandalone > 0) {
@@ -1083,8 +1009,8 @@ const runReviewPipeline = async (
     isFirstRun: !issueState.statusCommentExists,
     postedCount,
     unpostedCount: selected.length - postedCount,
-    // Coalesced: fail-open reposts can leave two anchors for one finding,
-    // and the tracked count reports findings, not comment anchors.
+    // Anchors are coalesced because fail-open reposts can leave two anchors for
+    // one finding, and the tracked count reports findings, not comment anchors.
     totalCount: coalesceAnchors(existingAnchors).length + postedCount,
     droppedByCap,
     model: modelUsed,
@@ -1116,9 +1042,7 @@ const runReviewPipeline = async (
     priorityDocPaths: priorityDocFiles.map((file) => file.path),
     priorityDocsInContextPaths,
     priorityDocsAbsentPaths,
-    mentionMatchedDocPaths: mentionMatchedDocsResult.files.map(
-      (file) => file.path,
-    ),
+    mentionMatchedDocPaths: mentionMatchedDocsResult.files.map((file) => file.path),
     docsExcludedPaths: mentionMatchedDocsResult.excludedByCapPaths,
     tokenBudgetTotal: config.contextBudgetTokens,
     tokenBudgetUsedByDiff: diffTokens,
@@ -1210,10 +1134,7 @@ export const orchestrate = async (
         })
 
   // Step 3.5: open the branded check run now that the head SHA is known
-  const checkRun = await createCheckRunSafely(
-    { githubClient, headSha: prContext.headSha },
-    logger,
-  )
+  const checkRun = await createCheckRunSafely({ githubClient, headSha: prContext.headSha }, logger)
 
   // A cancelled job stops the container before the completions below run,
   // which would leave the check in progress forever — the registered
@@ -1240,20 +1161,12 @@ export const orchestrate = async (
       : null
 
   try {
-    const result = await runReviewPipeline(
-      { deps, prContext, severityThreshold, stages },
-      logger,
-    )
+    const result = await runReviewPipeline({ deps, prContext, severityThreshold, stages }, logger)
     const completion = resolveCheckRunCompletion({
       result,
-      costSummaryMarkdown: config.costSummary
-        ? result.costSummaryMarkdown
-        : null,
+      costSummaryMarkdown: config.costSummary ? result.costSummaryMarkdown : null,
     })
-    await completeCheckRunSafely(
-      { githubClient, checkRun, ...completion },
-      logger,
-    )
+    await completeCheckRunSafely({ githubClient, checkRun, ...completion }, logger)
     // Unregistered only after the terminal update settles — a signal during
     // the request must still find the cleanup registered, or the check could
     // stay in progress forever

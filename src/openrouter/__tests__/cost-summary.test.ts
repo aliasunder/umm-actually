@@ -129,10 +129,7 @@ describe("renderCostSummary", () => {
     }
 
     const summary = renderCostSummary({
-      attempts: [
-        { ...acceptedAttempt, outcome: "schema_mismatch" },
-        fallbackAttempt,
-      ],
+      attempts: [{ ...acceptedAttempt, outcome: "schema_mismatch" }, fallbackAttempt],
       modelUsed: "anthropic/claude-haiku-4.5",
     })
 

@@ -11,9 +11,7 @@ export type TestLogger = Logger & {
 }
 
 /** Mirrors production lazy-prop semantics: function-valued props resolve at emit. */
-const resolveProps = (
-  props: Record<string, unknown>,
-): Record<string, unknown> =>
+const resolveProps = (props: Record<string, unknown>): Record<string, unknown> =>
   Object.fromEntries(
     Object.entries(props).map(([key, value]) => [
       key,

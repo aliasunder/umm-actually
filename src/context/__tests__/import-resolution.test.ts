@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-  extractImportSpecifiers,
-  resolveImportSpecifier,
-} from "../import-resolution.js"
+import { extractImportSpecifiers, resolveImportSpecifier } from "../import-resolution.js"
 
 describe("extractImportSpecifiers", () => {
   it("extracts static, dynamic, and require specifiers from one source", () => {
@@ -16,13 +13,7 @@ describe("extractImportSpecifiers", () => {
 
     const specifiers = extractImportSpecifiers(source)
 
-    expect(specifiers).toEqual([
-      "./a.js",
-      "../b.js",
-      "./lazy.js",
-      "./legacy.cjs",
-      "zod",
-    ])
+    expect(specifiers).toEqual(["./a.js", "../b.js", "./lazy.js", "./legacy.cjs", "zod"])
   })
 
   it("extracts a side-effect import specifier", () => {

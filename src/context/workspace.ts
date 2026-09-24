@@ -1,21 +1,14 @@
 import { readFile, readdir, realpath, stat } from "node:fs/promises"
 import path, { posix } from "node:path"
 import { describeError, type Logger } from "../logger.js"
-import {
-  CHARS_PER_TOKEN,
-  estimateTokens,
-  type PromptFile,
-} from "../review/prompt.js"
+import { CHARS_PER_TOKEN, estimateTokens, type PromptFile } from "../review/prompt.js"
 import {
   DOC_EXTENSIONS,
   byMentionRelevance,
   findMentionedChangedPaths,
   type DocCandidate,
 } from "./doc-mentions.js"
-import {
-  extractImportSpecifiers,
-  resolveImportSpecifier,
-} from "./import-resolution.js"
+import { extractImportSpecifiers, resolveImportSpecifier } from "./import-resolution.js"
 
 export type BudgetedFiles = { files: PromptFile[]; remainingTokens: number }
 
@@ -26,9 +19,7 @@ export type RelatedFilesResult = {
 
 export type ContextReader = {
   /** null when the file is missing — the prompt renders a "(no conventions…)" block. */
-  readConventions: (params: {
-    conventionsFile: string
-  }) => Promise<string | null>
+  readConventions: (params: { conventionsFile: string }) => Promise<string | null>
   /** Raw root .gitattributes content, or null when the repo has none;
    *  parsing stays in the pure diff layer. */
   readGitAttributes: () => Promise<string | null>
@@ -76,26 +67,10 @@ const LOCKFILE_BASENAMES = new Set([
   "go.sum",
 ])
 
-const SCANNABLE_EXTENSIONS = new Set([
-  ".ts",
-  ".tsx",
-  ".mts",
-  ".cts",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-])
+const SCANNABLE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"])
 
 /** Dependency, VCS, and build-output trees — never review context. */
-const PRUNED_DIRECTORIES = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  "build",
-  "out",
-  "coverage",
-])
+const PRUNED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", "out", "coverage"])
 
 /** Scan bounds: a related-files miss on a pathological repo beats an unbounded walk. */
 export const DEFAULT_MAX_SCAN_FILES = 5_000
@@ -140,12 +115,14 @@ const compareImporterCandidatesByRelevance = ({
 }): number => {
   const leftImportCount = leftCandidate.importedChangedPaths.length
   const rightImportCount = rightCandidate.importedChangedPaths.length
+
   if (leftImportCount !== rightImportCount) {
     return rightImportCount - leftImportCount
   }
 
   const leftCandidateIsTest = isTestFile(leftCandidate.path)
   const rightCandidateIsTest = isTestFile(rightCandidate.path)
+
   if (leftCandidateIsTest !== rightCandidateIsTest) {
     return leftCandidateIsTest ? 1 : -1
   }
@@ -155,18 +132,10 @@ const compareImporterCandidatesByRelevance = ({
 }
 
 const isMissingFileError = (error: unknown): boolean => {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT"
-  )
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
 }
 
-export const createContextReader = (
-  config: ContextReaderConfig,
-  logger: Logger,
-): ContextReader => {
+export const createContextReader = (config: ContextReaderConfig, logger: Logger): ContextReader => {
   const resolvedRoot = path.resolve(config.workspaceRoot)
   // The reader reports only the first operation interrupted by the deadline.
   const contextDeadlineState = { reported: false }
@@ -196,11 +165,13 @@ export const createContextReader = (
     fallback: Result
   }): Promise<Result> => {
     const remainingReviewMs = config.remainingReviewMs()
+
     if (remainingReviewMs <= 0) {
       reportContextDeadline({ interruptedOperation: operation })
       return fallback
     }
     const abortController = new AbortController()
+
     if (!Number.isFinite(remainingReviewMs)) return run(abortController.signal)
 
     const deadline = Promise.withResolvers<ContextOperationResult<Result>>()
@@ -209,9 +180,7 @@ export const createContextReader = (
       deadline.resolve({ status: "deadline" })
     }, Math.ceil(remainingReviewMs))
     try {
-      const runWithStatus = async (): Promise<
-        ContextOperationResult<Result>
-      > => {
+      const runWithStatus = async (): Promise<ContextOperationResult<Result>> => {
         try {
           const value = await run(abortController.signal)
           return { status: "completed", value }
@@ -221,6 +190,7 @@ export const createContextReader = (
         }
       }
       const result = await Promise.race([runWithStatus(), deadline.promise])
+
       if (result.status === "completed") return result.value
 
       reportContextDeadline({ interruptedOperation: operation })
@@ -234,6 +204,7 @@ export const createContextReader = (
    *  a traversal outside the workspace is an attack, not a lookup miss. */
   const resolveUnderRoot = (relativePath: string): string => {
     const resolvedPath = path.resolve(resolvedRoot, relativePath)
+
     if (!resolvedPath.startsWith(resolvedRoot + path.sep)) {
       throw new Error(`path escapes the workspace: ${relativePath}`)
     }
@@ -250,17 +221,10 @@ export const createContextReader = (
    * is realpath'd too — it may itself sit behind a symlink (macOS tmpdir).
    * Missing files reject with ENOENT so callers keep their existing handling.
    */
-  const realPathIfSafe = async (
-    absolutePath: string,
-  ): Promise<string | null> => {
-    const [realRoot, realPath] = await Promise.all([
-      realpath(resolvedRoot),
-      realpath(absolutePath),
-    ])
+  const realPathIfSafe = async (absolutePath: string): Promise<string | null> => {
+    const [realRoot, realPath] = await Promise.all([realpath(resolvedRoot), realpath(absolutePath)])
     const isUnderRoot = realPath.startsWith(realRoot + path.sep)
-    const isInGitDirectory = realPath.startsWith(
-      path.join(realRoot, ".git") + path.sep,
-    )
+    const isInGitDirectory = realPath.startsWith(path.join(realRoot, ".git") + path.sep)
     return isUnderRoot && !isInGitDirectory ? realPath : null
   }
 
@@ -276,6 +240,7 @@ export const createContextReader = (
         const absolutePath = resolveUnderRoot(conventionsFile)
         try {
           const safePath = await realPathIfSafe(absolutePath)
+
           if (signal.aborted) return null
           if (!safePath) {
             throw new Error(`path escapes the workspace: ${conventionsFile}`)
@@ -304,6 +269,7 @@ export const createContextReader = (
         const absolutePath = resolveUnderRoot(".gitattributes")
         try {
           const safePath = await realPathIfSafe(absolutePath)
+
           if (signal.aborted) return null
           if (!safePath) {
             logger.warn(
@@ -316,6 +282,7 @@ export const createContextReader = (
           // failures instead of being pulled into memory whole. A failed stat
           // falls through to the read path, which already logs per error kind.
           const fileStats = await stat(safePath).catch(() => null)
+
           if (signal.aborted) return null
           if (fileStats && fileStats.size > config.maxScanBytes) {
             logger.warn(
@@ -328,10 +295,9 @@ export const createContextReader = (
         } catch (readError) {
           if (signal.aborted) return null
           if (isMissingFileError(readError)) return null
-          logger.warn(
-            "failed reading .gitattributes — linguist-generated rules unavailable",
-            { error: describeError(readError) },
-          )
+          logger.warn("failed reading .gitattributes — linguist-generated rules unavailable", {
+            error: describeError(readError),
+          })
           return null
         }
       },
@@ -351,6 +317,7 @@ export const createContextReader = (
   ): Promise<string | null> => {
     try {
       const safePath = await realPathIfSafe(absolutePath)
+
       if (signal.aborted) return null
       if (safePath) {
         return await readFile(safePath, { encoding: "utf8", signal })
@@ -363,12 +330,9 @@ export const createContextReader = (
     } catch (readError) {
       if (signal.aborted) return null
       if (isMissingFileError(readError)) {
-        logger.info(
-          "changed file missing from checkout — including as diff-only",
-          {
-            path: changedPath,
-          },
-        )
+        logger.info("changed file missing from checkout — including as diff-only", {
+          path: changedPath,
+        })
         return null
       }
       logger.warn("changed file unreadable — including as diff-only", {
@@ -417,16 +381,17 @@ export const createContextReader = (
     signal: AbortSignal,
   ): Promise<string | null> => {
     const absolutePath = resolvePriorityDocPathOrNull(docPath)
+
     if (!absolutePath) return null
 
     try {
       const safePath = await realPathIfSafe(absolutePath)
+
       if (signal.aborted) return null
       if (!safePath) {
-        logger.warn(
-          "priority doc resolves outside the reviewable workspace — skipping",
-          { path: docPath },
-        )
+        logger.warn("priority doc resolves outside the reviewable workspace — skipping", {
+          path: docPath,
+        })
         return null
       }
       // Stat before reading: a priority doc can be arbitrarily large, and the
@@ -435,14 +400,12 @@ export const createContextReader = (
       // skip it without pulling it into memory. A failed stat falls through to
       // the read path, which already logs and degrades per error kind.
       const fileStats = await stat(safePath).catch(() => null)
+
       if (signal.aborted) return null
       if (fileStats && fileStats.size > maxBytes) {
-        logger.warn(
-          "priority doc exceeds remaining context budget — skipping",
-          {
-            path: docPath,
-          },
-        )
+        logger.warn("priority doc exceeds remaining context budget — skipping", {
+          path: docPath,
+        })
         return null
       }
       return await readFile(safePath, { encoding: "utf8", signal })
@@ -487,10 +450,9 @@ export const createContextReader = (
         break
       }
       if (diffOnlyPathSet.has(posix.normalize(changedPath))) {
-        logger.info(
-          "changed file already rendered in full elsewhere — including diff-only",
-          { path: changedPath },
-        )
+        logger.info("changed file already rendered in full elsewhere — including diff-only", {
+          path: changedPath,
+        })
         files.push({ path: changedPath, content: "", includedAs: "diff-only" })
         continue
       }
@@ -510,6 +472,7 @@ export const createContextReader = (
         fallback: null,
         run: () => stat(absolutePath).catch(() => null),
       })
+
       if (reviewDeadlineReached()) {
         reportContextDeadline({ interruptedOperation: "read changed files" })
         break
@@ -525,6 +488,7 @@ export const createContextReader = (
           return readChangedFileOrNull(absolutePath, changedPath, signal)
         },
       })
+
       if (reviewDeadlineReached()) {
         reportContextDeadline({ interruptedOperation: "read changed files" })
         break
@@ -539,6 +503,7 @@ export const createContextReader = (
         continue
       }
       const contentTokens = estimateTokens(content)
+
       if (contentTokens > remainingTokens) {
         files.push({ path: changedPath, content: "", includedAs: "diff-only" })
         continue
@@ -560,9 +525,7 @@ export const createContextReader = (
   }
 
   /** BFS walk parameterized by extension set — shared by source and doc scans. */
-  const scanWorkspaceFiles = async (
-    extensions: Set<string>,
-  ): Promise<string[]> => {
+  const scanWorkspaceFiles = async (extensions: Set<string>): Promise<string[]> => {
     const filePaths: string[] = []
     // Mutable queue by design: a breadth-first walk — subdirectories found
     // during iteration join the queue and are visited by the advancing index.
@@ -574,6 +537,7 @@ export const createContextReader = (
         return filePaths
       }
       const currentDirectory = directoryQueue[queueIndex]
+
       if (currentDirectory === undefined) continue
 
       const entries = await runWithinContextDeadline({
@@ -585,6 +549,7 @@ export const createContextReader = (
           })
         },
       })
+
       if (entries === null) return filePaths
       if (reviewDeadlineReached()) {
         reportContextDeadline({ interruptedOperation: "scan workspace" })
@@ -601,16 +566,15 @@ export const createContextReader = (
           return filePaths
         }
         const entryPath = posix.join(currentDirectory, entry.name)
+
         if (entry.isDirectory()) {
           const isPruned =
             PRUNED_DIRECTORIES.has(entry.name) ||
             entry.name.startsWith(".") ||
             config.excludePaths.some((excludePath) => {
-              return (
-                entryPath === excludePath ||
-                entryPath.startsWith(excludePath + "/")
-              )
+              return entryPath === excludePath || entryPath.startsWith(excludePath + "/")
             })
+
           if (!isPruned) directoryQueue.push(entryPath)
           continue
         }
@@ -618,10 +582,9 @@ export const createContextReader = (
         if (!extensions.has(posix.extname(entry.name))) continue
 
         if (filePaths.length >= config.maxScanFiles) {
-          logger.warn(
-            "workspace scan capped — related-file and doc detection may be incomplete",
-            { maxScanFiles: config.maxScanFiles },
-          )
+          logger.warn("workspace scan capped — related-file and doc detection may be incomplete", {
+            maxScanFiles: config.maxScanFiles,
+          })
           return filePaths
         }
         const fileStats = await runWithinContextDeadline({
@@ -629,6 +592,7 @@ export const createContextReader = (
           fallback: null,
           run: () => stat(path.join(resolvedRoot, entryPath)),
         })
+
         if (fileStats === null) return filePaths
         if (reviewDeadlineReached()) {
           reportContextDeadline({ interruptedOperation: "scan workspace" })
@@ -665,9 +629,7 @@ export const createContextReader = (
     excludePaths: string[]
   }): Promise<RelatedFilesResult> => {
     const changedPathSet = new Set(changedPaths)
-    const excludePathSet = new Set(
-      excludePaths.map((excludePath) => posix.normalize(excludePath)),
-    )
+    const excludePathSet = new Set(excludePaths.map((excludePath) => posix.normalize(excludePath)))
     const scannedPaths = await scanWorkspaceSourceFiles()
 
     const importers: ImporterCandidate[] = []
@@ -683,6 +645,7 @@ export const createContextReader = (
         fallback: null,
         run: (signal) => readScannedFileOrNull(scannedPath, signal),
       })
+
       if (reviewDeadlineReached()) {
         reportContextDeadline({ interruptedOperation: "trace related files" })
         break
@@ -704,18 +667,17 @@ export const createContextReader = (
             .filter((candidatePath) => changedPathSet.has(candidatePath)),
         ),
       ].toSorted()
+
       if (importedChangedPaths.length === 0) continue
       importers.push({ path: scannedPath, importedChangedPaths, content })
     }
 
-    const rankedImporters = importers.toSorted(
-      (leftCandidate, rightCandidate) => {
-        return compareImporterCandidatesByRelevance({
-          leftCandidate,
-          rightCandidate,
-        })
-      },
-    )
+    const rankedImporters = importers.toSorted((leftCandidate, rightCandidate) => {
+      return compareImporterCandidatesByRelevance({
+        leftCandidate,
+        rightCandidate,
+      })
+    })
 
     const relatedFiles: PromptFile[] = []
     // Sequential state by design: rank order is priority order, and an
@@ -733,6 +695,7 @@ export const createContextReader = (
         break
       }
       const contentTokens = estimateTokens(importer.content)
+
       if (contentTokens > remainingTokens) continue
       remainingTokens -= contentTokens
       relatedFiles.push({
@@ -749,13 +712,10 @@ export const createContextReader = (
         : []
 
     if (excludedByCapPaths.length > 0) {
-      logger.info(
-        "import-traced related files exceeded cap — excluded from context",
-        {
-          maxRelatedFiles: config.relatedFilesMax,
-          excludedPaths: excludedByCapPaths,
-        },
-      )
+      logger.info("import-traced related files exceeded cap — excluded from context", {
+        maxRelatedFiles: config.relatedFilesMax,
+        excludedPaths: excludedByCapPaths,
+      })
     }
 
     return { files: relatedFiles, excludedByCapPaths }
@@ -779,9 +739,7 @@ export const createContextReader = (
     excludePaths: string[]
   }): Promise<BudgetedFiles> => {
     const files: PromptFile[] = []
-    const excludePathSet = new Set(
-      excludePaths.map((excludePath) => posix.normalize(excludePath)),
-    )
+    const excludePathSet = new Set(excludePaths.map((excludePath) => posix.normalize(excludePath)))
     // Config parsing splits and trims priority_docs but does not dedupe, so
     // two spellings of one path ("README.md, ./README.md") would otherwise be
     // read and rendered twice — the at-most-once invariant has to hold at the
@@ -797,6 +755,7 @@ export const createContextReader = (
         break
       }
       const normalizedDocPath = posix.normalize(docPath)
+
       if (excludePathSet.has(normalizedDocPath)) {
         logger.info("priority doc already in context — skipping re-read", {
           path: docPath,
@@ -814,13 +773,10 @@ export const createContextReader = (
         operation: "read priority doc",
         fallback: null,
         run: (signal) => {
-          return readPriorityDocOrNull(
-            docPath,
-            remainingTokens * CHARS_PER_TOKEN,
-            signal,
-          )
+          return readPriorityDocOrNull(docPath, remainingTokens * CHARS_PER_TOKEN, signal)
         },
       })
+
       if (reviewDeadlineReached()) {
         reportContextDeadline({ interruptedOperation: "read priority docs" })
         break
@@ -828,6 +784,7 @@ export const createContextReader = (
       if (!content) continue
       if (content.includes("\x00")) continue
       const contentTokens = estimateTokens(content)
+
       if (contentTokens > remainingTokens) continue
       remainingTokens -= contentTokens
       files.push({
@@ -856,9 +813,7 @@ export const createContextReader = (
   }): Promise<RelatedFilesResult> => {
     const changedPathSet = new Set(changedPaths)
     const normalizedConventionsFile = posix.normalize(conventionsFile)
-    const excludePathSet = new Set(
-      excludePaths.map((excludePath) => posix.normalize(excludePath)),
-    )
+    const excludePathSet = new Set(excludePaths.map((excludePath) => posix.normalize(excludePath)))
     const scannedPaths = await scanWorkspaceFiles(DOC_EXTENSIONS)
 
     const candidates: DocCandidate[] = []
@@ -868,6 +823,7 @@ export const createContextReader = (
         break
       }
       const normalizedScannedPath = posix.normalize(scannedPath)
+
       if (normalizedScannedPath === normalizedConventionsFile) continue
       if (changedPathSet.has(scannedPath)) continue
       if (excludePathSet.has(normalizedScannedPath)) continue
@@ -877,6 +833,7 @@ export const createContextReader = (
         fallback: null,
         run: (signal) => readScannedFileOrNull(scannedPath, signal),
       })
+
       if (reviewDeadlineReached()) {
         reportContextDeadline({ interruptedOperation: "trace related docs" })
         break
@@ -884,8 +841,11 @@ export const createContextReader = (
       if (!content) continue
       if (content.includes("\x00")) continue
 
-      const { mentionedPaths, fullPathCount, basenameCount } =
-        findMentionedChangedPaths(content, changedPaths)
+      const { mentionedPaths, fullPathCount, basenameCount } = findMentionedChangedPaths(
+        content,
+        changedPaths,
+      )
+
       if (mentionedPaths.length === 0) continue
 
       candidates.push({
@@ -915,12 +875,12 @@ export const createContextReader = (
         break
       }
       const contentTokens = estimateTokens(candidate.content)
+
       if (contentTokens > remainingTokens) continue
       remainingTokens -= contentTokens
 
       const displayPaths = candidate.mentionedChangedPaths.slice(0, 3)
-      const overflow =
-        candidate.mentionedChangedPaths.length - displayPaths.length
+      const overflow = candidate.mentionedChangedPaths.length - displayPaths.length
       const reasonSuffix = overflow > 0 ? `, +${overflow} more` : ""
       relatedDocs.push({
         path: candidate.path,
@@ -932,9 +892,7 @@ export const createContextReader = (
 
     const excludedByCapPaths =
       capBreakIndex !== undefined
-        ? rankedCandidates
-            .slice(capBreakIndex)
-            .map((candidate) => candidate.path)
+        ? rankedCandidates.slice(capBreakIndex).map((candidate) => candidate.path)
         : []
 
     if (excludedByCapPaths.length > 0) {

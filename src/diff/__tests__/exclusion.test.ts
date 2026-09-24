@@ -49,9 +49,7 @@ describe("hasExcessiveWildcards", () => {
   it("accepts every shipped default pattern", () => {
     // Production-consistency check across two constants, not a drift test:
     // a default the cap itself would reject could never match anything
-    expect(DEFAULT_DIFF_EXCLUDE_PATTERNS.filter(hasExcessiveWildcards)).toEqual(
-      [],
-    )
+    expect(DEFAULT_DIFF_EXCLUDE_PATTERNS.filter(hasExcessiveWildcards)).toEqual([])
   })
 
   it("accepts globstar segments regardless of how many appear", () => {
@@ -140,8 +138,7 @@ describe("createExclusionMatcher — gitattributes rules", () => {
     expect(logger.messages).toEqual([
       {
         level: "warn",
-        message:
-          "gitattributes pattern exceeds the wildcard cap — rule ignored",
+        message: "gitattributes pattern exceeds the wildcard cap — rule ignored",
         data: { pattern: "*a*a*a*b" },
       },
     ])
@@ -194,9 +191,7 @@ describe("createExclusionMatcher — gitattributes rules", () => {
       gitAttributesContent: "__snapshots__ linguist-generated=true",
     })
 
-    expect(trailingSlash.classify("__snapshots__/x.json")).toBe(
-      "linguist_generated",
-    )
+    expect(trailingSlash.classify("__snapshots__/x.json")).toBe("linguist_generated")
     expect(bareName.classify("__snapshots__/x.json")).toBe("linguist_generated")
   })
 })
@@ -494,8 +489,6 @@ describe("summarizeExclusionSources", () => {
       },
     ]
 
-    expect(summarizeExclusionSources(excluded)).toBe(
-      "1 by built-in default list",
-    )
+    expect(summarizeExclusionSources(excluded)).toBe("1 by built-in default list")
   })
 })

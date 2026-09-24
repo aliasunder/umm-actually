@@ -3,11 +3,7 @@ import { createTestLogger } from "../../__tests__/test-logger.js"
 import type { StructuredReviewResult } from "../../openrouter/client.js"
 import type { Finding } from "../finding.js"
 import type { ReviewPhase } from "../phases.js"
-import {
-  AllPhasesFailedError,
-  runStages as dispatchStages,
-  type RunPhase,
-} from "../run-stages.js"
+import { AllPhasesFailedError, runStages as dispatchStages, type RunPhase } from "../run-stages.js"
 import { makeFinding } from "./make-finding.js"
 
 const runStages = (
@@ -22,9 +18,7 @@ const makePhase = (id: string): ReviewPhase => ({
   instructionSections: [`instructions for ${id}`],
 })
 
-const makeResult = (
-  overrides: Partial<StructuredReviewResult> = {},
-): StructuredReviewResult => ({
+const makeResult = (overrides: Partial<StructuredReviewResult> = {}): StructuredReviewResult => ({
   review: { analysis: "", findings: [] },
   modelUsed: "test/model",
   attempts: [],
@@ -36,24 +30,20 @@ type RecordedCall = { phase: string; priorFindings: Finding[] }
 /** A runPhase stub answering each phase id from a fixed table; records
  *  every call so dispatch order and prior findings can be asserted whole. */
 const makeRunPhase = (
-  responses: Record<
-    string,
-    () => Promise<StructuredReviewResult> | StructuredReviewResult
-  >,
+  responses: Record<string, () => Promise<StructuredReviewResult> | StructuredReviewResult>,
 ) => {
   const calls: RecordedCall[] = []
   const runPhase: RunPhase = async ({ phase, priorFindings }) => {
     calls.push({ phase: phase.id, priorFindings })
     const respond = responses[phase.id]
+
     if (!respond) throw new Error(`stub: no response for phase ${phase.id}`)
     return respond()
   }
   return { runPhase, calls }
 }
 
-const captureRejection = async (
-  pending: Promise<unknown>,
-): Promise<unknown> => {
+const captureRejection = async (pending: Promise<unknown>): Promise<unknown> => {
   try {
     await pending
     return undefined
@@ -77,8 +67,7 @@ describe("runStages", () => {
     )
     expect(calls).toEqual([])
     expect(rejection).toBeInstanceOf(AllPhasesFailedError)
-    if (!(rejection instanceof AllPhasesFailedError))
-      throw new Error("expected phase failure")
+    if (!(rejection instanceof AllPhasesFailedError)) throw new Error("expected phase failure")
     expect(rejection.outcomes).toEqual(
       [phaseA, phaseB].map((phase) => ({
         phase,
@@ -128,10 +117,7 @@ describe("runStages", () => {
       b: () => Promise.reject(deadlineError),
     })
 
-    const outcomes = await runStages(
-      { stages: [[phaseA, phaseB]], runPhase },
-      createTestLogger(),
-    )
+    const outcomes = await runStages({ stages: [[phaseA, phaseB]], runPhase }, createTestLogger())
 
     expect(outcomes).toEqual([
       { phase: phaseA, status: "completed", result: resultA },
@@ -153,10 +139,7 @@ describe("runStages", () => {
       b: () => resultB,
     })
 
-    const pending = runStages(
-      { stages: [[phaseA, phaseB]], runPhase },
-      createTestLogger(),
-    )
+    const pending = runStages({ stages: [[phaseA, phaseB]], runPhase }, createTestLogger())
     // Both phases were called before the first one settled
     expect(calls).toEqual([
       { phase: "a", priorFindings: [] },
@@ -179,10 +162,7 @@ describe("runStages", () => {
       c: () => makeResult(),
     })
 
-    await runStages(
-      { stages: [[phaseA], [phaseB], [phaseC]], runPhase },
-      createTestLogger(),
-    )
+    await runStages({ stages: [[phaseA], [phaseB], [phaseC]], runPhase }, createTestLogger())
 
     expect(calls).toEqual([
       { phase: "a", priorFindings: [] },
@@ -205,10 +185,7 @@ describe("runStages", () => {
       b: () => makeResult(),
     })
 
-    await runStages(
-      { stages: [[phaseA], [phaseB]], runPhase },
-      createTestLogger(),
-    )
+    await runStages({ stages: [[phaseA], [phaseB]], runPhase }, createTestLogger())
 
     expect(calls).toEqual([
       { phase: "a", priorFindings: [] },
@@ -224,10 +201,7 @@ describe("runStages", () => {
       b: () => Promise.reject(failure),
     })
 
-    const outcomes = await runStages(
-      { stages: [[phaseA, phaseB]], runPhase },
-      createTestLogger(),
-    )
+    const outcomes = await runStages({ stages: [[phaseA, phaseB]], runPhase }, createTestLogger())
 
     expect(outcomes).toEqual([
       { phase: phaseA, status: "completed", result: resultA },
@@ -246,12 +220,8 @@ describe("runStages", () => {
     if (!(rejection instanceof AllPhasesFailedError)) {
       throw new Error("expected an AllPhasesFailedError")
     }
-    expect(rejection.message).toBe(
-      "every review phase failed: a: [Error]: model exploded",
-    )
-    expect(rejection.outcomes).toEqual([
-      { phase: phaseA, status: "failed", error: failure },
-    ])
+    expect(rejection.message).toBe("every review phase failed: a: [Error]: model exploded")
+    expect(rejection.outcomes).toEqual([{ phase: phaseA, status: "failed", error: failure }])
   })
 
   it("names every failure in the message when nothing completed", async () => {
@@ -262,9 +232,7 @@ describe("runStages", () => {
 
     await expect(
       runStages({ stages: [[phaseA], [phaseB]], runPhase }, createTestLogger()),
-    ).rejects.toThrow(
-      "every review phase failed: a: [Error]: boom a; b: [Error]: boom b",
-    )
+    ).rejects.toThrow("every review phase failed: a: [Error]: boom a; b: [Error]: boom b")
   })
 
   it("skips later stages after an auth/credit abort and reports their phases as not attempted", async () => {
@@ -288,9 +256,7 @@ describe("runStages", () => {
       {
         phase: phaseC,
         status: "failed",
-        error: new Error(
-          "not attempted: an earlier phase aborted on an auth/credit error",
-        ),
+        error: new Error("not attempted: an earlier phase aborted on an auth/credit error"),
       },
     ])
   })
@@ -302,16 +268,10 @@ describe("runStages", () => {
       c: () => resultC,
     })
 
-    const outcomes = await runStages(
-      { stages: [[phaseA], [phaseC]], runPhase },
-      createTestLogger(),
-    )
+    const outcomes = await runStages({ stages: [[phaseA], [phaseC]], runPhase }, createTestLogger())
 
     expect(calls.map((call) => call.phase)).toEqual(["a", "c"])
-    expect(outcomes.map((outcome) => outcome.status)).toEqual([
-      "failed",
-      "completed",
-    ])
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(["failed", "completed"])
   })
 
   it.each([
@@ -320,9 +280,9 @@ describe("runStages", () => {
   ])("throws before any call for $label", async ({ stages }) => {
     const { runPhase, calls } = makeRunPhase({ a: () => makeResult() })
 
-    await expect(
-      runStages({ stages, runPhase }, createTestLogger()),
-    ).rejects.toThrow("no review phases to run")
+    await expect(runStages({ stages, runPhase }, createTestLogger())).rejects.toThrow(
+      "no review phases to run",
+    )
     expect(calls).toEqual([])
   })
 

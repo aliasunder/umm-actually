@@ -12,18 +12,16 @@ const captureStream = (
     lines: () =>
       writeSpy.mock.calls.map((call): WrittenLine => {
         const written = call[0]
-        if (typeof written !== "string")
-          throw new Error("expected string write")
+
+        if (typeof written !== "string") throw new Error("expected string write")
         return JSON.parse(written)
       }),
   }
 }
 
-const captureStdout = (): { lines: () => WrittenLine[] } =>
-  captureStream(process.stdout)
+const captureStdout = (): { lines: () => WrittenLine[] } => captureStream(process.stdout)
 
-const captureStderr = (): { lines: () => WrittenLine[] } =>
-  captureStream(process.stderr)
+const captureStderr = (): { lines: () => WrittenLine[] } => captureStream(process.stderr)
 
 describe("createLogger", () => {
   it("writes a structured JSON line with timestamp, level, name, message, and data", () => {

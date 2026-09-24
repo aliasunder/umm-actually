@@ -10,20 +10,15 @@ import {
 } from "../client.js"
 
 const readJsonFixture = (name: string): unknown =>
-  JSON.parse(
-    readFileSync(new URL(`../../../fixtures/${name}`, import.meta.url), "utf8"),
-  )
+  JSON.parse(readFileSync(new URL(`../../../fixtures/${name}`, import.meta.url), "utf8"))
 
 const acceptedChatResult = readJsonFixture("openrouter.chat-result.json")
 const invalidJsonChatResult = readJsonFixture("openrouter.invalid-json.json")
-const schemaMismatchChatResult = readJsonFixture(
-  "openrouter.schema-mismatch.json",
-)
+const schemaMismatchChatResult = readJsonFixture("openrouter.schema-mismatch.json")
 
 /** The review JSON embedded in the accepted chat-result fixture, parsed. */
 const acceptedReview = {
-  analysis:
-    "src/greeter.ts: verified the empty-key guard and traced register() callers.",
+  analysis: "src/greeter.ts: verified the empty-key guard and traced register() callers.",
   findings: [],
 }
 
@@ -41,9 +36,7 @@ type StubOptions = { signal?: AbortSignal } | undefined
 /** `pending` hands the call's options to a custom promise — for a request
  *  that never settles, settles late, or honours the abort signal. */
 type StubResponse =
-  | { value: unknown }
-  | { error: unknown }
-  | { pending: (options: StubOptions) => Promise<unknown> }
+  { value: unknown } | { error: unknown } | { pending: (options: StubOptions) => Promise<unknown> }
 
 const makeSdkStub = ({
   sendResponses,
@@ -73,6 +66,7 @@ const makeSdkStub = ({
     options: StubOptions
   }): unknown => {
     const next = queue[callCount - 1]
+
     if (next === undefined) {
       throw new Error(`stub: unexpected ${operation} call #${callCount}`)
     }
@@ -127,9 +121,7 @@ const makeStatusError = (statusCode: number): Error =>
   Object.assign(new Error(`HTTP ${statusCode}`), { statusCode })
 
 /** The rejection of a request expected to fail, so its fields can be asserted. */
-const captureRejection = async (
-  request: Promise<unknown>,
-): Promise<unknown> => {
+const captureRejection = async (request: Promise<unknown>): Promise<unknown> => {
   try {
     await request
     return undefined
@@ -210,10 +202,7 @@ describe("requestReview", () => {
               ]
             : []),
           {
-            model:
-              rung === "primary"
-                ? requestParams.model
-                : requestParams.fallbackModel,
+            model: rung === "primary" ? requestParams.model : requestParams.fallbackModel,
             outcome: "timeout",
             promptTokens: null,
             completionTokens: null,
@@ -238,14 +227,9 @@ describe("requestReview", () => {
             aborted: options?.signal?.aborted,
           })),
         ).toEqual([
-          ...(rung === "fallback"
-            ? [{ model: requestParams.model, aborted: false }]
-            : []),
+          ...(rung === "fallback" ? [{ model: requestParams.model, aborted: false }] : []),
           {
-            model:
-              rung === "primary"
-                ? requestParams.model
-                : requestParams.fallbackModel,
+            model: rung === "primary" ? requestParams.model : requestParams.fallbackModel,
             aborted: true,
           },
         ])
@@ -307,9 +291,9 @@ describe("requestReview", () => {
           },
         ],
       })
-      expect(
-        stub.sendCalls.map(({ chatRequest }) => chatRequest.model),
-      ).toEqual([requestParams.model])
+      expect(stub.sendCalls.map(({ chatRequest }) => chatRequest.model)).toEqual([
+        requestParams.model,
+      ])
       expect(vi.getTimerCount()).toBe(0)
     } finally {
       vi.useRealTimers()
@@ -396,9 +380,9 @@ describe("requestReview", () => {
       late.resolve({ data: { totalCost: 42 } })
       await vi.advanceTimersByTimeAsync(1000)
       expect(result).toEqual(expected)
-      expect(
-        stub.sendCalls.map(({ chatRequest }) => chatRequest.model),
-      ).toEqual([requestParams.model])
+      expect(stub.sendCalls.map(({ chatRequest }) => chatRequest.model)).toEqual([
+        requestParams.model,
+      ])
       expect(vi.getTimerCount()).toBe(0)
     } finally {
       vi.useRealTimers()
@@ -462,18 +446,16 @@ describe("requestReview", () => {
 
   it("retries the same model once on invalid JSON, recording both attempts", async () => {
     const stub = makeSdkStub({
-      sendResponses: [
-        { value: invalidJsonChatResult },
-        { value: acceptedChatResult },
-      ],
+      sendResponses: [{ value: invalidJsonChatResult }, { value: acceptedChatResult }],
     })
     const { client } = makeClient(stub)
 
     const result = await client.requestReview(requestParams)
 
-    expect(
-      stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
-    ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
+    expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
+      "openai/gpt-5-mini",
+      "openai/gpt-5-mini",
+    ])
     expect(result.attempts).toEqual([
       {
         model: "openai/gpt-5-mini",
@@ -502,19 +484,13 @@ describe("requestReview", () => {
       usage: { promptTokens: 10, completionTokens: 0, cost: null },
     }
     const stub = makeSdkStub({
-      sendResponses: [
-        { value: emptyContentResult },
-        { value: acceptedChatResult },
-      ],
+      sendResponses: [{ value: emptyContentResult }, { value: acceptedChatResult }],
     })
     const { client } = makeClient(stub)
 
     const result = await client.requestReview(requestParams)
 
-    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual([
-      "empty_content",
-      "accepted",
-    ])
+    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["empty_content", "accepted"])
   })
 
   it("advances to the fallback model after two schema mismatches", async () => {
@@ -529,9 +505,7 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams)
 
-    expect(
-      stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
-    ).toEqual([
+    expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
       "openai/gpt-5-mini",
       "openai/gpt-5-mini",
       "anthropic/claude-haiku-4.5",
@@ -545,18 +519,16 @@ describe("requestReview", () => {
 
   it("retries the same model once on a 429", async () => {
     const stub = makeSdkStub({
-      sendResponses: [
-        { error: makeStatusError(429) },
-        { value: acceptedChatResult },
-      ],
+      sendResponses: [{ error: makeStatusError(429) }, { value: acceptedChatResult }],
     })
     const { client } = makeClient(stub)
 
     const result = await client.requestReview(requestParams)
 
-    expect(
-      stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
-    ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
+    expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
+      "openai/gpt-5-mini",
+      "openai/gpt-5-mini",
+    ])
     expect(result.attempts[0]).toEqual({
       model: "openai/gpt-5-mini",
       outcome: "api_error",
@@ -569,18 +541,16 @@ describe("requestReview", () => {
 
   it("retries a status-less network error and records its bare message", async () => {
     const stub = makeSdkStub({
-      sendResponses: [
-        { error: new Error("socket hang up") },
-        { value: acceptedChatResult },
-      ],
+      sendResponses: [{ error: new Error("socket hang up") }, { value: acceptedChatResult }],
     })
     const { client } = makeClient(stub)
 
     const result = await client.requestReview(requestParams)
 
-    expect(
-      stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
-    ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
+    expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
+      "openai/gpt-5-mini",
+      "openai/gpt-5-mini",
+    ])
     expect(result.attempts[0]).toEqual({
       model: "openai/gpt-5-mini",
       outcome: "api_error",
@@ -601,9 +571,10 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams)
 
-    expect(
-      stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
-    ).toEqual(["openai/gpt-5-mini", "openai/gpt-5-mini"])
+    expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
+      "openai/gpt-5-mini",
+      "openai/gpt-5-mini",
+    ])
     expect(stub.sendCalls[0]?.options).toEqual({
       retries: { strategy: "none" },
       signal: expect.any(AbortSignal),
@@ -653,10 +624,7 @@ describe("requestReview", () => {
             reject(
               Object.assign(new Error("Request aborted by client"), {
                 name: "RequestAbortedError",
-                cause: new DOMException(
-                  "This operation was aborted",
-                  "AbortError",
-                ),
+                cause: new DOMException("This operation was aborted", "AbortError"),
               }),
             ),
           )
@@ -732,9 +700,10 @@ describe("requestReview", () => {
       await vi.advanceTimersByTimeAsync(45_000)
       const result = await reviewPromise
 
-      expect(
-        stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
-      ).toEqual(["openai/gpt-5-mini", "anthropic/claude-haiku-4.5"])
+      expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
+        "openai/gpt-5-mini",
+        "anthropic/claude-haiku-4.5",
+      ])
       expect(result.attempts).toEqual([
         {
           model: "openai/gpt-5-mini",
@@ -794,10 +763,7 @@ describe("requestReview", () => {
         })
       }
       const stub = makeSdkStub({
-        sendResponses: [
-          { pending: resolveLate },
-          { value: acceptedChatResult },
-        ],
+        sendResponses: [{ pending: resolveLate }, { value: acceptedChatResult }],
       })
       const logger = createTestLogger()
       const client = createOpenRouterClient(
@@ -813,9 +779,7 @@ describe("requestReview", () => {
       const reviewPromise = client.requestReview(requestParams)
       await vi.advanceTimersByTimeAsync(45_000)
       const result = await reviewPromise
-      expect(
-        result.attempts.map((attempt) => [attempt.model, attempt.outcome]),
-      ).toEqual([
+      expect(result.attempts.map((attempt) => [attempt.model, attempt.outcome])).toEqual([
         ["openai/gpt-5-mini", "timeout"],
         ["anthropic/claude-haiku-4.5", "accepted"],
       ])
@@ -863,9 +827,7 @@ describe("requestReview", () => {
       const reviewPromise = client.requestReview(requestParams)
       await vi.advanceTimersByTimeAsync(45_000)
       const result = await reviewPromise
-      expect(
-        result.attempts.map((attempt) => [attempt.model, attempt.outcome]),
-      ).toEqual([
+      expect(result.attempts.map((attempt) => [attempt.model, attempt.outcome])).toEqual([
         ["openai/gpt-5-mini", "timeout"],
         ["anthropic/claude-haiku-4.5", "accepted"],
       ])
@@ -975,9 +937,7 @@ describe("requestReview", () => {
       await expect(reviewPromise).rejects.toThrow(
         "review request failed after 3 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); anthropic/claude-haiku-4.5: timeout (no response within 45s); anthropic/claude-haiku-4.5: timeout (no response within 45s)",
       )
-      expect(
-        stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
-      ).toEqual([
+      expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
         "openai/gpt-5-mini",
         "anthropic/claude-haiku-4.5",
         "anthropic/claude-haiku-4.5",
@@ -1014,9 +974,7 @@ describe("requestReview", () => {
         await vi.advanceTimersByTimeAsync(45_000)
         await reviewPromise
 
-        const retrySleepCalls = setTimeoutSpy.mock.calls.filter(
-          (call) => call[1] === retryDelayMs,
-        )
+        const retrySleepCalls = setTimeoutSpy.mock.calls.filter((call) => call[1] === retryDelayMs)
         expect(retrySleepCalls).toHaveLength(0)
       } finally {
         setTimeoutSpy.mockRestore()
@@ -1087,10 +1045,7 @@ describe("requestReview", () => {
   it("does not sleep after the final attempt when retries are exhausted", async () => {
     const retryDelayMs = 50
     const stub = makeSdkStub({
-      sendResponses: [
-        { error: makeStatusError(429) },
-        { error: makeStatusError(429) },
-      ],
+      sendResponses: [{ error: makeStatusError(429) }, { error: makeStatusError(429) }],
     })
     const logger = createTestLogger()
     const client = createOpenRouterClient(
@@ -1105,16 +1060,14 @@ describe("requestReview", () => {
 
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
     try {
-      await expect(
-        client.requestReview({ ...requestParams, fallbackModel: null }),
-      ).rejects.toThrow("review request failed")
+      await expect(client.requestReview({ ...requestParams, fallbackModel: null })).rejects.toThrow(
+        "review request failed",
+      )
 
       // retryDelayMs sleeps happen between retryable failures; the guard
       // `attemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
       // after the final attempt. Only one sleep (between attempts 1 and 2).
-      const retrySleepCalls = setTimeoutSpy.mock.calls.filter(
-        (call) => call[1] === retryDelayMs,
-      )
+      const retrySleepCalls = setTimeoutSpy.mock.calls.filter((call) => call[1] === retryDelayMs)
       expect(retrySleepCalls).toHaveLength(1)
       expect(stub.sendCalls).toHaveLength(2)
     } finally {
@@ -1137,29 +1090,22 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams)
 
-    expect(result.attempts[0]?.errorSummary).toBe(
-      `HTTP 429: ${"x".repeat(200)}…`,
-    )
+    expect(result.attempts[0]?.errorSummary).toBe(`HTTP 429: ${"x".repeat(200)}…`)
   })
 
   it("advances to the fallback model without a retry on a 404", async () => {
     const stub = makeSdkStub({
-      sendResponses: [
-        { error: makeStatusError(404) },
-        { value: acceptedChatResult },
-      ],
+      sendResponses: [{ error: makeStatusError(404) }, { value: acceptedChatResult }],
     })
     const { client } = makeClient(stub)
 
     const result = await client.requestReview(requestParams)
 
-    expect(
-      stub.sendCalls.map((sendCall) => sendCall.chatRequest.model),
-    ).toEqual(["openai/gpt-5-mini", "anthropic/claude-haiku-4.5"])
-    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual([
-      "api_error",
-      "accepted",
+    expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
+      "openai/gpt-5-mini",
+      "anthropic/claude-haiku-4.5",
     ])
+    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["api_error", "accepted"])
   })
 
   it.each([401, 402, 403])(
@@ -1179,16 +1125,11 @@ describe("requestReview", () => {
 
   it("throws a per-attempt summary after exhausting a fallback-less ladder", async () => {
     const stub = makeSdkStub({
-      sendResponses: [
-        { error: makeStatusError(500) },
-        { error: makeStatusError(503) },
-      ],
+      sendResponses: [{ error: makeStatusError(500) }, { error: makeStatusError(503) }],
     })
     const { client } = makeClient(stub)
 
-    await expect(
-      client.requestReview({ ...requestParams, fallbackModel: null }),
-    ).rejects.toThrow(
+    await expect(client.requestReview({ ...requestParams, fallbackModel: null })).rejects.toThrow(
       "review request failed after 2 attempt(s): openai/gpt-5-mini: api_error (HTTP 500: HTTP 500); openai/gpt-5-mini: api_error (HTTP 503: HTTP 503)",
     )
     expect(stub.sendCalls).toHaveLength(2)
@@ -1196,10 +1137,7 @@ describe("requestReview", () => {
 
   it("carries every billed attempt on the error when the ladder is exhausted", async () => {
     const stub = makeSdkStub({
-      sendResponses: [
-        { error: makeStatusError(500) },
-        { error: makeStatusError(503) },
-      ],
+      sendResponses: [{ error: makeStatusError(500) }, { error: makeStatusError(503) }],
     })
     const { client } = makeClient(stub)
 
@@ -1274,10 +1212,7 @@ describe("requestReview", () => {
 
   it("treats an unrecognized chat response shape as a retryable api_error", async () => {
     const stub = makeSdkStub({
-      sendResponses: [
-        { value: { unexpected: true } },
-        { value: acceptedChatResult },
-      ],
+      sendResponses: [{ value: { unexpected: true } }, { value: acceptedChatResult }],
     })
     const { client } = makeClient(stub)
 

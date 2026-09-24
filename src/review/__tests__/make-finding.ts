@@ -11,7 +11,6 @@ export const makeFinding = (overrides: Partial<Finding> = {}): Finding => ({
   title: "Whitespace-only keys pass the empty-key guard",
   description: "The guard rejects only the exact empty string.",
   suggestion: null,
-  failure_scenario:
-    'register(" ", "value") succeeds and the entry is orphaned.',
+  failure_scenario: 'register(" ", "value") succeeds and the entry is orphaned.',
   ...overrides,
 })

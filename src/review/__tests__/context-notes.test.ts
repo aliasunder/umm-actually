@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest"
 import { buildContextNotes, type ContextNotesInput } from "../context-notes.js"
 import type { PromptFile } from "../prompt.js"
 
-const makeInput = (
-  overrides: Partial<ContextNotesInput> = {},
-): ContextNotesInput => ({
+const makeInput = (overrides: Partial<ContextNotesInput> = {}): ContextNotesInput => ({
   priorityDocs: [],
   priorityDocsInContext: [],
   priorityDocsRead: [],
@@ -23,8 +21,7 @@ const makePriorityDoc = (path: string): PromptFile => ({
 
 // Test-owned expected strings: importing the production templates would let
 // both sides drift together and pass trivially on any wording change.
-const inContextNote = (paths: string): string =>
-  `Priority docs already in context: ${paths}`
+const inContextNote = (paths: string): string => `Priority docs already in context: ${paths}`
 
 const notIncludedNote = (paths: string): string =>
   `Priority docs not included: ${paths} (missing, unreadable, or over budget)`
@@ -71,10 +68,7 @@ describe("buildContextNotes", () => {
       }),
     )
 
-    expect(notes).toEqual([
-      inContextNote("`README.md`"),
-      notIncludedNote("`MISSING.md`"),
-    ])
+    expect(notes).toEqual([inContextNote("`README.md`"), notIncludedNote("`MISSING.md`")])
   })
 
   it("omits a priority doc that readPriorityDocs returned from both notes", () => {
@@ -96,10 +90,7 @@ describe("buildContextNotes", () => {
       }),
     )
 
-    expect(notes).toEqual([
-      inContextNote("`./README.md`"),
-      notIncludedNote("`MISSING.md`"),
-    ])
+    expect(notes).toEqual([inContextNote("`./README.md`"), notIncludedNote("`MISSING.md`")])
   })
 
   it("normalizes a dot-prefixed in-context path before comparing", () => {
@@ -110,24 +101,17 @@ describe("buildContextNotes", () => {
       }),
     )
 
-    expect(notes).toEqual([
-      inContextNote("`docs/api.md`"),
-      notIncludedNote("`MISSING.md`"),
-    ])
+    expect(notes).toEqual([inContextNote("`docs/api.md`"), notIncludedNote("`MISSING.md`")])
   })
 
   it("renders the configured spelling rather than the normalized path", () => {
-    const notes = buildContextNotes(
-      makeInput({ priorityDocs: ["./docs/../MISSING.md"] }),
-    )
+    const notes = buildContextNotes(makeInput({ priorityDocs: ["./docs/../MISSING.md"] }))
 
     expect(notes).toEqual([notIncludedNote("`./docs/../MISSING.md`")])
   })
 
   it("lists a doc once when priority_docs names it under two spellings", () => {
-    const notes = buildContextNotes(
-      makeInput({ priorityDocs: ["./MISSING.md", "MISSING.md"] }),
-    )
+    const notes = buildContextNotes(makeInput({ priorityDocs: ["./MISSING.md", "MISSING.md"] }))
 
     expect(notes).toEqual([notIncludedNote("`./MISSING.md`")])
   })
@@ -156,9 +140,7 @@ describe("buildContextNotes", () => {
   })
 
   it("reports related docs excluded by the cap", () => {
-    const notes = buildContextNotes(
-      makeInput({ docsExcludedPaths: ["docs/overflow.md"] }),
-    )
+    const notes = buildContextNotes(makeInput({ docsExcludedPaths: ["docs/overflow.md"] }))
 
     expect(notes).toEqual([
       "1 related doc(s) excluded by `max_related_docs` cap: `docs/overflow.md`",

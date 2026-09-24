@@ -46,23 +46,18 @@ export const mergePhaseFindings = <FindingType extends Finding>(
     return phaseFindings.map((finding) => ({ finding, phaseIndex }))
   })
 
-  const kept = phased.reduce<PhasedFinding<FindingType>[]>(
-    (keptSoFar, candidate) => {
-      const overlapping = keptSoFar.filter((entry) =>
-        isCrossPhaseDuplicate(candidate, entry),
-      )
-      if (overlapping.length === 0) return [...keptSoFar, candidate]
-      const outranksAll = overlapping.every((entry) =>
-        outranks(candidate.finding, entry.finding),
-      )
-      if (!outranksAll) return keptSoFar
-      return keptSoFar.flatMap((entry) => {
-        if (entry === overlapping[0]) return [candidate]
-        return overlapping.includes(entry) ? [] : [entry]
-      })
-    },
-    [],
-  )
+  const kept = phased.reduce<PhasedFinding<FindingType>[]>((keptSoFar, candidate) => {
+    const overlapping = keptSoFar.filter((entry) => isCrossPhaseDuplicate(candidate, entry))
+
+    if (overlapping.length === 0) return [...keptSoFar, candidate]
+    const outranksAll = overlapping.every((entry) => outranks(candidate.finding, entry.finding))
+
+    if (!outranksAll) return keptSoFar
+    return keptSoFar.flatMap((entry) => {
+      if (entry === overlapping[0]) return [candidate]
+      return overlapping.includes(entry) ? [] : [entry]
+    })
+  }, [])
 
   return {
     findings: kept.map((entry) => entry.finding),

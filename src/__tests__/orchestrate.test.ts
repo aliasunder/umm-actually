@@ -2,11 +2,7 @@ import { readFileSync } from "node:fs"
 import parseDiff from "parse-diff"
 import { describe, expect, it, vi } from "vitest"
 import type { ActionConfig } from "../config.js"
-import type {
-  CheckRunConclusion,
-  CheckRunOutput,
-  GithubClient,
-} from "../github/client.js"
+import type { CheckRunConclusion, CheckRunOutput, GithubClient } from "../github/client.js"
 import type { PrContext } from "../github/event.js"
 import type { ContextReader } from "../context/workspace.js"
 import {
@@ -16,18 +12,10 @@ import {
   type OpenRouterClient,
   type StructuredReviewResult,
 } from "../openrouter/client.js"
-import {
-  buildUserPrompt,
-  estimateTokens,
-  type PromptFile,
-} from "../review/prompt.js"
+import { buildUserPrompt, estimateTokens, type PromptFile } from "../review/prompt.js"
 import { annotateDiff } from "../diff/annotate-diff.js"
 import { computeCommentableLines } from "../diff/commentable-lines.js"
-import type {
-  AttributedFinding,
-  Finding,
-  ReviewResponse,
-} from "../review/finding.js"
+import type { AttributedFinding, Finding, ReviewResponse } from "../review/finding.js"
 import {
   buildStatusComment,
   computeAnchorKey,
@@ -46,10 +34,7 @@ import {
 } from "../review/phases.js"
 import { selectFindings } from "../review/select-findings.js"
 import { renderCostSummary } from "../openrouter/cost-summary.js"
-import {
-  renderReviewSummary,
-  type ReviewSummaryStats,
-} from "../review/review-summary.js"
+import { renderReviewSummary, type ReviewSummaryStats } from "../review/review-summary.js"
 import {
   orchestrate,
   createPromptedGenerateFindings,
@@ -60,25 +45,16 @@ import {
 import { makeFinding } from "../review/__tests__/make-finding.js"
 import { createTestLogger } from "./test-logger.js"
 
-const sampleDiff = readFileSync(
-  new URL("../../fixtures/sample.diff", import.meta.url),
-  "utf8",
-)
+const sampleDiff = readFileSync(new URL("../../fixtures/sample.diff", import.meta.url), "utf8")
 
 const sampleDiffTokens = estimateTokens(annotateDiff(parseDiff(sampleDiff)))
 
 const pullRequestPayload: Record<string, unknown> = JSON.parse(
-  readFileSync(
-    new URL("../../fixtures/pull_request.opened.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL("../../fixtures/pull_request.opened.json", import.meta.url), "utf8"),
 )
 
 const fixtureReviewResponse: ReviewResponse = JSON.parse(
-  readFileSync(
-    new URL("../../fixtures/openrouter.response.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL("../../fixtures/openrouter.response.json", import.meta.url), "utf8"),
 )
 
 const fixturePrContext: PrContext = {
@@ -110,15 +86,12 @@ const fixtureChangedFile: PromptFile = {
 const fixtureFiles = parseDiff(sampleDiff)
 const fixtureCommentableByPath = computeCommentableLines(fixtureFiles)
 
-const withRoutedModel = (
-  finding: Finding,
-  modelUsed: string,
-): AttributedFinding => ({ ...finding, modelUsed })
+const withRoutedModel = (finding: Finding, modelUsed: string): AttributedFinding => ({
+  ...finding,
+  modelUsed,
+})
 
-const findingsWithRoutedModel = (
-  findings: Finding[],
-  modelUsed: string,
-): AttributedFinding[] => {
+const findingsWithRoutedModel = (findings: Finding[], modelUsed: string): AttributedFinding[] => {
   return findings.map((finding) => withRoutedModel(finding, modelUsed))
 }
 
@@ -136,9 +109,7 @@ const expectedCostSummary = renderCostSummary({
   modelUsed: "test/model",
 })
 
-const expectedReviewSummary = (
-  overrides: Partial<ReviewSummaryStats> = {},
-): string =>
+const expectedReviewSummary = (overrides: Partial<ReviewSummaryStats> = {}): string =>
   renderReviewSummary({
     prContext: fixturePrContext,
     conventionsFile: "AGENTS.md",
@@ -174,10 +145,7 @@ const expectedCappedSelection = selectFindings({
   maxFindings: 1,
 })
 const expectedCappedMapped = mapFindingsToReview({
-  findings: findingsWithRoutedModel(
-    expectedCappedSelection.selected,
-    "test/model",
-  ),
+  findings: findingsWithRoutedModel(expectedCappedSelection.selected, "test/model"),
   commentableByPath: fixtureCommentableByPath,
 })
 
@@ -230,13 +198,7 @@ const expectedStatus = ({
   }),
 })
 
-const buildSkipBody = ({
-  reason,
-  detail,
-}: {
-  reason: string
-  detail?: string
-}): string => {
+const buildSkipBody = ({ reason, detail }: { reason: string; detail?: string }): string => {
   const detailSection = detail ? `\n\n${detail}` : ""
   return `**umm-actually** — review skipped\n\n${reason}${detailSection}\n\n---\n*umm-actually*`
 }
@@ -306,6 +268,7 @@ type RequestReviewParams = {
 
 const first = <T>(array: T[]): T => {
   const item = array[0]
+
   if (item === undefined) throw new Error("expected at least one element")
   return item
 }
@@ -724,9 +687,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      const keptFiles = fixtureFiles.filter(
-        (file) => (file.to ?? file.from) !== "assets/logo.png",
-      )
+      const keptFiles = fixtureFiles.filter((file) => (file.to ?? file.from) !== "assets/logo.png")
       const expectedExcludedNote = [
         "1 changed file(s) excluded from review (content not shown):",
         "- assets/logo.png (+0/-0, diff_exclude_paths input)",
@@ -783,9 +744,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(first(stubs.readPriorityDocsCalls).priorityDocs).toEqual([
-        "docs/guide.md",
-      ])
+      expect(first(stubs.readPriorityDocsCalls).priorityDocs).toEqual(["docs/guide.md"])
     })
 
     it("passes diff-excluded paths to the related-file and doc scans as exclusions", async () => {
@@ -801,12 +760,8 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(first(stubs.findRelatedFilesCalls).excludePaths).toEqual([
-        "assets/logo.png",
-      ])
-      expect(first(stubs.findRelatedDocsCalls).excludePaths).toEqual([
-        "assets/logo.png",
-      ])
+      expect(first(stubs.findRelatedFilesCalls).excludePaths).toEqual(["assets/logo.png"])
+      expect(first(stubs.findRelatedDocsCalls).excludePaths).toEqual(["assets/logo.png"])
     })
 
     it("passes the budget check when the oversized files are all excluded", async () => {
@@ -877,9 +832,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      const keptFiles = fixtureFiles.filter(
-        (file) => (file.to ?? file.from) !== "assets/logo.png",
-      )
+      const keptFiles = fixtureFiles.filter((file) => (file.to ?? file.from) !== "assets/logo.png")
       const expectedExcludedNote = [
         "1 changed file(s) excluded from review (content not shown):",
         "- assets/logo.png (+0/-0, linguist-generated attribute)",
@@ -905,9 +858,7 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(readGitAttributesCalls).toHaveLength(0)
-      expect(first(stubs.generateFindingsCalls).annotatedDiff).toBe(
-        annotateDiff(fixtureFiles),
-      )
+      expect(first(stubs.generateFindingsCalls).annotatedDiff).toBe(annotateDiff(fixtureFiles))
     })
 
     it("passes correct prNumber and commitId in skip reviews", async () => {
@@ -1053,9 +1004,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, createTestLogger())
 
-      expect(
-        stubs.readPriorityDocsCalls.map((call) => call.budgetTokens),
-      ).toEqual([8_000, 40_000])
+      expect(stubs.readPriorityDocsCalls.map((call) => call.budgetTokens)).toEqual([8_000, 40_000])
       expect(first(stubs.readChangedFilesCalls).budgetTokens).toBe(
         baseConfig.contextBudgetTokens - sampleDiffTokens,
       )
@@ -1080,9 +1029,9 @@ describe("orchestrate", () => {
           readPriorityDocs: async (params) => {
             readPriorityDocsCalls.push(params)
             const firstPath = first(params.priorityDocs)
-            const selectedDoc =
-              firstPath === unchangedDoc.path ? unchangedDoc : changedDoc
+            const selectedDoc = firstPath === unchangedDoc.path ? unchangedDoc : changedDoc
             const selectedTokens = estimateTokens(selectedDoc.content)
+
             if (selectedTokens > params.budgetTokens) {
               return { files: [], remainingTokens: params.budgetTokens }
             }
@@ -1092,9 +1041,7 @@ describe("orchestrate", () => {
             }
           },
           readChangedFiles: async (params) => {
-            const changedWasReadEarly = params.diffOnlyPaths.includes(
-              changedDoc.path,
-            )
+            const changedWasReadEarly = params.diffOnlyPaths.includes(changedDoc.path)
             return {
               files: [
                 changedWasReadEarly
@@ -1141,8 +1088,7 @@ describe("orchestrate", () => {
         contextReader: {
           readPriorityDocs: async (params) => ({
             files: [changedDoc],
-            remainingTokens:
-              params.budgetTokens - estimateTokens(changedDoc.content),
+            remainingTokens: params.budgetTokens - estimateTokens(changedDoc.content),
           }),
           readChangedFiles: async (params) => {
             readChangedFilesCalls.push(params)
@@ -1163,10 +1109,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, createTestLogger())
 
-      expect(first(readChangedFilesCalls).diffOnlyPaths).toEqual([
-        "AGENTS.md",
-        changedDoc.path,
-      ])
+      expect(first(readChangedFilesCalls).diffOnlyPaths).toEqual(["AGENTS.md", changedDoc.path])
       const reviewContext = first(stubs.generateFindingsCalls)
       expect(reviewContext.changedFiles).toEqual([
         { path: changedDoc.path, content: "", includedAs: "diff-only" },
@@ -1204,15 +1147,12 @@ describe("orchestrate", () => {
         contextReader: {
           readPriorityDocs: async (params) => ({
             files: [priorityDoc],
-            remainingTokens:
-              params.budgetTokens - estimateTokens(priorityDoc.content),
+            remainingTokens: params.budgetTokens - estimateTokens(priorityDoc.content),
           }),
           findRelatedFiles: async (params) => {
             relatedFileCalls.push(params)
             return {
-              files: params.excludePaths.includes(priorityDoc.path)
-                ? []
-                : [priorityDoc],
+              files: params.excludePaths.includes(priorityDoc.path) ? [] : [priorityDoc],
               excludedByCapPaths: [],
             }
           },
@@ -1221,9 +1161,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, createTestLogger())
 
-      expect(relatedFileCalls.map((call) => call.excludePaths)).toEqual([
-        [priorityDoc.path],
-      ])
+      expect(relatedFileCalls.map((call) => call.excludePaths)).toEqual([[priorityDoc.path]])
       const reviewContext = first(stubs.generateFindingsCalls)
       expect(reviewContext.relatedFiles).toEqual([])
       expect(reviewContext.relatedDocs).toEqual([priorityDoc])
@@ -1281,15 +1219,9 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, createTestLogger())
 
-      expect(readPriorityDocsCalls.map((call) => call.budgetTokens)).toEqual([
-        8_000, 10_000,
-      ])
+      expect(readPriorityDocsCalls.map((call) => call.budgetTokens)).toEqual([8_000, 10_000])
       expect(first(stubs.findRelatedFilesCalls).budgetTokens).toBe(8_000)
-      expect(first(stubs.generateFindingsCalls).relatedDocs).toEqual([
-        firstDoc,
-        middleDoc,
-        lastDoc,
-      ])
+      expect(first(stubs.generateFindingsCalls).relatedDocs).toEqual([firstDoc, middleDoc, lastDoc])
     })
 
     it("fails the check when an early priority-doc read reaches the review deadline", async () => {
@@ -1323,10 +1255,7 @@ describe("orchestrate", () => {
         "every review phase failed: combined: [Error]: not attempted: review deadline exceeded",
       )
 
-      expect(operations.slice(0, 2)).toEqual([
-        "read priority docs",
-        "read changed files",
-      ])
+      expect(operations.slice(0, 2)).toEqual(["read priority docs", "read changed files"])
       expect(stubs.generateFindingsCalls).toEqual([])
       expect(stubs.postFindingsReviewCalls).toEqual([])
       expect(stubs.upsertSummaryCommentCalls).toEqual([])
@@ -1359,9 +1288,7 @@ describe("orchestrate", () => {
 
       expect(localReadChangedFilesCalls).toHaveLength(1)
       const call = first(localReadChangedFilesCalls)
-      expect(call.budgetTokens).toBe(
-        baseConfig.contextBudgetTokens - sampleDiffTokens,
-      )
+      expect(call.budgetTokens).toBe(baseConfig.contextBudgetTokens - sampleDiffTokens)
     })
 
     it("passes remainingTokens from readChangedFiles to findRelatedFiles", async () => {
@@ -1442,9 +1369,7 @@ describe("orchestrate", () => {
 
       expect(localDocCalls).toHaveLength(1)
       const call = first(localDocCalls)
-      expect(call.budgetTokens).toBe(
-        expectedRemainingTokens - relatedFileTokens,
-      )
+      expect(call.budgetTokens).toBe(expectedRemainingTokens - relatedFileTokens)
     })
 
     it("passes conventionsFile to findRelatedDocs for exclusion", async () => {
@@ -1456,9 +1381,7 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.findRelatedDocsCalls).toHaveLength(1)
-      expect(first(stubs.findRelatedDocsCalls).conventionsFile).toBe(
-        "CUSTOM.md",
-      )
+      expect(first(stubs.findRelatedDocsCalls).conventionsFile).toBe("CUSTOM.md")
     })
 
     it("passes priorityDocs as excludePaths to findRelatedDocs", async () => {
@@ -1473,10 +1396,7 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.findRelatedDocsCalls).toHaveLength(1)
-      expect(first(stubs.findRelatedDocsCalls).excludePaths).toEqual([
-        "README.md",
-        "CHANGELOG.md",
-      ])
+      expect(first(stubs.findRelatedDocsCalls).excludePaths).toEqual(["README.md", "CHANGELOG.md"])
     })
 
     it("clamps doc budget to zero when related files exhaust remaining tokens", async () => {
@@ -1513,9 +1433,7 @@ describe("orchestrate", () => {
 
       expect(localPriorityDocsCalls).toHaveLength(2)
       // remainingTokens (10) < relatedFilesTokens (25) → Math.max(0, -15) = 0
-      expect(localPriorityDocsCalls.map((call) => call.budgetTokens)).toEqual([
-        8_000, 0,
-      ])
+      expect(localPriorityDocsCalls.map((call) => call.budgetTokens)).toEqual([8_000, 0])
       expect(largeRelatedFileTokens).toBeGreaterThan(10)
     })
 
@@ -1662,9 +1580,7 @@ describe("orchestrate", () => {
           isFirstRun: true,
           postedCount: expectedSelection.selected.length,
           totalCount: expectedSelection.selected.length,
-          contextNotes: [
-            "1 related doc(s) excluded by `max_related_docs` cap: `docs/overflow.md`",
-          ],
+          contextNotes: ["1 related doc(s) excluded by `max_related_docs` cap: `docs/overflow.md`"],
         }),
       ])
     })
@@ -1782,9 +1698,10 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(
-        stubs.readPriorityDocsCalls.map((call) => call.excludePaths),
-      ).toEqual([[], ["AGENTS.md"]])
+      expect(stubs.readPriorityDocsCalls.map((call) => call.excludePaths)).toEqual([
+        [],
+        ["AGENTS.md"],
+      ])
     })
 
     it("excludes changed files, related files, and conventions from the priority-doc read", async () => {
@@ -1811,9 +1728,10 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(
-        stubs.readPriorityDocsCalls.map((call) => call.excludePaths),
-      ).toEqual([[], ["src/greeter.ts", "src/caller.ts", "AGENTS.md"]])
+      expect(stubs.readPriorityDocsCalls.map((call) => call.excludePaths)).toEqual([
+        [],
+        ["src/greeter.ts", "src/caller.ts", "AGENTS.md"],
+      ])
     })
 
     it("renders a changed conventions file diff-only when its own section carries it whole", async () => {
@@ -1824,9 +1742,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual([
-        "AGENTS.md",
-      ])
+      expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual(["AGENTS.md"])
     })
 
     it("renders a changed conventions file diff-only when a raised budget fits the file", async () => {
@@ -1843,9 +1759,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual([
-        "AGENTS.md",
-      ])
+      expect(first(stubs.readChangedFilesCalls).diffOnlyPaths).toEqual(["AGENTS.md"])
     })
 
     it("keeps a changed conventions file full when its own section is truncated", async () => {
@@ -1880,9 +1794,10 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(
-        stubs.readPriorityDocsCalls.map((call) => call.excludePaths),
-      ).toEqual([[], ["src/greeter.ts"]])
+      expect(stubs.readPriorityDocsCalls.map((call) => call.excludePaths)).toEqual([
+        [],
+        ["src/greeter.ts"],
+      ])
     })
 
     it("excludes an over-cap conventions file from priority docs when it is changed in the PR", async () => {
@@ -1913,9 +1828,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(
-        stubs.readPriorityDocsCalls.map((call) => call.excludePaths),
-      ).toEqual([[]])
+      expect(stubs.readPriorityDocsCalls.map((call) => call.excludePaths)).toEqual([[]])
       expect(first(stubs.generateFindingsCalls).changedFiles).toEqual([
         fixtureChangedFile,
         {
@@ -1988,9 +1901,10 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(
-        stubs.readPriorityDocsCalls.map((call) => call.excludePaths),
-      ).toEqual([[], ["src/greeter.ts"]])
+      expect(stubs.readPriorityDocsCalls.map((call) => call.excludePaths)).toEqual([
+        [],
+        ["src/greeter.ts"],
+      ])
     })
   })
 
@@ -2004,9 +1918,7 @@ describe("orchestrate", () => {
       await orchestrate(stubs.deps, logger)
 
       expect(stubs.readPriorityDocsCalls).toHaveLength(2)
-      expect(first(stubs.readPriorityDocsCalls).priorityDocs).toEqual([
-        "README.md",
-      ])
+      expect(first(stubs.readPriorityDocsCalls).priorityDocs).toEqual(["README.md"])
     })
 
     it("skips findRelatedFiles and findRelatedDocs when traceRelatedFiles is false", async () => {
@@ -2265,9 +2177,7 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.reviewUrl).toBe("")
-      expect(result.findingsCount).toBe(
-        expectedMapped.standaloneFindings.length,
-      )
+      expect(result.findingsCount).toBe(expectedMapped.standaloneFindings.length)
       // Unposted findings are NOT re-routed — their missing anchors make the
       // next run re-report them, and the status comment says so instead of
       // claiming they were posted.
@@ -2282,15 +2192,13 @@ describe("orchestrate", () => {
           isFirstRun: true,
           postedCount: expectedMapped.standaloneFindings.length,
           unpostedCount:
-            expectedSelection.selected.length -
-            expectedMapped.standaloneFindings.length,
+            expectedSelection.selected.length - expectedMapped.standaloneFindings.length,
           totalCount: expectedMapped.standaloneFindings.length,
         }),
       ])
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message:
-          "failed to post findings review — findings will re-report next run",
+        message: "failed to post findings review — findings will re-report next run",
         data: { error: "[Error]: boom" },
       })
     })
@@ -2338,8 +2246,7 @@ describe("orchestrate", () => {
       ])
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message:
-          "failed to post beyond-diff finding — it will re-report next run",
+        message: "failed to post beyond-diff finding — it will re-report next run",
         data: {
           error: "[Error]: boom",
           file: "src/untouched.ts",
@@ -2364,27 +2271,21 @@ describe("orchestrate", () => {
       })
       const realFinding = makeFinding({
         line: 145,
-        failure_scenario:
-          'register(" ", "value") succeeds and the entry is orphaned.',
+        failure_scenario: 'register(" ", "value") succeeds and the entry is orphaned.',
       })
       const mixedResponse: ReviewResponse = {
         analysis: "checked",
         findings: [nonFinding, realFinding],
       }
 
-      const { findings: mixedFiltered } = filterNonFindings(
-        mixedResponse.findings,
-      )
+      const { findings: mixedFiltered } = filterNonFindings(mixedResponse.findings)
       const mixedSelection = selectFindings({
         findings: mixedFiltered,
         severityThreshold: "low",
         maxFindings: undefined,
       })
       const mixedMapped = mapFindingsToReview({
-        findings: findingsWithRoutedModel(
-          mixedSelection.selected,
-          "test/model",
-        ),
+        findings: findingsWithRoutedModel(mixedSelection.selected, "test/model"),
         commentableByPath: fixtureCommentableByPath,
       })
 
@@ -2466,8 +2367,7 @@ describe("orchestrate", () => {
         phases: [{ phase: "combined", status: "completed" }],
         reviewSummaryMarkdown: expectedReviewSummary({
           relatedFilePaths: ["src/caller.ts"],
-          tokenBudgetRemainingForDocs:
-            40_000 - estimateTokens(relatedFile.content),
+          tokenBudgetRemainingForDocs: 40_000 - estimateTokens(relatedFile.content),
           totalFromModel: 1,
           posted: 1,
         }),
@@ -2476,9 +2376,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(
-            withRoutedModel(relatedFileFinding, "test/model"),
-          ),
+          body: renderStandaloneFinding(withRoutedModel(relatedFileFinding, "test/model")),
         },
       ])
     })
@@ -2577,15 +2475,11 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(
-            withRoutedModel(renamedFromFinding, "test/model"),
-          ),
+          body: renderStandaloneFinding(withRoutedModel(renamedFromFinding, "test/model")),
         },
         {
           prNumber: 7,
-          body: renderStandaloneFinding(
-            withRoutedModel(deletedFileFinding, "test/model"),
-          ),
+          body: renderStandaloneFinding(withRoutedModel(deletedFileFinding, "test/model")),
         },
       ])
     })
@@ -2612,9 +2506,7 @@ describe("orchestrate", () => {
       expect(foundStubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(
-            withRoutedModel(conventionsFinding, "test/model"),
-          ),
+          body: renderStandaloneFinding(withRoutedModel(conventionsFinding, "test/model")),
         },
       ])
       expect(missingResult.findingsCount).toBe(0)
@@ -2673,6 +2565,7 @@ describe("orchestrate", () => {
     it("dedups findings matching inline-comment anchors and posts the rest", async () => {
       const findings = fixtureReviewResponse.findings
       const duplicateFinding = findings[0]
+
       if (!duplicateFinding) {
         throw new Error("expected at least one fixture finding")
       }
@@ -2691,9 +2584,7 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(findings.length - 1)
-      expect(stubs.postFindingsReviewCalls).toEqual([
-        expectedFindingsReview(findings.slice(1)),
-      ])
+      expect(stubs.postFindingsReviewCalls).toEqual([expectedFindingsReview(findings.slice(1))])
       expect(stubs.upsertSummaryCommentCalls).toEqual([
         expectedStatus({
           isFirstRun: true,
@@ -2784,6 +2675,7 @@ describe("orchestrate", () => {
     it("counts duplicate anchors for one finding once in the status comment", async () => {
       const findings = fixtureReviewResponse.findings
       const duplicateFinding = findings[0]
+
       if (!duplicateFinding) {
         throw new Error("expected at least one fixture finding")
       }
@@ -2820,15 +2712,14 @@ describe("orchestrate", () => {
     it("dedups findings matching beyond-diff issue-comment anchors", async () => {
       const findings = fixtureReviewResponse.findings
       const duplicateFinding = findings[0]
+
       if (!duplicateFinding) {
         throw new Error("expected at least one fixture finding")
       }
 
       const stubs = makeOrchestrateDeps({
         githubClient: {
-          fetchBotIssueComments: async () => [
-            issueFinding(computeAnchorKey(duplicateFinding)),
-          ],
+          fetchBotIssueComments: async () => [issueFinding(computeAnchorKey(duplicateFinding))],
         },
       })
       const logger = createTestLogger()
@@ -2836,14 +2727,13 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(findings.length - 1)
-      expect(stubs.postFindingsReviewCalls).toEqual([
-        expectedFindingsReview(findings.slice(1)),
-      ])
+      expect(stubs.postFindingsReviewCalls).toEqual([expectedFindingsReview(findings.slice(1))])
     })
 
     it("dedups a finding whose reported line drifted within the window", async () => {
       const findings = fixtureReviewResponse.findings
       const driftedFinding = findings[0]
+
       if (!driftedFinding) {
         throw new Error("expected at least one fixture finding")
       }
@@ -2855,9 +2745,7 @@ describe("orchestrate", () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           fetchBotReviewComments: async () => [
-            existingComment(
-              `some comment\n\n<!-- umm-actually:${driftedAnchor} -->`,
-            ),
+            existingComment(`some comment\n\n<!-- umm-actually:${driftedAnchor} -->`),
           ],
         },
       })
@@ -2866,14 +2754,13 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(findings.length - 1)
-      expect(stubs.postFindingsReviewCalls).toEqual([
-        expectedFindingsReview(findings.slice(1)),
-      ])
+      expect(stubs.postFindingsReviewCalls).toEqual([expectedFindingsReview(findings.slice(1))])
     })
 
     it("dedup follows the comment's live position across pushes", async () => {
       const findings = fixtureReviewResponse.findings
       const movedFinding = findings[0]
+
       if (!movedFinding) {
         throw new Error("expected at least one fixture finding")
       }
@@ -2887,13 +2774,10 @@ describe("orchestrate", () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
           fetchBotReviewComments: async () => [
-            existingComment(
-              `some comment\n\n<!-- umm-actually:${staleAnchor} -->`,
-              {
-                line: movedFinding.line,
-                originalLine: movedFinding.line - 50,
-              },
-            ),
+            existingComment(`some comment\n\n<!-- umm-actually:${staleAnchor} -->`, {
+              line: movedFinding.line,
+              originalLine: movedFinding.line - 50,
+            }),
           ],
         },
       })
@@ -2902,14 +2786,13 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(findings.length - 1)
-      expect(stubs.postFindingsReviewCalls).toEqual([
-        expectedFindingsReview(findings.slice(1)),
-      ])
+      expect(stubs.postFindingsReviewCalls).toEqual([expectedFindingsReview(findings.slice(1))])
     })
 
     it("dedups via content tier when title matches but category differs", async () => {
       const findings = fixtureReviewResponse.findings
       const targetFinding = findings[0]
+
       if (!targetFinding) {
         throw new Error("expected at least one fixture finding")
       }
@@ -3054,8 +2937,7 @@ describe("orchestrate", () => {
       ])
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message:
-          "failed to fetch inline comments — treating their findings as new",
+        message: "failed to fetch inline comments — treating their findings as new",
         data: { error: "[Error]: network error" },
       })
     })
@@ -3110,6 +2992,7 @@ describe("orchestrate", () => {
 
     const priorBotCommentsFrom = (stubs: RecordingStubs): string[] => {
       const context = stubs.generateFindingsCalls[0]
+
       if (!context) {
         throw new Error("expected at least one generateFindings call")
       }
@@ -3121,9 +3004,7 @@ describe("orchestrate", () => {
         "**[high/correctness]** Fix null check\n\nDescription.\n\n<!-- umm-actually:src/greeter.ts:correctness:99 -->"
       const stubs = makeOrchestrateDeps({
         githubClient: {
-          fetchBotReviewComments: async () => [
-            existingComment(commentBody, { line: 99 }),
-          ],
+          fetchBotReviewComments: async () => [existingComment(commentBody, { line: 99 })],
           fetchBotIssueComments: async () => [
             statusComment,
             issueFinding("src/other.ts:security:50"),
@@ -3263,8 +3144,7 @@ describe("orchestrate", () => {
           conclusion: "success",
           output: {
             title: "No findings above threshold",
-            summary:
-              "Reviewed with `test/model` — no findings above threshold.",
+            summary: "Reviewed with `test/model` — no findings above threshold.",
           },
         },
       ])
@@ -3323,9 +3203,7 @@ describe("orchestrate", () => {
       })
       const logger = createTestLogger()
 
-      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
-        "model exploded",
-      )
+      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow("model exploded")
       expect(stubs.updateCheckRunCalls).toEqual([
         {
           checkRunId: 555,
@@ -3489,11 +3367,7 @@ describe("orchestrate", () => {
 })
 
 describe("staged phases", () => {
-  const splitPhaseIds = [
-    "correctness-security",
-    "conventions-tests",
-    "subtle-bugs",
-  ]
+  const splitPhaseIds = ["correctness-security", "conventions-tests", "subtle-bugs"]
   const completedSplitPhases = splitPhaseIds.map((phase) => ({
     phase,
     status: "completed" as const,
@@ -3509,12 +3383,7 @@ describe("staged phases", () => {
 
     const result = await orchestrate(stubs.deps, logger)
 
-    expect(
-      stubs.generateFindingsCalls.map((call) => [
-        call.phase,
-        call.priorFindings,
-      ]),
-    ).toEqual([
+    expect(stubs.generateFindingsCalls.map((call) => [call.phase, call.priorFindings])).toEqual([
       [CORRECTNESS_SECURITY_PHASE, []],
       [CONVENTIONS_TESTS_PHASE, []],
       [SUBTLE_BUGS_PHASE, []],
@@ -3572,12 +3441,7 @@ describe("staged phases", () => {
 
     await orchestrate(stubs.deps, logger)
 
-    expect(
-      stubs.generateFindingsCalls.map((call) => [
-        call.phase.id,
-        call.priorFindings,
-      ]),
-    ).toEqual([
+    expect(stubs.generateFindingsCalls.map((call) => [call.phase.id, call.priorFindings])).toEqual([
       ["correctness-security", []],
       ["conventions-tests", [correctnessFinding]],
       ["subtle-bugs", [correctnessFinding, conventionsFinding]],
@@ -3594,9 +3458,7 @@ describe("staged phases", () => {
       const send = vi.fn(async () => ({
         id: "accepted-before-deadline",
         model: "test/model",
-        choices: [
-          { message: { content: JSON.stringify(fixtureReviewResponse) } },
-        ],
+        choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
         usage: { promptTokens: 10, completionTokens: 20 },
       }))
       const client = createOpenRouterClient(
@@ -3684,9 +3546,7 @@ describe("staged phases", () => {
       const response = {
         id: "completed",
         model: "test/model",
-        choices: [
-          { message: { content: JSON.stringify(fixtureReviewResponse) } },
-        ],
+        choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
         usage: { promptTokens: 10, completionTokens: 20, cost: 0.01 },
       }
       const send = vi
@@ -3830,8 +3690,7 @@ describe("staged phases", () => {
         {
           phase: "subtle-bugs",
           status: "failed",
-          reason:
-            "[ReviewRequestError]: review request failed after 1 attempt(s)",
+          reason: "[ReviewRequestError]: review request failed after 1 attempt(s)",
         },
       ],
       reviewSummaryMarkdown: expectedReviewSummary({
@@ -3876,9 +3735,7 @@ describe("staged phases", () => {
 
     const expectedMessage =
       "every review phase failed: correctness-security: [Error]: correctness-security exploded; conventions-tests: [Error]: conventions-tests exploded; subtle-bugs: [Error]: subtle-bugs exploded"
-    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
-      expectedMessage,
-    )
+    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(expectedMessage)
     expect(stubs.postFindingsReviewCalls).toEqual([])
     expect(stubs.updateCheckRunCalls).toEqual([
       {
@@ -3951,12 +3808,9 @@ describe("staged phases", () => {
     })
     const logger = createTestLogger()
 
-    const notAttempted =
-      "[Error]: not attempted: an earlier phase aborted on an auth/credit error"
+    const notAttempted = "[Error]: not attempted: an earlier phase aborted on an auth/credit error"
     const expectedMessage = `every review phase failed: correctness-security: [ReviewRequestError]: OpenRouter auth/credit error — aborting without fallback; conventions-tests: ${notAttempted}; subtle-bugs: ${notAttempted}`
-    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
-      expectedMessage,
-    )
+    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(expectedMessage)
     expect(stubs.generateFindingsCalls.map((call) => call.phase.id)).toEqual([
       "correctness-security",
     ])
@@ -3966,12 +3820,10 @@ describe("staged phases", () => {
         conclusion: "failure",
         output: {
           title: "Error — review did not complete",
-          summary: `[AllPhasesFailedError]: ${expectedMessage}\n\n${renderCostSummary(
-            {
-              attempts: [{ ...billedAttempt, phase: "correctness-security" }],
-              modelUsed: "test/model",
-            },
-          )}`,
+          summary: `[AllPhasesFailedError]: ${expectedMessage}\n\n${renderCostSummary({
+            attempts: [{ ...billedAttempt, phase: "correctness-security" }],
+            modelUsed: "test/model",
+          })}`,
         },
       },
     ])
@@ -4018,9 +3870,8 @@ describe("staged phases", () => {
   })
 
   it("attributes a cross-phase winner to its routed model while reporting all run models", async () => {
-    const fixtureLowFinding = fixtureReviewResponse.findings.find(
-      (finding) => finding.line === 3,
-    )
+    const fixtureLowFinding = fixtureReviewResponse.findings.find((finding) => finding.line === 3)
+
     if (!fixtureLowFinding) {
       throw new Error("fixture finding on line 3 is missing")
     }

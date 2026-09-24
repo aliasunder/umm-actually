@@ -72,6 +72,10 @@ files. Prefer SDK-provided types over redefining shapes.
   branch so the remaining code flows linearly without nesting. Extract
   multi-clause conditionals into named booleans. Name booleans for the
   affirmative state.
+- Blank lines separate logical steps inside a function — each
+  declaration-plus-comment block, guard, or step gets one, and a comment never
+  sits directly under the previous statement. ESLint enforces the
+  declaration-before-`if` case; the rest is on the author.
 - Block bodies `{}` for any multiline function response — expression bodies
   only for one-liners. A multi-clause boolean spanning lines gets
   `{ return (...) }`; guard chains get explicit early returns, never a

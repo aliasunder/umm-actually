@@ -19,12 +19,9 @@ export type FindingSeverity = (typeof FINDING_SEVERITIES)[number]
  * validates shape only (same split as resolvePhases). Called at startup so
  * a bad threshold crashes before any OpenRouter call.
  */
-export const resolveSeverityThreshold = (
-  severityThresholdInput: string,
-): FindingSeverity => {
-  const matchedSeverity = FINDING_SEVERITIES.find(
-    (severity) => severity === severityThresholdInput,
-  )
+export const resolveSeverityThreshold = (severityThresholdInput: string): FindingSeverity => {
+  const matchedSeverity = FINDING_SEVERITIES.find((severity) => severity === severityThresholdInput)
+
   if (matchedSeverity === undefined) {
     throw new Error(
       `unknown severity_threshold "${severityThresholdInput}" — valid: ${FINDING_SEVERITIES.join(" | ")}`,
@@ -56,14 +53,10 @@ export const SEVERITY_RANK: Record<FindingSeverity, number> = {
  *  body, and a newline would break the anchor's single-line round-trip.
  *  Enforced via refine, not .regex, so the constraint stays out of the
  *  JSON schema sent to OpenRouter (provider pattern support varies). */
-const isSafeFilePath = (file: string): boolean =>
-  !file.includes("-->") && !/[\r\n]/.test(file)
+const isSafeFilePath = (file: string): boolean => !file.includes("-->") && !/[\r\n]/.test(file)
 
 const findingSchema = z.strictObject({
-  file: z
-    .string()
-    .min(1)
-    .refine(isSafeFilePath, 'file must be a single-line path without "-->"'),
+  file: z.string().min(1).refine(isSafeFilePath, 'file must be a single-line path without "-->"'),
   line: z.int().positive(),
   end_line: z.int().positive().nullable(),
   category: z.enum(FINDING_CATEGORIES),

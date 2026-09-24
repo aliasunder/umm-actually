@@ -13,8 +13,7 @@ const changeText = (change: Change): string => change.content.slice(1)
  * change — same type, same line number, marker text as content. Rendered, it
  * would appear as a phantom content line duplicating a real line number.
  */
-const isNoNewlineMarker = (change: Change): boolean =>
-  change.content.startsWith("\\")
+const isNoNewlineMarker = (change: Change): boolean => change.content.startsWith("\\")
 
 /** Width of the line-number column; deleted rows pad with spaces to match. */
 const LINE_NUMBER_WIDTH = 6
@@ -47,8 +46,7 @@ export const annotateDiff = (files: File[]): string => {
     const path = newFilePath(file) ?? file.from ?? "(unknown)"
     const header = `=== ${path}${fileStatus(file)} ===`
 
-    if (file.chunks.length === 0)
-      return `${header}\n(no line changes — binary or metadata-only)`
+    if (file.chunks.length === 0) return `${header}\n(no line changes — binary or metadata-only)`
 
     const chunkBlocks = file.chunks.map((chunk) => {
       const renderedChanges = chunk.changes
