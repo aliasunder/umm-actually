@@ -58,8 +58,12 @@ inputs:
     default: "true"
   priority_docs:
     description: >-
-      Comma-separated repo-relative paths prioritized for review context,
-      subject to the token budget.
+      Comma-separated repo-relative paths included in review context with a
+      reserved 10% budget floor. The floor is spent before changed files are
+      read (unchanged docs first, each group in listed order), so a large diff
+      can't crowd these docs out. Floor space they don't use goes back to
+      changed files, and a doc too large for the floor is retried at the end
+      with any remaining budget.
       Docs already present in full from other context channels are not
       re-read; a changed file excluded from the review diff stays excluded
       (empty = disabled)
