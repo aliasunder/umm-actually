@@ -8,12 +8,7 @@ import {
 } from "../review/finding.js"
 
 export type AttemptOutcome =
-  | "accepted"
-  | "api_error"
-  | "timeout"
-  | "empty_content"
-  | "invalid_json"
-  | "schema_mismatch"
+  "accepted" | "api_error" | "timeout" | "empty_content" | "invalid_json" | "schema_mismatch"
 
 export type ModelAttempt = {
   /** The model slug requested for this attempt (ladder position, not routing). */
@@ -136,8 +131,7 @@ const summarizeError = (error: unknown): string => {
 }
 
 /** How the SDK call itself ended. */
-type SettledResult<T> =
-  { status: "resolved"; value: T } | { status: "rejected"; error: unknown }
+type SettledResult<T> = { status: "resolved"; value: T } | { status: "rejected"; error: unknown }
 
 /** A settled call, or the deadline winning before it settled. */
 type BoundedResult<T> = SettledResult<T> | { status: "timed_out" }
@@ -204,11 +198,10 @@ const withDeadline = async <T>(
     controller.abort()
   }, Math.ceil(timeoutMs))
 
-  const bounded = await Promise.race([settled, deadline.promise]).finally(
-    () => {
-      clearTimeout(timer)
-    },
-  )
+  const bounded = await Promise.race([settled, deadline.promise]).finally(() => {
+    clearTimeout(timer)
+  })
+
   if (bounded.status !== "timed_out") return bounded
 
   logger.warn("request deadline elapsed", { ...logContext, timeoutMs })
@@ -218,9 +211,7 @@ const withDeadline = async <T>(
       elapsedMs: DateTime.now().diff(startedAt).toMillis(),
       timeoutMs,
       settledWith: describeLateSettlement(late),
-      ...(late.status === "rejected"
-        ? { error: summarizeError(late.error) }
-        : {}),
+      ...(late.status === "rejected" ? { error: summarizeError(late.error) } : {}),
     })
   }
   // Observed, not awaited: the deadline has already been reported and the
@@ -308,8 +299,7 @@ export class ReviewRequestError extends Error {
 }
 
 const describeAttempt = (attempt: ModelAttempt): string => {
-  const errorSuffix =
-    attempt.errorSummary === null ? "" : ` (${attempt.errorSummary})`
+  const errorSuffix = attempt.errorSummary === null ? "" : ` (${attempt.errorSummary})`
   return `${attempt.model}: ${attempt.outcome}${errorSuffix}`
 }
 
@@ -349,16 +339,14 @@ export const createOpenRouterClient = (
     const sendResult = await withDeadline(
       {
         start: (signal) => {
-          return sdk.chat.send(
-            { chatRequest },
-            { retries: { strategy: "none" }, signal },
-          )
+          return sdk.chat.send({ chatRequest }, { retries: { strategy: "none" }, signal })
         },
         timeoutMs: Math.min(requestTimeoutMs, remainingMs),
         logContext: { operation: "chat request", model },
       },
       logger,
     )
+
     if (sendResult.status === "timed_out") {
       return {
         kind: "failed",
@@ -368,9 +356,7 @@ export const createOpenRouterClient = (
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
-          errorSummary: reviewDeadlineWins
-            ? "review deadline exceeded"
-            : deadlineSummary,
+          errorSummary: reviewDeadlineWins ? "review deadline exceeded" : deadlineSummary,
         },
         retryable: true,
         abort: false,
@@ -382,9 +368,7 @@ export const createOpenRouterClient = (
       // Retryable: unknown status, 5xx, 408 timeout, 429 rate-limit.
       // Other 4xx (e.g. 400 bad request) is structural — don't retry.
       const retryable =
-        statusCode === undefined ||
-        statusCode >= 500 ||
-        RETRYABLE_4XX_STATUSES.has(statusCode)
+        statusCode === undefined || statusCode >= 500 || RETRYABLE_4XX_STATUSES.has(statusCode)
       return {
         kind: "failed",
         attempt: {
@@ -404,6 +388,7 @@ export const createOpenRouterClient = (
     }
 
     const parsedResult = chatResultSchema.safeParse(sendResult.value)
+
     if (!parsedResult.success) {
       return {
         kind: "failed",
@@ -427,10 +412,7 @@ export const createOpenRouterClient = (
       completionTokens: chatResult.usage?.completionTokens ?? null,
       costUsd: chatResult.usage?.cost ?? null,
     }
-    const failedValidation = (
-      outcome: AttemptOutcome,
-      errorSummary: string,
-    ): SingleAttempt => ({
+    const failedValidation = (outcome: AttemptOutcome, errorSummary: string): SingleAttempt => ({
       kind: "failed",
       attempt: { model, outcome, ...usage, errorSummary },
       retryable: true,
@@ -438,19 +420,19 @@ export const createOpenRouterClient = (
     })
 
     const content = chatResult.choices[0]?.message.content
+
     if (typeof content !== "string" || content === "") {
       return failedValidation("empty_content", "response had no text content")
     }
 
     const parsedContent = parseJsonOrNull(content)
+
     if (parsedContent === null) {
-      return failedValidation(
-        "invalid_json",
-        "response content is not valid JSON",
-      )
+      return failedValidation("invalid_json", "response content is not valid JSON")
     }
 
     const parsedReview = reviewResponseSchema.safeParse(parsedContent.parsed)
+
     if (!parsedReview.success) {
       const firstIssue = parsedReview.error.issues[0]
       return failedValidation(
@@ -471,10 +453,9 @@ export const createOpenRouterClient = (
   }
 
   /** Best-effort: a cost lookup failure must never fail a completed review. */
-  const lookupGenerationCost = async (
-    generationId: string,
-  ): Promise<number | null> => {
+  const lookupGenerationCost = async (generationId: string): Promise<number | null> => {
     const generations = sdk.generations
+
     if (!generations || remainingReviewMs() <= 0) return null
     const lookup = await withDeadline(
       {
@@ -489,12 +470,10 @@ export const createOpenRouterClient = (
       },
       logger,
     )
+
     if (lookup.status === "timed_out") {
       logger.warn("generation cost lookup failed", {
-        error:
-          remainingReviewMs() <= 0
-            ? "review deadline exceeded"
-            : deadlineSummary,
+        error: remainingReviewMs() <= 0 ? "review deadline exceeded" : deadlineSummary,
       })
       return null
     }
@@ -505,6 +484,7 @@ export const createOpenRouterClient = (
       return null
     }
     const parsed = generationResponseSchema.safeParse(lookup.value)
+
     if (!parsed.success) {
       logger.warn("unexpected generation response shape")
       return null
@@ -524,8 +504,7 @@ export const createOpenRouterClient = (
     model: string
     fallbackModel: string | null
   }): Promise<StructuredReviewResult> => {
-    const modelLadder =
-      fallbackModel === null ? [model] : [model, fallbackModel]
+    const modelLadder = fallbackModel === null ? [model] : [model, fallbackModel]
     const attempts: ModelAttempt[] = []
     const ensureReviewTimeRemaining = (): void => {
       if (remainingReviewMs() > 0) return
@@ -604,10 +583,7 @@ export const createOpenRouterClient = (
         attemptNumber++
         if (attemptNumber <= MAX_ATTEMPTS_PER_MODEL && retryDelayMs > 0) {
           await new Promise((resolve) => {
-            setTimeout(
-              resolve,
-              Math.ceil(Math.min(retryDelayMs, remainingReviewMs())),
-            )
+            setTimeout(resolve, Math.ceil(Math.min(retryDelayMs, remainingReviewMs())))
           })
         }
       }

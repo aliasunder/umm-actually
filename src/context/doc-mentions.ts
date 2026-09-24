@@ -38,10 +38,12 @@ const PATH_CONTINUATION = /[\w/-]/
 
 const isPathContinuation = (text: string, afterIndex: number): boolean => {
   const charAfter = text[afterIndex]
+
   if (!charAfter) return false
   if (PATH_CONTINUATION.test(charAfter)) return true
   if (charAfter === ".") {
     const charAfterDot = text[afterIndex + 1]
+
     if (!charAfterDot) return false
     return /\w/.test(charAfterDot)
   }
@@ -55,10 +57,12 @@ const hasPathMention = (text: string, pathToken: string): boolean => {
   let start = 0
   while (true) {
     const index = text.indexOf(pathToken, start)
+
     if (index === -1) return false
     const charBefore = text[index - 1]
     const leftBoundary = !charBefore || !PATH_CONTINUATION.test(charBefore)
     const rightBoundary = !isPathContinuation(text, index + pathToken.length)
+
     if (leftBoundary && rightBoundary) return true
     start = index + 1
   }
@@ -88,12 +92,15 @@ export const findMentionedChangedPaths = (
     const basename = posix.basename(changedPath)
     const dotIndex = basename.lastIndexOf(".")
     const stem = dotIndex === -1 ? basename : basename.slice(0, dotIndex)
+
     if (stem === "") continue
 
     if (GENERIC_BASENAMES.has(stem)) {
       const segments = changedPath.split("/")
+
       if (segments.length < 2) continue
       const lastTwoSegments = segments.slice(-2).join("/")
+
       if (hasPathMention(docContent, lastTwoSegments)) {
         mentionedPaths.push(changedPath)
         basenameCount++
@@ -111,10 +118,7 @@ export const findMentionedChangedPaths = (
 }
 
 /** Full-path count desc, then basename count desc, then path asc for determinism. */
-export const byMentionRelevance = (
-  a: DocCandidate,
-  b: DocCandidate,
-): number => {
+export const byMentionRelevance = (a: DocCandidate, b: DocCandidate): number => {
   if (a.fullPathCount !== b.fullPathCount) {
     return b.fullPathCount - a.fullPathCount
   }

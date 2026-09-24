@@ -6,10 +6,7 @@ import type { ReviewComment } from "../../review/comment-mapping.js"
 import { createGithubClient, type OctokitLike } from "../client.js"
 
 const pullGetResponse: Record<string, unknown> = JSON.parse(
-  readFileSync(
-    new URL("../../../fixtures/pull.get.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL("../../../fixtures/pull.get.json", import.meta.url), "utf8"),
 )
 
 type StubResponse = { data: unknown } | { error: unknown }
@@ -57,6 +54,7 @@ const makeOctokitStub = ({
     operation: string,
   ): { data: unknown } => {
     const next = queue[callCount - 1]
+
     if (next === undefined) {
       throw new Error(`stub: unexpected ${operation} call #${callCount}`)
     }
@@ -65,12 +63,10 @@ const makeOctokitStub = ({
   }
 
   const octokit: OctokitLike = {
-    graphql: <T = unknown>(
-      query: string,
-      parameters?: Record<string, unknown>,
-    ): Promise<T> => {
+    graphql: <T = unknown>(query: string, parameters?: Record<string, unknown>): Promise<T> => {
       graphqlCalls.push({ query, ...(parameters ? { parameters } : {}) })
       const next = graphqlResponses[graphqlCalls.length - 1]
+
       if (next === undefined) {
         throw new Error(`stub: unexpected graphql call #${graphqlCalls.length}`)
       }
@@ -86,11 +82,7 @@ const makeOctokitStub = ({
         },
         createReview: async (params) => {
           createReviewCalls.push(params)
-          return takeNext(
-            createReviewResponses,
-            createReviewCalls.length,
-            "pulls.createReview",
-          )
+          return takeNext(createReviewResponses, createReviewCalls.length, "pulls.createReview")
         },
         listReviewComments: async (params) => {
           listReviewCommentsCalls.push(params)
@@ -104,45 +96,25 @@ const makeOctokitStub = ({
       issues: {
         listComments: async (params) => {
           listCommentsCalls.push(params)
-          return takeNext(
-            listCommentsResponses,
-            listCommentsCalls.length,
-            "issues.listComments",
-          )
+          return takeNext(listCommentsResponses, listCommentsCalls.length, "issues.listComments")
         },
         createComment: async (params) => {
           createCommentCalls.push(params)
-          return takeNext(
-            createCommentResponses,
-            createCommentCalls.length,
-            "issues.createComment",
-          )
+          return takeNext(createCommentResponses, createCommentCalls.length, "issues.createComment")
         },
         updateComment: async (params) => {
           updateCommentCalls.push(params)
-          return takeNext(
-            updateCommentResponses,
-            updateCommentCalls.length,
-            "issues.updateComment",
-          )
+          return takeNext(updateCommentResponses, updateCommentCalls.length, "issues.updateComment")
         },
       },
       checks: {
         create: async (params) => {
           checksCreateCalls.push(params)
-          return takeNext(
-            checksCreateResponses,
-            checksCreateCalls.length,
-            "checks.create",
-          )
+          return takeNext(checksCreateResponses, checksCreateCalls.length, "checks.create")
         },
         update: async (params) => {
           checksUpdateCalls.push(params)
-          return takeNext(
-            checksUpdateResponses,
-            checksUpdateCalls.length,
-            "checks.update",
-          )
+          return takeNext(checksUpdateResponses, checksUpdateCalls.length, "checks.update")
         },
       },
     },
@@ -197,9 +169,7 @@ describe("fetchPullRequest", () => {
 
     const prContext = await client.fetchPullRequest({ prNumber: 7 })
 
-    expect(stub.getCalls).toEqual([
-      { owner: "aliasunder", repo: "fixture", pull_number: 7 },
-    ])
+    expect(stub.getCalls).toEqual([{ owner: "aliasunder", repo: "fixture", pull_number: 7 }])
     expect(prContext).toEqual({
       prNumber: 7,
       title: "feat: trim names before greeting",
@@ -283,9 +253,7 @@ describe("fetchDiff", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow(
-      "socket hang up",
-    )
+    await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow("socket hang up")
   })
 
   it("throws when the diff response is not a string", async () => {
@@ -299,8 +267,7 @@ describe("fetchDiff", () => {
 })
 
 describe("submitReview", () => {
-  const reviewUrl =
-    "https://github.com/aliasunder/fixture/pull/7#pullrequestreview-1"
+  const reviewUrl = "https://github.com/aliasunder/fixture/pull/7#pullrequestreview-1"
 
   it("posts a body-only review and returns the review url", async () => {
     const stub = makeOctokitStub({
@@ -361,8 +328,7 @@ describe("submitReview", () => {
 })
 
 describe("postFindingsReview", () => {
-  const reviewUrl =
-    "https://github.com/aliasunder/fixture/pull/7#pullrequestreview-1"
+  const reviewUrl = "https://github.com/aliasunder/fixture/pull/7#pullrequestreview-1"
   const markerBody = "<!-- umm-actually-review -->"
 
   it("posts the marker body with comments and returns ok with the url", async () => {
@@ -448,8 +414,7 @@ describe("postFindingsReview", () => {
 })
 
 describe("postIssueComment", () => {
-  const commentUrl =
-    "https://github.com/aliasunder/fixture/pull/7#issuecomment-9"
+  const commentUrl = "https://github.com/aliasunder/fixture/pull/7#issuecomment-9"
 
   it("posts the body and returns the comment url", async () => {
     const stub = makeOctokitStub({
@@ -479,9 +444,9 @@ describe("postIssueComment", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(
-      client.postIssueComment({ prNumber: 7, body: "finding" }),
-    ).rejects.toThrow("unexpected issue comment response shape")
+    await expect(client.postIssueComment({ prNumber: 7, body: "finding" })).rejects.toThrow(
+      "unexpected issue comment response shape",
+    )
   })
 
   it("propagates errors", async () => {
@@ -490,9 +455,9 @@ describe("postIssueComment", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(
-      client.postIssueComment({ prNumber: 7, body: "finding" }),
-    ).rejects.toThrow("HTTP 403")
+    await expect(client.postIssueComment({ prNumber: 7, body: "finding" })).rejects.toThrow(
+      "HTTP 403",
+    )
   })
 })
 
@@ -611,9 +576,7 @@ describe("fetchBotReviewComments", () => {
 
     const comments = await client.fetchBotReviewComments({ prNumber: 7 })
 
-    expect(comments).toEqual([
-      { path: "src/b.ts", body: "real finding", line: 5, originalLine: 5 },
-    ])
+    expect(comments).toEqual([{ path: "src/b.ts", body: "real finding", line: 5, originalLine: 5 }])
   })
 
   it("paginates when a page is full", async () => {
@@ -726,9 +689,9 @@ describe("fetchBotReviewComments", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(
-      client.fetchBotReviewComments({ prNumber: 7 }),
-    ).rejects.toThrow("unexpected review comments response shape")
+    await expect(client.fetchBotReviewComments({ prNumber: 7 })).rejects.toThrow(
+      "unexpected review comments response shape",
+    )
   })
 })
 
@@ -813,9 +776,7 @@ describe("fetchBotIssueComments", () => {
     // Regression guard: unconditional suffixing built `umm-actually[bot][bot]`
     // and silently matched no comments.
     const stub = makeOctokitStub({
-      graphqlResponses: [
-        { data: { viewer: { login: "umm-actually[bot]", __typename: "Bot" } } },
-      ],
+      graphqlResponses: [{ data: { viewer: { login: "umm-actually[bot]", __typename: "Bot" } } }],
       listCommentsResponses: [{ data: [botComment(9, "finding")] }],
     })
     const { client } = makeClient(stub)
@@ -829,9 +790,7 @@ describe("fetchBotIssueComments", () => {
     // A personal access token resolves viewer to a User — comments are
     // authored by the bare login, so no [bot] suffix may be appended.
     const stub = makeOctokitStub({
-      graphqlResponses: [
-        { data: { viewer: { login: "aliasunder", __typename: "User" } } },
-      ],
+      graphqlResponses: [{ data: { viewer: { login: "aliasunder", __typename: "User" } } }],
       listCommentsResponses: [
         {
           data: [
@@ -861,10 +820,7 @@ describe("fetchBotIssueComments", () => {
     }))
     const stub = makeOctokitStub({
       graphqlResponses: [viewerResponse],
-      listCommentsResponses: [
-        { data: humanPage },
-        { data: [botComment(200, "bot finding")] },
-      ],
+      listCommentsResponses: [{ data: humanPage }, { data: [botComment(200, "bot finding")] }],
     })
     const { client } = makeClient(stub)
 
@@ -943,20 +899,15 @@ describe("fetchBotIssueComments", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(client.fetchBotIssueComments({ prNumber: 7 })).rejects.toThrow(
-      "token expired",
-    )
+    await expect(client.fetchBotIssueComments({ prNumber: 7 })).rejects.toThrow("token expired")
   })
 })
 
 describe("bot login memoization", () => {
   it("resolves the viewer query only once across fetchBotIssueComments and upsertSummaryComment", async () => {
-    const commentUrl =
-      "https://github.com/aliasunder/fixture/pull/7#issuecomment-1"
+    const commentUrl = "https://github.com/aliasunder/fixture/pull/7#issuecomment-1"
     const stub = makeOctokitStub({
-      graphqlResponses: [
-        { data: { viewer: { login: "umm-actually", __typename: "Bot" } } },
-      ],
+      graphqlResponses: [{ data: { viewer: { login: "umm-actually", __typename: "Bot" } } }],
       listCommentsResponses: [{ data: [] }, { data: [] }],
       createCommentResponses: [{ data: { html_url: commentUrl } }],
     })
@@ -973,9 +924,7 @@ describe("bot login memoization", () => {
     expect(result).toEqual({ url: commentUrl, created: true })
     // Exactly one GraphQL call: the memoized viewer query. A second call
     // would mean the viewer query ran twice.
-    expect(stub.graphqlCalls).toEqual([
-      { query: "query { viewer { login __typename } }" },
-    ])
+    expect(stub.graphqlCalls).toEqual([{ query: "query { viewer { login __typename } }" }])
     // Both methods must have actually listed comments — a short-circuited
     // empty result would leave this at one call (or none).
     expect(stub.listCommentsCalls).toEqual([
@@ -998,8 +947,7 @@ describe("bot login memoization", () => {
 })
 
 describe("upsertSummaryComment", () => {
-  const commentUrl =
-    "https://github.com/aliasunder/fixture/pull/7#issuecomment-1"
+  const commentUrl = "https://github.com/aliasunder/fixture/pull/7#issuecomment-1"
   const anchor = "<!-- umm-actually-status -->"
   const viewerResponse = {
     data: { viewer: { login: "umm-actually", __typename: "Bot" } },
@@ -1180,9 +1128,9 @@ describe("upsertSummaryComment", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(
-      client.upsertSummaryComment({ prNumber: 7, body, anchor }),
-    ).rejects.toThrow("unexpected issue comments response shape")
+    await expect(client.upsertSummaryComment({ prNumber: 7, body, anchor })).rejects.toThrow(
+      "unexpected issue comments response shape",
+    )
   })
 
   it("throws when the create response has no html_url", async () => {
@@ -1193,9 +1141,9 @@ describe("upsertSummaryComment", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(
-      client.upsertSummaryComment({ prNumber: 7, body, anchor }),
-    ).rejects.toThrow("unexpected issue comment response shape")
+    await expect(client.upsertSummaryComment({ prNumber: 7, body, anchor })).rejects.toThrow(
+      "unexpected issue comment response shape",
+    )
   })
 
   it("throws when the update response has no html_url", async () => {
@@ -1217,9 +1165,9 @@ describe("upsertSummaryComment", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(
-      client.upsertSummaryComment({ prNumber: 7, body, anchor }),
-    ).rejects.toThrow("unexpected issue comment response shape")
+    await expect(client.upsertSummaryComment({ prNumber: 7, body, anchor })).rejects.toThrow(
+      "unexpected issue comment response shape",
+    )
   })
 
   it("creates a new comment instead of updating a spoofed anchor from another author", async () => {

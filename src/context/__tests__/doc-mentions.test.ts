@@ -22,10 +22,9 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("detects a non-generic basename mention", () => {
-    const result = findMentionedChangedPaths(
-      "The greeter.ts module handles all greetings.",
-      ["src/greeter.ts"],
-    )
+    const result = findMentionedChangedPaths("The greeter.ts module handles all greetings.", [
+      "src/greeter.ts",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: ["src/greeter.ts"],
@@ -35,10 +34,9 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("requires path-ish match for generic basenames", () => {
-    const result = findMentionedChangedPaths(
-      "See index.ts for the barrel exports.",
-      ["src/lib/index.ts"],
-    )
+    const result = findMentionedChangedPaths("See index.ts for the barrel exports.", [
+      "src/lib/index.ts",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: [],
@@ -48,10 +46,9 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("detects generic basename with last-two-segment match", () => {
-    const result = findMentionedChangedPaths(
-      "The barrel re-export is in lib/index.ts.",
-      ["src/lib/index.ts"],
-    )
+    const result = findMentionedChangedPaths("The barrel re-export is in lib/index.ts.", [
+      "src/lib/index.ts",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: ["src/lib/index.ts"],
@@ -61,10 +58,10 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("returns empty result when no paths are mentioned", () => {
-    const result = findMentionedChangedPaths(
-      "This document has no file references at all.",
-      ["src/greeter.ts", "src/registry.ts"],
-    )
+    const result = findMentionedChangedPaths("This document has no file references at all.", [
+      "src/greeter.ts",
+      "src/registry.ts",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: [],
@@ -100,9 +97,7 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("matches extensionless paths by full-path substring", () => {
-    const result = findMentionedChangedPaths("The Makefile is important.", [
-      "Makefile",
-    ])
+    const result = findMentionedChangedPaths("The Makefile is important.", ["Makefile"])
 
     expect(result).toEqual({
       mentionedPaths: ["Makefile"],
@@ -112,9 +107,7 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("does not match generic basename without parent directory context", () => {
-    const result = findMentionedChangedPaths("See config.ts for settings.", [
-      "src/config.ts",
-    ])
+    const result = findMentionedChangedPaths("See config.ts for settings.", ["src/config.ts"])
 
     expect(result).toEqual({
       mentionedPaths: [],
@@ -124,9 +117,7 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("requires parent directory context for extensionless generic basenames", () => {
-    const result = findMentionedChangedPaths("See the index for details.", [
-      "src/index",
-    ])
+    const result = findMentionedChangedPaths("See the index for details.", ["src/index"])
 
     expect(result).toEqual({
       mentionedPaths: [],
@@ -136,10 +127,9 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("matches extensionless generic basename with parent directory context", () => {
-    const result = findMentionedChangedPaths(
-      "The entry point is src/index in the source tree.",
-      ["src/index"],
-    )
+    const result = findMentionedChangedPaths("The entry point is src/index in the source tree.", [
+      "src/index",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: ["src/index"],
@@ -149,10 +139,9 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("skips a dot-prefixed file that does not match by full path", () => {
-    const result = findMentionedChangedPaths(
-      "The .gitignore file controls tracking.",
-      ["src/.gitignore"],
-    )
+    const result = findMentionedChangedPaths("The .gitignore file controls tracking.", [
+      "src/.gitignore",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: [],
@@ -162,10 +151,7 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("matches a generic basename by full path when the full path appears in the doc", () => {
-    const result = findMentionedChangedPaths(
-      "See src/config.ts for settings.",
-      ["src/config.ts"],
-    )
+    const result = findMentionedChangedPaths("See src/config.ts for settings.", ["src/config.ts"])
 
     expect(result).toEqual({
       mentionedPaths: ["src/config.ts"],
@@ -175,10 +161,9 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("does not match a path that is a prefix of a longer path", () => {
-    const result = findMentionedChangedPaths(
-      "The component lives in src/greeter.tsx.",
-      ["src/greeter.ts"],
-    )
+    const result = findMentionedChangedPaths("The component lives in src/greeter.tsx.", [
+      "src/greeter.ts",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: [],
@@ -188,10 +173,9 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("does not match a basename that is a prefix of a longer filename", () => {
-    const result = findMentionedChangedPaths(
-      "See greeter.tsx for the component.",
-      ["src/greeter.ts"],
-    )
+    const result = findMentionedChangedPaths("See greeter.tsx for the component.", [
+      "src/greeter.ts",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: [],
@@ -201,10 +185,7 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("does not match an extensionless path that is a prefix of a longer filename", () => {
-    const result = findMentionedChangedPaths(
-      "The file is Makefile.in for autoconf.",
-      ["Makefile"],
-    )
+    const result = findMentionedChangedPaths("The file is Makefile.in for autoconf.", ["Makefile"])
 
     expect(result).toEqual({
       mentionedPaths: [],
@@ -227,10 +208,9 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("matches an extensionless path followed by a sentence-ending period", () => {
-    const result = findMentionedChangedPaths(
-      "Check the Makefile. It has the targets.",
-      ["Makefile"],
-    )
+    const result = findMentionedChangedPaths("Check the Makefile. It has the targets.", [
+      "Makefile",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: ["Makefile"],
@@ -240,10 +220,9 @@ describe("findMentionedChangedPaths", () => {
   })
 
   it("matches a path followed by non-path punctuation", () => {
-    const result = findMentionedChangedPaths(
-      "Check `src/greeter.ts` for details.",
-      ["src/greeter.ts"],
-    )
+    const result = findMentionedChangedPaths("Check `src/greeter.ts` for details.", [
+      "src/greeter.ts",
+    ])
 
     expect(result).toEqual({
       mentionedPaths: ["src/greeter.ts"],
@@ -254,9 +233,7 @@ describe("findMentionedChangedPaths", () => {
 })
 
 describe("byMentionRelevance", () => {
-  const makeCandidate = (
-    overrides: Partial<DocCandidate> & { path: string },
-  ): DocCandidate => ({
+  const makeCandidate = (overrides: Partial<DocCandidate> & { path: string }): DocCandidate => ({
     content: "",
     fullPathCount: 0,
     basenameCount: 0,
@@ -311,16 +288,7 @@ describe("constants", () => {
 
   it("GENERIC_BASENAMES contains the exact set of common stems", () => {
     expect(GENERIC_BASENAMES).toEqual(
-      new Set([
-        "index",
-        "main",
-        "config",
-        "types",
-        "utils",
-        "helpers",
-        "constants",
-        "mod",
-      ]),
+      new Set(["index", "main", "config", "types", "utils", "helpers", "constants", "mod"]),
     )
   })
 })

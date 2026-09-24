@@ -17,13 +17,12 @@ export const newFilePath = (file: File): string | null => {
   return file.to
 }
 
-export const computeCommentableLines = (
-  files: File[],
-): Map<string, CommentableFile> => {
+export const computeCommentableLines = (files: File[]): Map<string, CommentableFile> => {
   const commentableByPath = new Map<string, CommentableFile>()
 
   for (const file of files) {
     const path = newFilePath(file)
+
     if (path === null) continue
 
     const rightLines = new Set<number>()

@@ -15,9 +15,7 @@ import {
 import type { AttributedFinding } from "../finding.js"
 import { makeFinding as makePlainFinding } from "./make-finding.js"
 
-const makeFinding = (
-  overrides: Partial<AttributedFinding> = {},
-): AttributedFinding => ({
+const makeFinding = (overrides: Partial<AttributedFinding> = {}): AttributedFinding => ({
   ...makePlainFinding(overrides),
   modelUsed: overrides.modelUsed ?? "test/model",
 })
@@ -27,9 +25,7 @@ const makeCommentableByPath = (): Map<string, CommentableFile> =>
     [
       "src/greeter.ts",
       {
-        rightLines: new Set([
-          1, 2, 3, 4, 5, 6, 141, 142, 143, 144, 145, 146, 147,
-        ]),
+        rightLines: new Set([1, 2, 3, 4, 5, 6, 141, 142, 143, 144, 145, 146, 147]),
         hunkRanges: [
           { start: 1, end: 6 },
           { start: 141, end: 147 },
@@ -137,8 +133,7 @@ The guard rejects only the exact empty string.
     })
 
     expect(mapped).toEqual({ comments: [], standaloneFindings: [finding] })
-    expect(renderStandaloneFinding(finding))
-      .toBe(`**Whitespace-only keys pass the empty-key guard**
+    expect(renderStandaloneFinding(finding)).toBe(`**Whitespace-only keys pass the empty-key guard**
 Medium severity · correctness · high confidence
 
 \`src/untouched.ts:30\` — beyond the diff's line ranges, in code the changes touch or depend on.
@@ -401,9 +396,7 @@ The guard rejects only the exact empty string.
     const body = renderStandaloneFinding(finding)
 
     expect(body).toContain("Medium severity · subtle bugs · high confidence")
-    expect(body).toContain(
-      "<!-- umm-actually:src/untouched.ts:subtle_bugs:30 -->",
-    )
+    expect(body).toContain("<!-- umm-actually:src/untouched.ts:subtle_bugs:30 -->")
   })
 
   it("renders the suggestion fence between failure scenario and anchor", () => {
@@ -691,14 +684,14 @@ const anchorSource = (
 describe("extractAnchors", () => {
   it("prefers the comment's live line over the anchor's embedded line", () => {
     const comments = [
-      anchorSource(
-        "Some comment body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
-        { line: 48, originalLine: 42 },
-      ),
-      anchorSource(
-        "Another body\n\n<!-- umm-actually:src/b.ts:security:100 -->",
-        { line: 100, originalLine: 100 },
-      ),
+      anchorSource("Some comment body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->", {
+        line: 48,
+        originalLine: 42,
+      }),
+      anchorSource("Another body\n\n<!-- umm-actually:src/b.ts:security:100 -->", {
+        line: 100,
+        originalLine: 100,
+      }),
     ]
 
     const anchors = extractAnchors(comments)
@@ -710,9 +703,7 @@ describe("extractAnchors", () => {
   })
 
   it("still finds the anchor behind the model attribution on a rendered comment", () => {
-    const body = renderStandaloneFinding(
-      makeFinding({ file: "src/untouched.ts", line: 30 }),
-    )
+    const body = renderStandaloneFinding(makeFinding({ file: "src/untouched.ts", line: 30 }))
 
     const anchors = extractAnchors([anchorSource(body)])
 
@@ -742,9 +733,7 @@ describe("extractAnchors", () => {
   })
 
   it("falls back to the anchor's embedded line when both positions are null", () => {
-    const comments = [
-      anchorSource("Body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->"),
-    ]
+    const comments = [anchorSource("Body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->")]
 
     const anchors = extractAnchors(comments)
 
@@ -755,9 +744,7 @@ describe("extractAnchors", () => {
 
   it("skips old-format title-hash keys", () => {
     const comments = [
-      anchorSource(
-        "Old format\n\n<!-- umm-actually:src/a.ts:correctness:abcd1234 -->",
-      ),
+      anchorSource("Old format\n\n<!-- umm-actually:src/a.ts:correctness:abcd1234 -->"),
       anchorSource("New format\n\n<!-- umm-actually:src/b.ts:security:55 -->"),
     ]
 
@@ -797,9 +784,7 @@ describe("extractAnchors", () => {
 
   it("ignores an anchor-shaped string that is not at the end of the body", () => {
     const comments = [
-      anchorSource(
-        "Quoting <!-- umm-actually:src/a.ts:correctness:10 --> mid-body",
-      ),
+      anchorSource("Quoting <!-- umm-actually:src/a.ts:correctness:10 --> mid-body"),
     ]
 
     expect(extractAnchors(comments)).toEqual([])
@@ -809,9 +794,7 @@ describe("extractAnchors", () => {
     const comments = [
       anchorSource("A comment from a human reviewer"),
       anchorSource("CodeRabbit: some finding here"),
-      anchorSource(
-        "Body with\n\n<!-- umm-actually:src/a.ts:correctness:10 -->",
-      ),
+      anchorSource("Body with\n\n<!-- umm-actually:src/a.ts:correctness:10 -->"),
     ]
 
     const anchors = extractAnchors(comments)
@@ -842,9 +825,7 @@ describe("extractAnchors", () => {
 
   it("returns title as undefined when the body has no bold header", () => {
     const comments = [
-      anchorSource(
-        "Plain text body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->",
-      ),
+      anchorSource("Plain text body\n\n<!-- umm-actually:src/a.ts:correctness:42 -->"),
     ]
 
     const anchors = extractAnchors(comments)
@@ -864,10 +845,7 @@ describe("isDuplicateFinding", () => {
     const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
 
     expect(
-      isDuplicateFinding(
-        { file: "src/a.ts", category: "correctness", line: 50 },
-        anchors,
-      ),
+      isDuplicateFinding({ file: "src/a.ts", category: "correctness", line: 50 }, anchors),
     ).toBe(true)
   })
 
@@ -875,16 +853,10 @@ describe("isDuplicateFinding", () => {
     const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
 
     expect(
-      isDuplicateFinding(
-        { file: "src/a.ts", category: "correctness", line: 55 },
-        anchors,
-      ),
+      isDuplicateFinding({ file: "src/a.ts", category: "correctness", line: 55 }, anchors),
     ).toBe(true)
     expect(
-      isDuplicateFinding(
-        { file: "src/a.ts", category: "correctness", line: 45 },
-        anchors,
-      ),
+      isDuplicateFinding({ file: "src/a.ts", category: "correctness", line: 45 }, anchors),
     ).toBe(true)
   })
 
@@ -892,16 +864,10 @@ describe("isDuplicateFinding", () => {
     const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
 
     expect(
-      isDuplicateFinding(
-        { file: "src/a.ts", category: "correctness", line: 56 },
-        anchors,
-      ),
+      isDuplicateFinding({ file: "src/a.ts", category: "correctness", line: 56 }, anchors),
     ).toBe(false)
     expect(
-      isDuplicateFinding(
-        { file: "src/a.ts", category: "correctness", line: 44 },
-        anchors,
-      ),
+      isDuplicateFinding({ file: "src/a.ts", category: "correctness", line: 44 }, anchors),
     ).toBe(false)
   })
 
@@ -909,31 +875,22 @@ describe("isDuplicateFinding", () => {
     const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
 
     expect(
-      isDuplicateFinding(
-        { file: "src/b.ts", category: "correctness", line: 50 },
-        anchors,
-      ),
+      isDuplicateFinding({ file: "src/b.ts", category: "correctness", line: 50 }, anchors),
     ).toBe(false)
   })
 
   it("rejects when category differs", () => {
     const anchors = [{ file: "src/a.ts", category: "correctness", line: 50 }]
 
-    expect(
-      isDuplicateFinding(
-        { file: "src/a.ts", category: "security", line: 50 },
-        anchors,
-      ),
-    ).toBe(false)
+    expect(isDuplicateFinding({ file: "src/a.ts", category: "security", line: 50 }, anchors)).toBe(
+      false,
+    )
   })
 
   it("returns false for empty anchors", () => {
-    expect(
-      isDuplicateFinding(
-        { file: "src/a.ts", category: "correctness", line: 50 },
-        [],
-      ),
-    ).toBe(false)
+    expect(isDuplicateFinding({ file: "src/a.ts", category: "correctness", line: 50 }, [])).toBe(
+      false,
+    )
   })
 
   // --- Content dedup layer ---
@@ -1017,12 +974,9 @@ describe("isDuplicateFinding", () => {
       },
     ]
 
-    expect(
-      isDuplicateFinding(
-        { file: "src/a.ts", category: "security", line: 55 },
-        anchors,
-      ),
-    ).toBe(false)
+    expect(isDuplicateFinding({ file: "src/a.ts", category: "security", line: 55 }, anchors)).toBe(
+      false,
+    )
   })
 
   it("skips content match when the anchor has no title", () => {
@@ -1188,8 +1142,7 @@ describe("isDuplicateFinding", () => {
         file: "src/a.ts",
         category: "correctness",
         line: 50,
-        title:
-          "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima",
+        title: "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima",
       },
     ]
 
@@ -1199,8 +1152,7 @@ describe("isDuplicateFinding", () => {
           file: "src/b.ts",
           category: "correctness",
           line: 200,
-          title:
-            "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo mike",
+          title: "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo mike",
         },
         anchors,
       ),
@@ -1212,8 +1164,7 @@ describe("isDuplicateFinding", () => {
         file: "src/a.ts",
         category: "correctness",
         line: 50,
-        title:
-          "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima november",
+        title: "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima november",
       },
     ]
     expect(
@@ -1222,8 +1173,7 @@ describe("isDuplicateFinding", () => {
           file: "src/b.ts",
           category: "correctness",
           line: 200,
-          title:
-            "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike",
+          title: "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike",
         },
         swapAnchors,
       ),

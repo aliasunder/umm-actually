@@ -19,8 +19,7 @@ import type { File } from "parse-diff"
 import type { Logger } from "../logger.js"
 import { newFilePath } from "./commentable-lines.js"
 
-export type DiffExclusionSource =
-  "diff_exclude_paths" | "linguist_generated" | "default_list"
+export type DiffExclusionSource = "diff_exclude_paths" | "linguist_generated" | "default_list"
 
 export type ExcludedDiffFile = {
   path: string
@@ -70,20 +69,14 @@ const matchesExcludePattern = (filePath: string, pattern: string): boolean => {
   )
 }
 
-const matchesAnyExcludePattern = (
-  filePath: string,
-  patterns: string[],
-): boolean => {
+const matchesAnyExcludePattern = (filePath: string, patterns: string[]): boolean => {
   return patterns.some((pattern) => matchesExcludePattern(filePath, pattern))
 }
 
 /** Gitattributes patterns follow gitignore syntax: a slash-less pattern
  *  matches basenames at any depth; a trailing slash matches directory
  *  contents. Normalizes to a glob that matchesGlob understands. */
-const matchesGitattributesPattern = (
-  filePath: string,
-  pattern: string,
-): boolean => {
+const matchesGitattributesPattern = (filePath: string, pattern: string): boolean => {
   // Gitattributes escapes spaces with backslash; matchesGlob expects literals
   const unescaped = pattern.replace(/\\ /g, " ")
 
@@ -132,19 +125,16 @@ const UNESCAPED_WHITESPACE = /(?<!\\)\s+/
  * recognized linguist-generated attribute are ignored — and neither ever
  * fails the run.
  */
-const parseLinguistGeneratedRules = (
-  content: string,
-  logger: Logger,
-): LinguistRule[] => {
+const parseLinguistGeneratedRules = (content: string, logger: Logger): LinguistRule[] => {
   const rules: LinguistRule[] = []
 
   for (const rawLine of content.split("\n")) {
     const line = rawLine.trim()
+
     if (!line || line.startsWith("#")) continue
 
-    const [pattern, ...attributes] = line
-      .split(UNESCAPED_WHITESPACE)
-      .filter(Boolean)
+    const [pattern, ...attributes] = line.split(UNESCAPED_WHITESPACE).filter(Boolean)
+
     if (!pattern) continue
     // Gitattributes forbids gitignore-style "!" negation patterns
     if (pattern.startsWith("!")) continue
@@ -153,13 +143,11 @@ const parseLinguistGeneratedRules = (
     const generatedState = attributes
       .map((attribute) => GENERATED_ATTRIBUTE_STATES.get(attribute))
       .findLast((state) => state !== undefined)
+
     if (generatedState === undefined) continue
 
     if (hasExcessiveWildcards(pattern)) {
-      logger.warn(
-        "gitattributes pattern exceeds the wildcard cap — rule ignored",
-        { pattern },
-      )
+      logger.warn("gitattributes pattern exceeds the wildcard cap — rule ignored", { pattern })
       continue
     }
 
@@ -198,6 +186,7 @@ const classifyExclusion = (
   const linguistGenerated = linguistRules.findLast((rule) => {
     return matchesGitattributesPattern(filePath, rule.pattern)
   })?.generated
+
   if (linguistGenerated === false) return null
   if (linguistGenerated === true) return "linguist_generated"
 
@@ -241,6 +230,7 @@ export const createExclusionMatcher = (
  *  reviewed, while a rename into one is excluded. */
 const classificationPath = (file: File): string | null => {
   const filePath = newFilePath(file) ?? file.from
+
   if (!filePath || filePath === "/dev/null") return null
   // ignore().ignores() threw on absolute paths; matchesGlob doesn't, but
   // diff paths are PR-author-influenced so normalize defensively
@@ -265,6 +255,7 @@ export const partitionExcludedFiles = ({
   for (const file of files) {
     const filePath = classificationPath(file)
     const source = filePath ? matcher.classify(filePath) : null
+
     if (filePath && source) {
       excluded.push({
         path: filePath,
@@ -291,18 +282,14 @@ const SOURCE_LABELS: Record<DiffExclusionSource, string> = {
 }
 
 /** Human-readable label for each exclusion source. */
-export const describeExclusionSource = (
-  source: DiffExclusionSource,
-): string => {
+export const describeExclusionSource = (source: DiffExclusionSource): string => {
   return SOURCE_LABELS[source]
 }
 
 /** One line per excluded file with change counts and the source that
  *  excluded it — shared by the prompt trailer and the all-excluded skip
  *  review so both surfaces name the same facts identically. */
-export const renderExcludedFileLines = (
-  excluded: ExcludedDiffFile[],
-): string[] => {
+export const renderExcludedFileLines = (excluded: ExcludedDiffFile[]): string[] => {
   return excluded.map((file) => {
     const changeCounts = `+${file.additions}/-${file.deletions}`
     return `- ${file.path} (${changeCounts}, ${describeExclusionSource(file.source)})`
@@ -316,9 +303,7 @@ const SOURCE_SUMMARY_ORDER: DiffExclusionSource[] = [
 ]
 
 /** Per-source counts for one-line surfaces (check-run title, skip reason). */
-export const summarizeExclusionSources = (
-  excluded: ExcludedDiffFile[],
-): string => {
+export const summarizeExclusionSources = (excluded: ExcludedDiffFile[]): string => {
   return SOURCE_SUMMARY_ORDER.flatMap((source) => {
     const count = excluded.filter((file) => file.source === source).length
     return count > 0 ? [`${count} by ${describeExclusionSource(source)}`] : []
@@ -331,9 +316,7 @@ export const summarizeExclusionSources = (
  * deliberately do not resemble the "=== path ===" file headers — the
  * anchoring contract only lets the model cite real headers and file blocks.
  */
-export const renderExcludedFilesNote = (
-  excluded: ExcludedDiffFile[],
-): string => {
+export const renderExcludedFilesNote = (excluded: ExcludedDiffFile[]): string => {
   if (excluded.length === 0) return ""
 
   return [

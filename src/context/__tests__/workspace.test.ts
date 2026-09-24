@@ -1,13 +1,5 @@
 import { readFileSync } from "node:fs"
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -38,9 +30,7 @@ const defaultConfig = (workspaceRoot: string): ContextReaderConfig => ({
   remainingReviewMs: () => Infinity,
 })
 
-const workspaceRoot = fileURLToPath(
-  new URL("../../../fixtures/workspace", import.meta.url),
-)
+const workspaceRoot = fileURLToPath(new URL("../../../fixtures/workspace", import.meta.url))
 
 const readFixture = (workspaceRelativePath: string): string =>
   readFileSync(path.join(workspaceRoot, workspaceRelativePath), "utf8")
@@ -56,10 +46,7 @@ const configJsonContent = readFixture("docs/config.json")
 
 const makeReader = () => {
   const logger = createTestLogger()
-  const contextReader = createContextReader(
-    defaultConfig(workspaceRoot),
-    logger,
-  )
+  const contextReader = createContextReader(defaultConfig(workspaceRoot), logger)
   return { contextReader, logger }
 }
 
@@ -151,10 +138,7 @@ describe("readConventions", () => {
       "CLAUDE.md": "# Conventions behind a symlink\n",
     })
     await symlink(path.join(root, "CLAUDE.md"), path.join(root, "AGENTS.md"))
-    const contextReader = createContextReader(
-      defaultConfig(root),
-      createTestLogger(),
-    )
+    const contextReader = createContextReader(defaultConfig(root), createTestLogger())
 
     try {
       const conventions = await contextReader.readConventions({
@@ -171,27 +155,17 @@ describe("readConventions", () => {
     // The outside target must exist: a dangling link would reject with ENOENT
     // (the missing-file path) and pass this test without the escape guard
     const outsideRoot = await mkdtemp(path.join(tmpdir(), "umm-outside-"))
-    await writeFile(
-      path.join(outsideRoot, "secret.md"),
-      "runner secret",
-      "utf8",
-    )
+    await writeFile(path.join(outsideRoot, "secret.md"), "runner secret", "utf8")
     const { root, cleanup } = await makeTempWorkspace({
       "README.md": "# fixture\n",
     })
-    await symlink(
-      path.join(outsideRoot, "secret.md"),
-      path.join(root, "AGENTS.md"),
-    )
-    const contextReader = createContextReader(
-      defaultConfig(root),
-      createTestLogger(),
-    )
+    await symlink(path.join(outsideRoot, "secret.md"), path.join(root, "AGENTS.md"))
+    const contextReader = createContextReader(defaultConfig(root), createTestLogger())
 
     try {
-      await expect(
-        contextReader.readConventions({ conventionsFile: "AGENTS.md" }),
-      ).rejects.toThrow(new Error("path escapes the workspace: AGENTS.md"))
+      await expect(contextReader.readConventions({ conventionsFile: "AGENTS.md" })).rejects.toThrow(
+        new Error("path escapes the workspace: AGENTS.md"),
+      )
     } finally {
       await cleanup()
       await rm(outsideRoot, { recursive: true, force: true })
@@ -204,10 +178,7 @@ describe("readGitAttributes", () => {
     const { root, cleanup } = await makeTempWorkspace({
       ".gitattributes": "*.snap linguist-generated=true\n",
     })
-    const contextReader = createContextReader(
-      defaultConfig(root),
-      createTestLogger(),
-    )
+    const contextReader = createContextReader(defaultConfig(root), createTestLogger())
 
     try {
       const content = await contextReader.readGitAttributes()
@@ -242,8 +213,7 @@ describe("readGitAttributes", () => {
       expect(content).toBeNull()
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message:
-          "failed reading .gitattributes — linguist-generated rules unavailable",
+        message: "failed reading .gitattributes — linguist-generated rules unavailable",
         data: { error: expect.stringContaining("EISDIR") },
       })
     } finally {
@@ -257,10 +227,7 @@ describe("readGitAttributes", () => {
       ".gitattributes": oversizedContent,
     })
     const logger = createTestLogger()
-    const contextReader = createContextReader(
-      { ...defaultConfig(root), maxScanBytes: 16 },
-      logger,
-    )
+    const contextReader = createContextReader({ ...defaultConfig(root), maxScanBytes: 16 }, logger)
 
     try {
       const content = await contextReader.readGitAttributes()
@@ -268,8 +235,7 @@ describe("readGitAttributes", () => {
       expect(content).toBeNull()
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message:
-          ".gitattributes exceeds the scan size cap — linguist-generated rules unavailable",
+        message: ".gitattributes exceeds the scan size cap — linguist-generated rules unavailable",
         data: { bytes: oversizedContent.length, maxScanBytes: 16 },
       })
     } finally {
@@ -281,18 +247,11 @@ describe("readGitAttributes", () => {
     // The outside target must exist: a dangling link would reject with ENOENT
     // (the silent missing-file path) and pass this test without the guard
     const outsideRoot = await mkdtemp(path.join(tmpdir(), "umm-outside-"))
-    await writeFile(
-      path.join(outsideRoot, "attrs"),
-      "* linguist-generated=true\n",
-      "utf8",
-    )
+    await writeFile(path.join(outsideRoot, "attrs"), "* linguist-generated=true\n", "utf8")
     const { root, cleanup } = await makeTempWorkspace({
       "README.md": "# fixture\n",
     })
-    await symlink(
-      path.join(outsideRoot, "attrs"),
-      path.join(root, ".gitattributes"),
-    )
+    await symlink(path.join(outsideRoot, "attrs"), path.join(root, ".gitattributes"))
     const logger = createTestLogger()
     const contextReader = createContextReader(defaultConfig(root), logger)
 
@@ -365,10 +324,7 @@ describe("readChangedFiles", () => {
           includedAs: "full",
         },
       ],
-      remainingTokens:
-        10_000 -
-        estimateTokens(greeterContent) -
-        estimateTokens(registryContent),
+      remainingTokens: 10_000 - estimateTokens(greeterContent) - estimateTokens(registryContent),
     })
   })
 
@@ -408,8 +364,7 @@ describe("readChangedFiles", () => {
     })
     expect(logger.messages).toContainEqual({
       level: "info",
-      message:
-        "changed file already rendered in full elsewhere — including diff-only",
+      message: "changed file already rendered in full elsewhere — including diff-only",
       data: { path: "AGENTS.md" },
     })
   })
@@ -436,18 +391,11 @@ describe("readChangedFiles", () => {
       "packages/cli/yarn.lock": "# yarn lockfile v1",
       "src/app.ts": appContent,
     })
-    const contextReader = createContextReader(
-      defaultConfig(root),
-      createTestLogger(),
-    )
+    const contextReader = createContextReader(defaultConfig(root), createTestLogger())
 
     try {
       const result = await contextReader.readChangedFiles({
-        changedPaths: [
-          "package-lock.json",
-          "packages/cli/yarn.lock",
-          "src/app.ts",
-        ],
+        changedPaths: ["package-lock.json", "packages/cli/yarn.lock", "src/app.ts"],
         budgetTokens: 10_000,
         diffOnlyPaths: [],
       })
@@ -477,10 +425,7 @@ describe("readChangedFiles", () => {
     const { root, cleanup } = await makeTempWorkspace({
       "src/large.ts": multibyteContent,
     })
-    const contextReader = createContextReader(
-      defaultConfig(root),
-      createTestLogger(),
-    )
+    const contextReader = createContextReader(defaultConfig(root), createTestLogger())
 
     try {
       const result = await contextReader.readChangedFiles({
@@ -507,17 +452,13 @@ describe("readChangedFiles", () => {
       diffOnlyPaths: [],
     })
 
-    expect(result.files).toEqual([
-      { path: "src/missing.ts", content: "", includedAs: "diff-only" },
-    ])
+    expect(result.files).toEqual([{ path: "src/missing.ts", content: "", includedAs: "diff-only" }])
     expect(logger.messages).toContainEqual({
       level: "info",
       message: "changed file missing from checkout — including as diff-only",
       data: { path: "src/missing.ts" },
     })
-    expect(
-      logger.messages.filter((message) => message.level === "warn"),
-    ).toEqual([])
+    expect(logger.messages.filter((message) => message.level === "warn")).toEqual([])
   })
 
   it("includes an unreadable file as diff-only with a warning", async () => {
@@ -560,12 +501,8 @@ describe("readChangedFiles", () => {
       diffOnlyPaths: [],
     })
 
-    expect(result.files).toEqual([
-      { path: "src/data.bin", content: "", includedAs: "diff-only" },
-    ])
-    expect(
-      logger.messages.filter((message) => message.level === "warn"),
-    ).toEqual([])
+    expect(result.files).toEqual([{ path: "src/data.bin", content: "", includedAs: "diff-only" }])
+    expect(logger.messages.filter((message) => message.level === "warn")).toEqual([])
   })
 
   it("throws when a changed path escapes the workspace", async () => {
@@ -584,18 +521,11 @@ describe("readChangedFiles", () => {
     // The outside target must exist: a dangling link would take the
     // unreadable path and pass this test without the escape guard
     const outsideRoot = await mkdtemp(path.join(tmpdir(), "umm-outside-"))
-    await writeFile(
-      path.join(outsideRoot, "secret.txt"),
-      "runner secret",
-      "utf8",
-    )
+    await writeFile(path.join(outsideRoot, "secret.txt"), "runner secret", "utf8")
     const { root, cleanup } = await makeTempWorkspace({
       "src/ok.ts": "export const ok = 1\n",
     })
-    await symlink(
-      path.join(outsideRoot, "secret.txt"),
-      path.join(root, "src/leak.ts"),
-    )
+    await symlink(path.join(outsideRoot, "secret.txt"), path.join(root, "src/leak.ts"))
     const logger = createTestLogger()
     const contextReader = createContextReader(defaultConfig(root), logger)
 
@@ -606,13 +536,10 @@ describe("readChangedFiles", () => {
         diffOnlyPaths: [],
       })
 
-      expect(result.files).toEqual([
-        { path: "src/leak.ts", content: "", includedAs: "diff-only" },
-      ])
+      expect(result.files).toEqual([{ path: "src/leak.ts", content: "", includedAs: "diff-only" }])
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message:
-          "changed file resolves outside the reviewable workspace — including as diff-only",
+        message: "changed file resolves outside the reviewable workspace — including as diff-only",
         data: { path: "src/leak.ts" },
       })
     } finally {
@@ -636,13 +563,10 @@ describe("readChangedFiles", () => {
         diffOnlyPaths: [],
       })
 
-      expect(result.files).toEqual([
-        { path: "leak.ts", content: "", includedAs: "diff-only" },
-      ])
+      expect(result.files).toEqual([{ path: "leak.ts", content: "", includedAs: "diff-only" }])
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message:
-          "changed file resolves outside the reviewable workspace — including as diff-only",
+        message: "changed file resolves outside the reviewable workspace — including as diff-only",
         data: { path: "leak.ts" },
       })
     } finally {
@@ -815,9 +739,7 @@ describe("findRelatedFiles", () => {
         excludePaths: [],
       })
 
-      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
-        ["small.ts"],
-      )
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(["small.ts"])
     } finally {
       await cleanup()
     }
@@ -832,10 +754,7 @@ describe("findRelatedFiles", () => {
       "dist/compiled.ts": importTarget,
       ".hidden/covert.ts": importTarget,
     })
-    const contextReader = createContextReader(
-      defaultConfig(root),
-      createTestLogger(),
-    )
+    const contextReader = createContextReader(defaultConfig(root), createTestLogger())
 
     try {
       const relatedFiles = await contextReader.findRelatedFiles({
@@ -844,9 +763,7 @@ describe("findRelatedFiles", () => {
         excludePaths: [],
       })
 
-      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
-        ["src/legit.ts"],
-      )
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(["src/legit.ts"])
     } finally {
       await cleanup()
     }
@@ -871,9 +788,7 @@ describe("findRelatedFiles", () => {
       })
 
       // readable.ts still arriving proves the scan carried on past the failure
-      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
-        ["readable.ts"],
-      )
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(["readable.ts"])
       expect(logger.messages).toContainEqual({
         level: "warn",
         message: "scanned file unreadable — excluding from context",
@@ -894,10 +809,7 @@ describe("findRelatedFiles", () => {
       "clean.ts": importTarget,
       "binary.ts": `${importTarget}export const marker = "\x00"\n`,
     })
-    const contextReader = createContextReader(
-      defaultConfig(root),
-      createTestLogger(),
-    )
+    const contextReader = createContextReader(defaultConfig(root), createTestLogger())
 
     try {
       const relatedFiles = await contextReader.findRelatedFiles({
@@ -906,9 +818,7 @@ describe("findRelatedFiles", () => {
         excludePaths: [],
       })
 
-      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(
-        ["clean.ts"],
-      )
+      expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(["clean.ts"])
     } finally {
       await cleanup()
     }
@@ -934,8 +844,7 @@ describe("findRelatedFiles", () => {
 
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message:
-          "workspace scan capped — related-file and doc detection may be incomplete",
+        message: "workspace scan capped — related-file and doc detection may be incomplete",
         data: { maxScanFiles: DEFAULT_MAX_SCAN_FILES },
       })
     } finally {
@@ -963,9 +872,7 @@ describe("findRelatedFiles", () => {
         excludePaths: [],
       })
 
-      expect(relatedFiles.files.map((file) => file.path)).toEqual([
-        "src/legit.ts",
-      ])
+      expect(relatedFiles.files.map((file) => file.path)).toEqual(["src/legit.ts"])
     } finally {
       await cleanup()
     }
@@ -978,10 +885,7 @@ describe("findRelatedFiles", () => {
       "src/legit.ts": importTarget,
       "generated/api-client.ts": importTarget,
     })
-    const contextReader = createContextReader(
-      defaultConfig(root),
-      createTestLogger(),
-    )
+    const contextReader = createContextReader(defaultConfig(root), createTestLogger())
 
     try {
       const relatedFiles = await contextReader.findRelatedFiles({
@@ -990,9 +894,7 @@ describe("findRelatedFiles", () => {
         excludePaths: ["generated/api-client.ts"],
       })
 
-      expect(relatedFiles.files.map((file) => file.path)).toEqual([
-        "src/legit.ts",
-      ])
+      expect(relatedFiles.files.map((file) => file.path)).toEqual(["src/legit.ts"])
     } finally {
       await cleanup()
     }
@@ -1046,9 +948,7 @@ describe("findRelatedFiles", () => {
         excludePaths: [],
       })
 
-      expect(relatedFiles.files.map((file) => file.path)).toEqual([
-        "src/legit.ts",
-      ])
+      expect(relatedFiles.files.map((file) => file.path)).toEqual(["src/legit.ts"])
     } finally {
       await cleanup()
     }
@@ -1207,13 +1107,8 @@ describe("findRelatedDocs", () => {
 
   it("caps results at DEFAULT_RELATED_DOCS_MAX, keeping alphabetically first docs", async () => {
     const docFiles: Record<string, string> = {}
-    for (
-      let fileIndex = 0;
-      fileIndex < DEFAULT_RELATED_DOCS_MAX + 2;
-      fileIndex++
-    ) {
-      docFiles[`docs/doc-${fileIndex}.md`] =
-        `# Doc ${fileIndex}\n\nSee src/target.ts for details.`
+    for (let fileIndex = 0; fileIndex < DEFAULT_RELATED_DOCS_MAX + 2; fileIndex++) {
+      docFiles[`docs/doc-${fileIndex}.md`] = `# Doc ${fileIndex}\n\nSee src/target.ts for details.`
     }
     docFiles["src/target.ts"] = "export const target = true"
 
@@ -1237,10 +1132,7 @@ describe("findRelatedDocs", () => {
         "docs/doc-2.md",
         "docs/doc-3.md",
       ])
-      expect(relatedDocs.excludedByCapPaths).toEqual([
-        "docs/doc-4.md",
-        "docs/doc-5.md",
-      ])
+      expect(relatedDocs.excludedByCapPaths).toEqual(["docs/doc-4.md", "docs/doc-5.md"])
     } finally {
       await cleanup()
     }
@@ -1255,10 +1147,7 @@ describe("findRelatedDocs", () => {
     })
     try {
       const logger = createTestLogger()
-      const reader = createContextReader(
-        { ...defaultConfig(root), relatedDocsMax: 2 },
-        logger,
-      )
+      const reader = createContextReader({ ...defaultConfig(root), relatedDocsMax: 2 }, logger)
 
       const relatedDocs = await reader.findRelatedDocs({
         changedPaths: ["src/target.ts"],
@@ -1267,10 +1156,7 @@ describe("findRelatedDocs", () => {
         excludePaths: [],
       })
 
-      expect(relatedDocs.files.map((doc) => doc.path)).toEqual([
-        "docs/a.md",
-        "docs/b.md",
-      ])
+      expect(relatedDocs.files.map((doc) => doc.path)).toEqual(["docs/a.md", "docs/b.md"])
     } finally {
       await cleanup()
     }
@@ -1323,8 +1209,7 @@ describe("findRelatedDocs", () => {
       expect(relatedDocs.files).toEqual([
         {
           path: "docs/mentions-many.md",
-          content:
-            "# Many mentions\nSee src/a.ts, src/b.ts, src/c.ts, and src/d.ts for details.",
+          content: "# Many mentions\nSee src/a.ts, src/b.ts, src/c.ts, and src/d.ts for details.",
           includedAs: "full",
           reason: "mentions src/a.ts, src/b.ts, src/c.ts, +1 more",
         },
@@ -1400,8 +1285,7 @@ describe("findRelatedDocs", () => {
       "src/target.ts": `export const target = "target"\n`,
       "docs/guide.md": "See `src/target.ts` for the implementation.\n",
       "evals/report.md": "Evaluated `src/target.ts` on 100 samples.\n",
-      "evals/iteration-1/summary.md":
-        "The `src/target.ts` module scored 95%.\n",
+      "evals/iteration-1/summary.md": "The `src/target.ts` module scored 95%.\n",
     })
     const contextReader = createContextReader(
       { ...defaultConfig(root), excludePaths: ["evals"] },
@@ -1416,9 +1300,7 @@ describe("findRelatedDocs", () => {
         excludePaths: [],
       })
 
-      expect(relatedDocs.files.map((file) => file.path)).toEqual([
-        "docs/guide.md",
-      ])
+      expect(relatedDocs.files.map((file) => file.path)).toEqual(["docs/guide.md"])
     } finally {
       await cleanup()
     }
@@ -1568,18 +1450,11 @@ describe("readPriorityDocs", () => {
 
   it("skips a symlinked priority doc that resolves outside the workspace", async () => {
     const outsideRoot = await mkdtemp(path.join(tmpdir(), "umm-outside-"))
-    await writeFile(
-      path.join(outsideRoot, "secret.md"),
-      "runner secret",
-      "utf8",
-    )
+    await writeFile(path.join(outsideRoot, "secret.md"), "runner secret", "utf8")
     const { root, cleanup } = await makeTempWorkspace({
       "src/placeholder.ts": "export {}",
     })
-    await symlink(
-      path.join(outsideRoot, "secret.md"),
-      path.join(root, "README.md"),
-    )
+    await symlink(path.join(outsideRoot, "secret.md"), path.join(root, "README.md"))
     try {
       const logger = createTestLogger()
       const reader = createContextReader(defaultConfig(root), logger)
@@ -1593,8 +1468,7 @@ describe("readPriorityDocs", () => {
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })
       expect(logger.messages).toContainEqual({
         level: "warn",
-        message:
-          "priority doc resolves outside the reviewable workspace — skipping",
+        message: "priority doc resolves outside the reviewable workspace — skipping",
         data: { path: "README.md" },
       })
     } finally {
@@ -1713,10 +1587,7 @@ describe("readPriorityDocs", () => {
             reason: "priority documentation",
           },
         ],
-        remainingTokens:
-          100_000 -
-          estimateTokens(readmeContent) -
-          estimateTokens(guideContent),
+        remainingTokens: 100_000 - estimateTokens(readmeContent) - estimateTokens(guideContent),
       })
       expect(logger.messages).toContainEqual({
         level: "info",

@@ -38,9 +38,7 @@ export type ReviewSummaryStats = {
 /** Formats paths for a markdown table cell — em-dash when empty so cells
  *  are never blank. Pipes are escaped so paths can't break the table. */
 const renderPaths = (paths: string[]): string =>
-  paths.length === 0
-    ? "—"
-    : paths.map((path) => path.replaceAll("|", "\\|")).join(", ")
+  paths.length === 0 ? "—" : paths.map((path) => path.replaceAll("|", "\\|")).join(", ")
 
 /** Markdown summary for the workflow job summary — renders a context
  *  table showing what the model saw (and which priority docs it did not),
@@ -49,9 +47,7 @@ const renderPaths = (paths: string[]): string =>
 export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
   const sha = stats.prContext.headSha.slice(0, 7)
   const incompleteClause =
-    stats.phasesIncomplete.length === 0
-      ? ""
-      : ` · incomplete: ${stats.phasesIncomplete.join(", ")}`
+    stats.phasesIncomplete.length === 0 ? "" : ` · incomplete: ${stats.phasesIncomplete.join(", ")}`
 
   return [
     "### umm-actually review summary",
@@ -62,10 +58,7 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     "",
     `**Phases:** ${renderPaths(stats.phasesCompleted)}${incompleteClause}`,
     ...(stats.reviewDeadlineExceeded
-      ? [
-          "",
-          "The review deadline expired; results from completed phases are shown.",
-        ]
+      ? ["", "The review deadline expired; results from completed phases are shown."]
       : []),
     "",
     "#### Context",

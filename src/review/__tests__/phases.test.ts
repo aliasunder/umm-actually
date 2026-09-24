@@ -60,11 +60,7 @@ describe("resolveStages", () => {
 
   it("resolves parallel to one stage of the three split phases", () => {
     expect(resolveStages("parallel")).toEqual([
-      [
-        expectedCorrectnessSecurityPhase,
-        expectedConventionsTestsPhase,
-        expectedSubtleBugsPhase,
-      ],
+      [expectedCorrectnessSecurityPhase, expectedConventionsTestsPhase, expectedSubtleBugsPhase],
     ])
   })
 
@@ -100,9 +96,7 @@ describe("DIMENSION_CORRECTNESS_SECURITY", () => {
   it("carries the filesystem containment and symlinked-root rules", () => {
     const normalized = DIMENSION_CORRECTNESS_SECURITY.replace(/\s+/g, " ")
     expect(normalized).toContain("realpath-style containment")
-    expect(normalized).toContain(
-      "a symlinked search root bypasses per-entry validation",
-    )
+    expect(normalized).toContain("a symlinked search root bypasses per-entry validation")
   })
 
   it("includes the unchanged-doc staleness instruction", () => {
@@ -118,9 +112,7 @@ describe("DIMENSION_CORRECTNESS_SECURITY", () => {
     expect(DIMENSION_CORRECTNESS_SECURITY.replace(/\s+/g, " ")).toContain(
       "walk EACH path through the whole document",
     )
-    expect(DIMENSION_CORRECTNESS_SECURITY).toContain(
-      "Skip this walkthrough for single-path docs.",
-    )
+    expect(DIMENSION_CORRECTNESS_SECURITY).toContain("Skip this walkthrough for single-path docs.")
   })
 
   it("requires widened eligibility checks to preserve the old filter's guarantees", () => {
@@ -158,9 +150,7 @@ describe("DIMENSION_CODE_QUALITY", () => {
 
   it("flags side-effect prefixes on value-returning functions with a call-site boundary", () => {
     const normalized = DIMENSION_CODE_QUALITY.replace(/\s+/g, " ")
-    expect(normalized).toContain(
-      "Side-effect prefixes (ensure*, check*, init*, setup*)",
-    )
+    expect(normalized).toContain("Side-effect prefixes (ensure*, check*, init*, setup*)")
     expect(normalized).toContain(
       "keep the prefix when every call site in the provided files ignores the return",
     )
@@ -170,9 +160,7 @@ describe("DIMENSION_CODE_QUALITY", () => {
     const normalized = DIMENSION_CODE_QUALITY.replace(/\s+/g, " ")
     expect(normalized).toContain("Built-ins over manual string surgery")
     expect(normalized).toContain("split/slice/index arithmetic")
-    expect(normalized).toContain(
-      'Wrong: req.originalUrl.split("?")[0] ?? req.originalUrl',
-    )
+    expect(normalized).toContain('Wrong: req.originalUrl.split("?")[0] ?? req.originalUrl')
     expect(normalized).toContain("URL.parse(req.originalUrl")
   })
 
@@ -260,9 +248,7 @@ describe("DIMENSION_SUBTLE_BUGS", () => {
 describe("CI_WORKFLOW_CHECKS", () => {
   it("carries the bash -e short-circuit and if:-evaluation-time rules", () => {
     const normalized = CI_WORKFLOW_CHECKS.replace(/\s+/g, " ")
-    expect(normalized).toContain(
-      'a failing "[ test ] && cmd" short-circuit aborts the job',
-    )
+    expect(normalized).toContain('a failing "[ test ] && cmd" short-circuit aborts the job')
     expect(normalized).toContain("GitHub evaluates if: before the step runs")
   })
 })
@@ -280,8 +266,6 @@ describe("REPORTING_RULES", () => {
     expect(normalized).toContain(
       "Same-pattern sweep: when a trigger fires on changed code, scan the rest of that file and the provided related files",
     )
-    expect(normalized).toContain(
-      "sweep the specific pattern that fired, not all dimensions",
-    )
+    expect(normalized).toContain("sweep the specific pattern that fired, not all dimensions")
   })
 })

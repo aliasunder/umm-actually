@@ -27,17 +27,9 @@ describe("normalizeTitle", () => {
   })
 
   it("handles backtick-wrapped code identifiers", () => {
-    const result = normalizeTitle(
-      "Unguarded `toLowerCase` call on `user.email`",
-    )
+    const result = normalizeTitle("Unguarded `toLowerCase` call on `user.email`")
 
-    expect(result).toEqual([
-      "call",
-      "email",
-      "tolowercase",
-      "unguarded",
-      "user",
-    ])
+    expect(result).toEqual(["call", "email", "tolowercase", "unguarded", "user"])
   })
 })
 

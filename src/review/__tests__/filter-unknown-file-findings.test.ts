@@ -134,9 +134,10 @@ describe("filterUnknownFileFindings", () => {
   it("drops every finding when no paths are known", () => {
     const finding = makeFinding()
 
-    expect(
-      filterUnknownFileFindings({ findings: [finding], knownPaths: [] }),
-    ).toEqual({ findings: [], droppedAsUnknownFile: [finding] })
+    expect(filterUnknownFileFindings({ findings: [finding], knownPaths: [] })).toEqual({
+      findings: [],
+      droppedAsUnknownFile: [finding],
+    })
   })
 
   it("returns empty arrays for no findings", () => {

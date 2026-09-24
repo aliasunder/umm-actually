@@ -8,10 +8,7 @@ import {
 import { makeFinding } from "./make-finding.js"
 
 const fixtureResponse: unknown = JSON.parse(
-  readFileSync(
-    new URL("../../../fixtures/openrouter.response.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL("../../../fixtures/openrouter.response.json", import.meta.url), "utf8"),
 )
 
 describe("reviewResponseSchema", () => {
@@ -37,8 +34,7 @@ describe("reviewResponseSchema", () => {
   })
 
   it("rejects a finding missing failure_scenario", () => {
-    const { failure_scenario: _omitted, ...findingWithoutScenario } =
-      makeFinding()
+    const { failure_scenario: _omitted, ...findingWithoutScenario } = makeFinding()
     const response = { analysis: "checked", findings: [findingWithoutScenario] }
 
     const result = reviewResponseSchema.safeParse(response)

@@ -1,4 +1,5 @@
 import js from "@eslint/js"
+import stylistic from "@stylistic/eslint-plugin"
 import { defineConfig } from "eslint/config"
 import tseslint from "typescript-eslint"
 import eslintConfigPrettier from "eslint-config-prettier"
@@ -13,19 +14,25 @@ export default defineConfig(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
-      "@typescript-eslint/consistent-type-assertions": [
+      "@typescript-eslint/consistent-type-assertions": ["error", { assertionStyle: "never" }],
+    },
+  },
+  {
+    // AGENTS.md → Code style: blank lines separate logical steps, so a
+    // declaration never runs straight into the `if` that consumes it.
+    // Prettier does not manage blank lines, so this rule cannot conflict with it.
+    plugins: { "@stylistic": stylistic },
+    rules: {
+      "@stylistic/padding-line-between-statements": [
         "error",
-        { assertionStyle: "never" },
+        { blankLine: "always", prev: ["const", "let"], next: "if" },
       ],
     },
   },
   {
     files: ["**/__tests__/**/*.ts", "**/*.test.ts"],
     rules: {
-      "@typescript-eslint/consistent-type-assertions": [
-        "warn",
-        { assertionStyle: "never" },
-      ],
+      "@typescript-eslint/consistent-type-assertions": ["warn", { assertionStyle: "never" }],
       "@typescript-eslint/no-non-null-assertion": "warn",
     },
   },

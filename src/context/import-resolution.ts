@@ -10,9 +10,8 @@ const IMPORT_SPECIFIER_PATTERN =
   /(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)["']([^"']+)["']/g
 
 export const extractImportSpecifiers = (source: string): string[] => {
-  return [...source.matchAll(IMPORT_SPECIFIER_PATTERN)].flatMap(
-    (specifierMatch) =>
-      specifierMatch[1] === undefined ? [] : [specifierMatch[1]],
+  return [...source.matchAll(IMPORT_SPECIFIER_PATTERN)].flatMap((specifierMatch) =>
+    specifierMatch[1] === undefined ? [] : [specifierMatch[1]],
   )
 }
 
@@ -43,10 +42,12 @@ export const resolveImportSpecifier = ({
   if (!specifier.startsWith("./") && !specifier.startsWith("../")) return []
 
   const joined = posix.join(posix.dirname(importerPath), specifier)
+
   // A join that climbs above the workspace root can never match a changed file
   if (joined.startsWith("../")) return []
 
   const extension = posix.extname(joined)
+
   if (extension === "") {
     return [
       joined,
@@ -59,8 +60,6 @@ export const resolveImportSpecifier = ({
   const withoutExtension = joined.slice(0, -extension.length)
   return [
     joined,
-    ...remappedExtensions.map(
-      (remappedExtension) => `${withoutExtension}${remappedExtension}`,
-    ),
+    ...remappedExtensions.map((remappedExtension) => `${withoutExtension}${remappedExtension}`),
   ]
 }

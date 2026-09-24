@@ -6,8 +6,7 @@ export type PhaseAttempt = ModelAttempt & { phase: string }
 const formatCost = (costUsd: number | null): string =>
   costUsd === null ? "n/a" : `$${costUsd.toFixed(6)}`
 
-const formatTokens = (tokens: number | null): string =>
-  tokens === null ? "n/a" : String(tokens)
+const formatTokens = (tokens: number | null): string => (tokens === null ? "n/a" : String(tokens))
 
 /** Markdown table for the workflow job summary — one row per attempt across
  *  every phase, failed ones included (any attempt that reached the provider
@@ -28,8 +27,7 @@ export const renderCostSummary = ({
     attempt.costUsd === null ? [] : [attempt.costUsd],
   )
   const totalCost = knownCosts.reduce((sum, costUsd) => sum + costUsd, 0)
-  const unpricedSuffix =
-    knownCosts.length < attempts.length ? " (some attempts unpriced)" : ""
+  const unpricedSuffix = knownCosts.length < attempts.length ? " (some attempts unpriced)" : ""
   const totalLine =
     knownCosts.length === 0
       ? "Total cost: n/a"

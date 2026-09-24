@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-  renderReviewSummary,
-  type ReviewSummaryStats,
-} from "../review-summary.js"
+import { renderReviewSummary, type ReviewSummaryStats } from "../review-summary.js"
 
 const baseStats: ReviewSummaryStats = {
   prContext: {
@@ -216,10 +213,7 @@ describe("renderReviewSummary", () => {
           "",
           "**Phases:** correctness-security, conventions-tests · incomplete: subtle-bugs",
           ...(reviewDeadlineExceeded
-            ? [
-                "",
-                "The review deadline expired; results from completed phases are shown.",
-              ]
+            ? ["", "The review deadline expired; results from completed phases are shown."]
             : []),
           "",
           "#### Context",

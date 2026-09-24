@@ -27,10 +27,7 @@ describe("mergePhaseFindings", () => {
       modelUsed: "model/correctness",
     }
 
-    const merged = mergePhaseFindings([
-      [correctnessFinding, unrelatedFinding],
-      [subtleBugsFinding],
-    ])
+    const merged = mergePhaseFindings([[correctnessFinding, unrelatedFinding], [subtleBugsFinding]])
 
     expect(merged).toEqual({
       findings: [subtleBugsFinding, unrelatedFinding],
@@ -91,11 +88,7 @@ describe("mergePhaseFindings", () => {
       title: "Range 10 to 12",
     })
 
-    const merged = mergePhaseFindings([
-      [lineTenFinding],
-      [lineTwelveFinding],
-      [rangeFinding],
-    ])
+    const merged = mergePhaseFindings([[lineTenFinding], [lineTwelveFinding], [rangeFinding]])
 
     expect(merged).toEqual({
       findings: [rangeFinding],
@@ -119,11 +112,7 @@ describe("mergePhaseFindings", () => {
       title: "Range 10 to 12",
     })
 
-    const merged = mergePhaseFindings([
-      [lineTenFinding],
-      [lineTwelveFinding],
-      [rangeFinding],
-    ])
+    const merged = mergePhaseFindings([[lineTenFinding], [lineTwelveFinding], [rangeFinding]])
 
     expect(merged).toEqual({
       findings: [lineTenFinding, lineTwelveFinding],

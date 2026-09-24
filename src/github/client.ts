@@ -12,10 +12,7 @@ import type { PrContext } from "./event.js"
  * real octokit assignable under strictFunctionTypes.
  */
 export type OctokitLike = {
-  graphql<T = unknown>(
-    query: string,
-    parameters?: Record<string, unknown>,
-  ): Promise<T>
+  graphql<T = unknown>(query: string, parameters?: Record<string, unknown>): Promise<T>
   rest: {
     pulls: {
       get(params: {
@@ -90,8 +87,7 @@ export type CheckRunConclusion = "success" | "neutral" | "failure" | "cancelled"
 
 export type CheckRunOutput = { title: string; summary: string }
 
-export type DiffFetchResult =
-  { kind: "ok"; diff: string } | { kind: "too_large" }
+export type DiffFetchResult = { kind: "ok"; diff: string } | { kind: "too_large" }
 
 export type SubmitReviewResult = { url: string }
 
@@ -112,8 +108,7 @@ export type ExistingReviewComment = {
 
 /** Outcome of posting the inline-findings review: `rejected` is GitHub's
  *  422 on the comment anchors — the caller falls back to issue comments. */
-export type FindingsReviewResult =
-  { kind: "ok"; url: string } | { kind: "rejected" }
+export type FindingsReviewResult = { kind: "ok"; url: string } | { kind: "rejected" }
 
 export type GithubClient = {
   fetchPullRequest: (params: { prNumber: number }) => Promise<PrContext>
@@ -129,25 +124,15 @@ export type GithubClient = {
     body: string
     comments: ReviewComment[]
   }) => Promise<FindingsReviewResult>
-  postIssueComment: (params: {
-    prNumber: number
-    body: string
-  }) => Promise<{ url: string }>
-  fetchBotReviewComments: (params: {
-    prNumber: number
-  }) => Promise<ExistingReviewComment[]>
-  fetchBotIssueComments: (params: {
-    prNumber: number
-  }) => Promise<{ body: string }[]>
+  postIssueComment: (params: { prNumber: number; body: string }) => Promise<{ url: string }>
+  fetchBotReviewComments: (params: { prNumber: number }) => Promise<ExistingReviewComment[]>
+  fetchBotIssueComments: (params: { prNumber: number }) => Promise<{ body: string }[]>
   upsertSummaryComment: (params: {
     prNumber: number
     body: string
     anchor: string
   }) => Promise<UpsertCommentResult>
-  createCheckRun: (params: {
-    headSha: string
-    name: string
-  }) => Promise<{ checkRunId: number }>
+  createCheckRun: (params: { headSha: string; name: string }) => Promise<{ checkRunId: number }>
   updateCheckRun: (params: {
     checkRunId: number
     conclusion: CheckRunConclusion
@@ -199,11 +184,7 @@ const errorStatus = (error: unknown): number | undefined => {
 }
 
 export const createGithubClient = (
-  {
-    octokit,
-    owner,
-    repo,
-  }: { octokit: OctokitLike; owner: string; repo: string },
+  { octokit, owner, repo }: { octokit: OctokitLike; owner: string; repo: string },
   logger: Logger,
 ): GithubClient => {
   const MAX_PAGES = 10
@@ -211,21 +192,19 @@ export const createGithubClient = (
 
   const parseReviewUrl = (data: unknown): string => {
     const parsed = urlResponseSchema.safeParse(data)
+
     if (!parsed.success) throw new Error("unexpected review response shape")
     return parsed.data.html_url
   }
 
-  const fetchPullRequest = async ({
-    prNumber,
-  }: {
-    prNumber: number
-  }): Promise<PrContext> => {
+  const fetchPullRequest = async ({ prNumber }: { prNumber: number }): Promise<PrContext> => {
     const response = await octokit.rest.pulls.get({
       owner,
       repo,
       pull_number: prNumber,
     })
     const parsed = prResponseSchema.safeParse(response.data)
+
     if (!parsed.success) {
       throw new Error("unexpected pull request response shape")
     }
@@ -240,11 +219,7 @@ export const createGithubClient = (
     }
   }
 
-  const fetchDiff = async ({
-    prNumber,
-  }: {
-    prNumber: number
-  }): Promise<DiffFetchResult> => {
+  const fetchDiff = async ({ prNumber }: { prNumber: number }): Promise<DiffFetchResult> => {
     try {
       const response = await octokit.rest.pulls.get({
         owner,
@@ -252,10 +227,9 @@ export const createGithubClient = (
         pull_number: prNumber,
         mediaType: { format: "diff" },
       })
+
       if (typeof response.data !== "string") {
-        throw new Error(
-          "expected a unified diff string from the diff media type",
-        )
+        throw new Error("expected a unified diff string from the diff media type")
       }
       return { kind: "ok", diff: response.data }
     } catch (fetchError) {
@@ -282,8 +256,7 @@ export const createGithubClient = (
       viewer: { login: string; __typename: string }
     }>("query { viewer { login __typename } }")
     const { login, __typename } = viewer.viewer
-    botLoginCache =
-      __typename === "Bot" && !login.endsWith("[bot]") ? `${login}[bot]` : login
+    botLoginCache = __typename === "Bot" && !login.endsWith("[bot]") ? `${login}[bot]` : login
     return botLoginCache
   }
 
@@ -359,6 +332,7 @@ export const createGithubClient = (
       body,
     })
     const parsed = urlResponseSchema.safeParse(response.data)
+
     if (!parsed.success) {
       throw new Error("unexpected issue comment response shape")
     }
@@ -385,6 +359,7 @@ export const createGithubClient = (
         page,
       })
       const parsed = reviewCommentListSchema.safeParse(response.data)
+
       if (!parsed.success) {
         throw new Error("unexpected review comments response shape")
       }
@@ -395,8 +370,7 @@ export const createGithubClient = (
             path: comment.path,
             body: comment.body,
             line: comment.start_line ?? comment.line ?? null,
-            originalLine:
-              comment.original_start_line ?? comment.original_line ?? null,
+            originalLine: comment.original_start_line ?? comment.original_line ?? null,
           })),
       )
       if (parsed.data.length < PER_PAGE) break
@@ -436,6 +410,7 @@ export const createGithubClient = (
         page,
       })
       const parsed = issueCommentListSchema.safeParse(response.data)
+
       if (!parsed.success) {
         throw new Error("unexpected issue comments response shape")
       }
@@ -479,15 +454,16 @@ export const createGithubClient = (
         page,
       })
       const parsed = issueCommentListSchema.safeParse(response.data)
+
       if (!parsed.success) {
         throw new Error("unexpected issue comments response shape")
       }
       totalFetched += parsed.data.length
 
       const existingComment = parsed.data.find(
-        (comment) =>
-          comment.user?.login === botLogin && comment.body.startsWith(anchor),
+        (comment) => comment.user?.login === botLogin && comment.body.startsWith(anchor),
       )
+
       if (existingComment) {
         const updateResponse = await octokit.rest.issues.updateComment({
           owner,
@@ -496,6 +472,7 @@ export const createGithubClient = (
           body,
         })
         const updateParsed = urlResponseSchema.safeParse(updateResponse.data)
+
         if (!updateParsed.success) {
           throw new Error("unexpected issue comment response shape")
         }
@@ -519,6 +496,7 @@ export const createGithubClient = (
       body,
     })
     const parsed = urlResponseSchema.safeParse(response.data)
+
     if (!parsed.success) {
       throw new Error("unexpected issue comment response shape")
     }
@@ -545,6 +523,7 @@ export const createGithubClient = (
       status: "in_progress",
     })
     const parsed = checkRunResponseSchema.safeParse(response.data)
+
     if (!parsed.success) {
       throw new Error("unexpected check run response shape")
     }

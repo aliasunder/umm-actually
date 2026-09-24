@@ -4,17 +4,12 @@ import { describe, expect, it } from "vitest"
 import { annotateDiff } from "../annotate-diff.js"
 import { computeCommentableLines, newFilePath } from "../commentable-lines.js"
 
-const sampleDiff = readFileSync(
-  new URL("../../../fixtures/sample.diff", import.meta.url),
-  "utf8",
-)
+const sampleDiff = readFileSync(new URL("../../../fixtures/sample.diff", import.meta.url), "utf8")
 const parsedFiles = parseDiff(sampleDiff)
 
 describe("annotateDiff", () => {
   it("renders an added file with explicit new-file line numbers", () => {
-    const addedFile = parsedFiles.filter(
-      (file) => file.to === "src/added-file.ts",
-    )
+    const addedFile = parsedFiles.filter((file) => file.to === "src/added-file.ts")
 
     expect(annotateDiff(addedFile)).toBe(
       [
@@ -28,9 +23,7 @@ describe("annotateDiff", () => {
   })
 
   it("renders deleted lines without a line number", () => {
-    const renamedFile = parsedFiles.filter(
-      (file) => file.to === "src/new-name.ts",
-    )
+    const renamedFile = parsedFiles.filter((file) => file.to === "src/new-name.ts")
 
     expect(annotateDiff(renamedFile)).toBe(
       [
@@ -46,9 +39,7 @@ describe("annotateDiff", () => {
   })
 
   it("labels renamed files with their previous path", () => {
-    const renamedFile = parsedFiles.filter(
-      (file) => file.to === "src/new-name.ts",
-    )
+    const renamedFile = parsedFiles.filter((file) => file.to === "src/new-name.ts")
 
     expect(annotateDiff(renamedFile)).toContain(
       "=== src/new-name.ts (renamed from src/old-name.ts) ===",
@@ -56,9 +47,7 @@ describe("annotateDiff", () => {
   })
 
   it("filters no-newline markers so they don't render as phantom content lines", () => {
-    const noNewlineFile = parsedFiles.filter(
-      (file) => file.to === "src/no-trailing-newline.ts",
-    )
+    const noNewlineFile = parsedFiles.filter((file) => file.to === "src/no-trailing-newline.ts")
 
     expect(annotateDiff(noNewlineFile)).toBe(
       [
@@ -72,9 +61,7 @@ describe("annotateDiff", () => {
   })
 
   it("renders binary files as a no-line-changes section", () => {
-    const binaryFile = parsedFiles.filter(
-      (file) => file.to === "assets/logo.png",
-    )
+    const binaryFile = parsedFiles.filter((file) => file.to === "assets/logo.png")
 
     expect(annotateDiff(binaryFile)).toBe(
       "=== assets/logo.png ===\n(no line changes — binary or metadata-only)",
@@ -90,13 +77,12 @@ describe("annotateDiff", () => {
 
     for (const file of parsedFiles) {
       const path = newFilePath(file)
+
       if (path === null) continue
 
       const annotated = annotateDiff([file])
       const printedLineNumbers = new Set(
-        [...annotated.matchAll(/^\s*(\d+) [+ ] /gm)].map((match) =>
-          Number(match[1]),
-        ),
+        [...annotated.matchAll(/^\s*(\d+) [+ ] /gm)].map((match) => Number(match[1])),
       )
       const commentable = commentableByPath.get(path)
 

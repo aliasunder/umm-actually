@@ -3,10 +3,7 @@ import parseDiff from "parse-diff"
 import { describe, expect, it } from "vitest"
 import { computeCommentableLines, newFilePath } from "../commentable-lines.js"
 
-const sampleDiff = readFileSync(
-  new URL("../../../fixtures/sample.diff", import.meta.url),
-  "utf8",
-)
+const sampleDiff = readFileSync(new URL("../../../fixtures/sample.diff", import.meta.url), "utf8")
 const parsedFiles = parseDiff(sampleDiff)
 
 describe("newFilePath", () => {
@@ -14,15 +11,11 @@ describe("newFilePath", () => {
     const greeter = parsedFiles.find((file) => file.to === "src/greeter.ts")
 
     expect(greeter).toBeDefined()
-    expect(greeter === undefined ? null : newFilePath(greeter)).toBe(
-      "src/greeter.ts",
-    )
+    expect(greeter === undefined ? null : newFilePath(greeter)).toBe("src/greeter.ts")
   })
 
   it("returns null for a deleted file", () => {
-    const removed = parsedFiles.find(
-      (file) => file.from === "src/removed-file.ts",
-    )
+    const removed = parsedFiles.find((file) => file.from === "src/removed-file.ts")
 
     expect(removed?.to).toBe("/dev/null")
     expect(removed === undefined ? null : newFilePath(removed)).toBeNull()
@@ -63,9 +56,7 @@ describe("computeCommentableLines", () => {
   it("maps an added file to all of its new lines", () => {
     const addedFile = commentableByPath.get("src/added-file.ts")
 
-    expect([...(addedFile?.rightLines ?? [])].sort((a, b) => a - b)).toEqual([
-      1, 2, 3,
-    ])
+    expect([...(addedFile?.rightLines ?? [])].sort((a, b) => a - b)).toEqual([1, 2, 3])
     expect(addedFile?.hunkRanges).toEqual([{ start: 1, end: 3 }])
   })
 
@@ -74,9 +65,7 @@ describe("computeCommentableLines", () => {
 
     expect(renamed).toBeDefined()
     expect(commentableByPath.has("src/old-name.ts")).toBe(false)
-    expect([...(renamed?.rightLines ?? [])].sort((a, b) => a - b)).toEqual([
-      10, 11, 12, 13,
-    ])
+    expect([...(renamed?.rightLines ?? [])].sort((a, b) => a - b)).toEqual([10, 11, 12, 13])
   })
 
   it("yields no commentable lines for a binary file", () => {

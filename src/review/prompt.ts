@@ -140,6 +140,7 @@ export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string =>
 
 const truncateToTokenCap = (text: string, tokenCap: number): string => {
   const characterCap = tokenCap * CHARS_PER_TOKEN
+
   if (text.length <= characterCap) return text
   // toWellFormed: a cut mid-surrogate-pair would leave a lone surrogate,
   // which some HTTP stacks and providers reject in the request body
@@ -153,23 +154,20 @@ const truncateToTokenCap = (text: string, tokenCap: number): string => {
  * and place instruction-shaped text outside the untrusted wrapper.
  * Generated once per run by the caller and passed to buildUserPrompt.
  */
-export const generateDelimiterNonce = (): string =>
-  randomBytes(6).toString("hex")
+export const generateDelimiterNonce = (): string => randomBytes(6).toString("hex")
 
 /** A double quote would terminate the surrounding attribute — nothing else is
  *  structural inside a quoted attribute value. */
-const escapeAttributeValue = (value: string): string =>
-  value.replaceAll('"', "&quot;")
+const escapeAttributeValue = (value: string): string => value.replaceAll('"', "&quot;")
 
 const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
   const fileTag = `file-${delimiterNonce}`
   const pathAttribute = escapeAttributeValue(file.path)
+
   if (file.includedAs === "diff-only") {
     return `<${fileTag} path="${pathAttribute}" note="full content omitted — see diff">\n</${fileTag}>`
   }
-  const reasonAttribute = file.reason
-    ? ` reason="${escapeAttributeValue(file.reason)}"`
-    : ""
+  const reasonAttribute = file.reason ? ` reason="${escapeAttributeValue(file.reason)}"` : ""
   return `<${fileTag} path="${pathAttribute}"${reasonAttribute}>\n${file.content}\n</${fileTag}>`
 }
 
@@ -237,9 +235,7 @@ export const buildUserPrompt = ({
       ? ""
       : [
           "Documentation that may describe changed code (flag any claims that have become stale):",
-          ...relatedDocs.map((relatedDoc) =>
-            renderFileBlock(relatedDoc, delimiterNonce),
-          ),
+          ...relatedDocs.map((relatedDoc) => renderFileBlock(relatedDoc, delimiterNonce)),
         ].join("\n\n")
 
   const priorFindingsSection =
@@ -267,5 +263,4 @@ export const buildUserPrompt = ({
 }
 
 /** Order-of-magnitude token estimate for budget decisions. */
-export const estimateTokens = (text: string): number =>
-  Math.ceil(text.length / CHARS_PER_TOKEN)
+export const estimateTokens = (text: string): number => Math.ceil(text.length / CHARS_PER_TOKEN)

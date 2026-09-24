@@ -14,10 +14,7 @@ const logger = createLogger("umm-actually")
 
 process.on("unhandledRejection", (error) => {
   logger.warn("unhandled promise rejection (likely SDK internal)", {
-    error:
-      error instanceof Error
-        ? `[${error.name}]: ${error.message}`
-        : String(error),
+    error: error instanceof Error ? `[${error.name}]: ${error.message}` : String(error),
   })
 })
 
@@ -96,11 +93,7 @@ try {
   core.setSecret(config.githubToken)
   core.setSecret(config.openrouterApiKey)
 
-  const workspaceRoot = envVar
-    .from(process.env)
-    .get("GITHUB_WORKSPACE")
-    .required()
-    .asString()
+  const workspaceRoot = envVar.from(process.env).get("GITHUB_WORKSPACE").required().asString()
   const octokit = getOctokit(config.githubToken)
   const { owner, repo } = context.repo
 
@@ -135,8 +128,7 @@ try {
             logger,
           ),
           model: config.model,
-          fallbackModel:
-            config.fallbackModel === "" ? null : config.fallbackModel,
+          fallbackModel: config.fallbackModel === "" ? null : config.fallbackModel,
         },
         logger,
       ),

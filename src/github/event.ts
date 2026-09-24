@@ -57,6 +57,7 @@ export const resolvePullRequestEvent = (
 
   if (eventName === "pull_request" || eventName === "pull_request_target") {
     const parsed = pullRequestEventSchema.safeParse(payload)
+
     if (!parsed.success) {
       return { kind: "not_a_pr", reason: `malformed ${eventName} payload` }
     }
@@ -76,6 +77,7 @@ export const resolvePullRequestEvent = (
 
   if (eventName === "issue_comment") {
     const parsed = issueCommentEventSchema.safeParse(payload)
+
     if (!parsed.success) {
       return { kind: "not_a_pr", reason: "malformed issue_comment payload" }
     }

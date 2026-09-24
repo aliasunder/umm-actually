@@ -1,8 +1,5 @@
 import { posix } from "node:path"
-import {
-  describeExclusionSource,
-  type ExcludedDiffFile,
-} from "../diff/exclusion.js"
+import { describeExclusionSource, type ExcludedDiffFile } from "../diff/exclusion.js"
 import type { PromptFile } from "./prompt.js"
 
 export type ContextNotesInput = {
@@ -38,16 +35,14 @@ const renderExcludedFile = (file: ExcludedDiffFile): string => {
 export const findInContextPriorityDocs = ({
   priorityDocs,
   priorityDocsInContext,
-}: Pick<
-  ContextNotesInput,
-  "priorityDocs" | "priorityDocsInContext"
->): string[] => {
+}: Pick<ContextNotesInput, "priorityDocs" | "priorityDocsInContext">): string[] => {
   const inContextPaths = new Set(priorityDocsInContext.map(normalizePath))
   const seenPaths = new Set<string>()
   const matchedDocs: string[] = []
 
   for (const docPath of priorityDocs) {
     const normalizedPath = normalizePath(docPath)
+
     if (!inContextPaths.has(normalizedPath)) continue
     if (seenPaths.has(normalizedPath)) continue
     seenPaths.add(normalizedPath)
@@ -78,6 +73,7 @@ export const findAbsentPriorityDocs = ({
 
   for (const docPath of priorityDocs) {
     const normalizedPath = normalizePath(docPath)
+
     if (satisfiedPaths.has(normalizedPath)) continue
     if (seenPaths.has(normalizedPath)) continue
     seenPaths.add(normalizedPath)
