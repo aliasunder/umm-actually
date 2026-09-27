@@ -780,11 +780,13 @@ const runReviewPipeline = async (
   )
   const docRemainingTokens = latePriorityDocsResult.remainingTokens
 
-  // A new conventions file's diff hunks carry every line of it
+  // A new conventions file's diff hunks carry every line of it. A binary file's
+  // diff has no hunks, so it carries nothing.
   const conventionsAddedInDiff = reviewableFiles.some((file) => {
     const toPath = newFilePath(file)
     return (
       Boolean(file.new) &&
+      file.chunks.length > 0 &&
       toPath !== null &&
       posix.normalize(toPath) === posix.normalize(config.conventionsFile)
     )

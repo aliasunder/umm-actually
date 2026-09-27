@@ -2118,6 +2118,33 @@ describe("orchestrate", () => {
         )
       })
 
+      it("does not treat an added binary conventions file's diff as a full copy", async () => {
+        const binaryConventionsDiff = `${sampleDiff}diff --git a/AGENTS.md b/AGENTS.md\nnew file mode 100644\nindex 0000000..4444444\nBinary files /dev/null and b/AGENTS.md differ\n`
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: [] },
+          githubClient: {
+            fetchDiff: async () => ({ kind: "ok" as const, diff: binaryConventionsDiff }),
+          },
+          contextReader: { readConventions: async () => overCapConventions },
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(truncationWarnings(logger)).toEqual([
+          {
+            level: "warn",
+            message: truncationWarning,
+            data: {
+              conventionsFile: "AGENTS.md",
+              conventionsCharacters: 32_001,
+              conventionsCharacterCap: 32_000,
+            },
+          },
+        ])
+        expect(result.conventionsNote).toBe(noCopyNote)
+      })
+
       it("does not treat a modified conventions file's diff as a full copy", async () => {
         const modifiedConventionsDiff = `${sampleDiff}diff --git a/AGENTS.md b/AGENTS.md\nindex 1111111..4444444 100644\n--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -1 +1 @@\n-# Old conventions\n+# Conventions\n`
         const stubs = makeOrchestrateDeps({
