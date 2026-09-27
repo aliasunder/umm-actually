@@ -127,8 +127,8 @@ const findFullCopyChannel = ({
   if (priorityDocFiles.some(carriesConventionsInFull)) return "priority-docs"
   if (changedFiles.some(carriesConventionsInFull)) return "changed-files"
 
-  // Related files are traced from JS/TS imports, so this check fires only for
-  // a conventions file with a JS/TS extension that a changed file imports
+  // Related files are JS/TS files that import a changed file, so this check
+  // fires only for a JS/TS conventions file that imports a file the PR changes
   if (relatedFiles.some(carriesConventionsInFull)) return "related-files"
 
   // Fallback for a new file the changed-file read could not carry in full
@@ -165,7 +165,8 @@ export const classifyConventionsCoverage = ({
 }
 
 /** PR-facing line for a truncated conventions file. Null when the file fits
- *  its section, or a priority-doc copy delivered the whole text. */
+ *  its section, or when a full copy reached the model and priority_docs will
+ *  keep sending one to later PRs. */
 export const buildConventionsNote = ({
   conventionsCoverage,
   conventionsFile,
@@ -181,19 +182,18 @@ export const buildConventionsNote = ({
   const { fullCopyChannel, characterCap, totalCharacters } = conventionsCoverage
   const fileLabel = `\`${conventionsFile}\``
 
-  // This PR changes, adds, or imports the file, so its review had the full
-  // text, but a later PR that does none of those gets only the head
-  const onlyThisPrCarriesFullText =
-    fullCopyChannel === "changed-files" ||
-    fullCopyChannel === "added-in-diff" ||
-    fullCopyChannel === "related-files"
+  // priority_docs reads a listed file on every PR, so a full copy from any
+  // channel needs no note; a later PR that cannot fit it reports it then
+  const laterPrsKeepFullCopy =
+    fullCopyChannel === "priority-docs" || (fullCopyChannel !== null && listedInPriorityDocs)
 
-  if (onlyThisPrCarriesFullText) {
-    return `Conventions file ${fileLabel} exceeds \`conventions_budget_tokens\` (${totalCharacters} characters against a ${characterCap}-character cap) — this PR carried the full text, but later PRs that don't change or import it will see only the first ${characterCap} characters.`
+  if (laterPrsKeepFullCopy) return null
+
+  // This PR changes or adds the file, or changes a file it imports, so its
+  // review had the full text; a later PR that does none of those gets the head
+  if (fullCopyChannel) {
+    return `Conventions file ${fileLabel} exceeds \`conventions_budget_tokens\` (${totalCharacters} characters against a ${characterCap}-character cap) — this PR carried the full text, but later PRs that change neither it nor a file it imports will see only the first ${characterCap} characters.`
   }
-
-  // priority_docs reads the file on every PR, so its full copy needs no note
-  if (fullCopyChannel === "priority-docs") return null
 
   const truncationLead = `Conventions file ${fileLabel} was truncated to its first ${characterCap} of ${totalCharacters} characters, and no full copy reached the model`
 

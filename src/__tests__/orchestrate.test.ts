@@ -1909,7 +1909,7 @@ describe("orchestrate", () => {
       const listedNoCopyNote =
         "Conventions file `AGENTS.md` was truncated to its first 32000 of 32001 characters, and no full copy reached the model — raise `conventions_budget_tokens`; the file is listed in `priority_docs` but did not fit or was excluded."
       const crossingNote =
-        "Conventions file `AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that don't change or import it will see only the first 32000 characters."
+        "Conventions file `AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that change neither it nor a file it imports will see only the first 32000 characters."
 
       const truncationWarnings = (logger: ReturnType<typeof createTestLogger>) => {
         return logger.messages.filter((entry) => entry.message === truncationWarning)
@@ -2114,7 +2114,7 @@ describe("orchestrate", () => {
           "**Instructions:** ./AGENTS.md (truncated to 32000 of 32001 characters; full copy in the diff of the added file)",
         )
         expect(result.conventionsNote).toBe(
-          "Conventions file `./AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that don't change or import it will see only the first 32000 characters.",
+          "Conventions file `./AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that change neither it nor a file it imports will see only the first 32000 characters.",
         )
       })
 
