@@ -1,6 +1,6 @@
 import { posix } from "node:path"
 import { describeExclusionSource, type ExcludedDiffFile } from "../diff/exclusion.js"
-import { CHARS_PER_TOKEN, conventionsRenderInFull, type PromptFile } from "./prompt.js"
+import { conventionsCharacterCap, conventionsRenderInFull, type PromptFile } from "./prompt.js"
 
 export type ContextNotesInput = {
   /** config.priorityDocs, in the spelling the operator configured. */
@@ -159,8 +159,7 @@ export const classifyConventionsCoverage = ({
   return {
     status: "truncated",
     fullCopyChannel: findFullCopyChannel(fullCopyLookup),
-    // The same cap conventionsRenderInFull and the prompt's truncation apply
-    characterCap: conventionsBudgetTokens * CHARS_PER_TOKEN,
+    characterCap: conventionsCharacterCap(conventionsBudgetTokens),
     totalCharacters,
   }
 }

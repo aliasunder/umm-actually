@@ -19,15 +19,22 @@ export type PromptFile = {
 /** ~4 chars per token — the standard rough heuristic; we only need order-of-magnitude. */
 export const CHARS_PER_TOKEN = 4
 
+/** Longest conventions text, in characters, the conventions section carries
+ *  before truncating. The render check, the prompt truncation, and the
+ *  truncation report all read it, so they cannot drift apart. */
+export const conventionsCharacterCap = (conventionsBudgetTokens: number): number => {
+  return conventionsBudgetTokens * CHARS_PER_TOKEN
+}
+
 /** Whether the conventions section will carry the file's complete text rather
  *  than a truncated head. A conventions file that also changed in the PR is
  *  rendered by the changed-files channel too — the caller uses this to decide
  *  which of the two copies is the full one, so exactly one full copy is ever
- *  sent. Shares the token cap with truncateToTokenCap so the two cannot drift. */
+ *  sent. */
 export const conventionsRenderInFull = (
   conventions: string,
   conventionsBudgetTokens: number,
-): boolean => conventions.length <= conventionsBudgetTokens * CHARS_PER_TOKEN
+): boolean => conventions.length <= conventionsCharacterCap(conventionsBudgetTokens)
 
 const IDENTITY_AND_SCOPE = `You are umm-actually, a code review bot. You review the changes in a pull
 request. You are skeptical: code being in the diff is not evidence it is correct.
@@ -139,7 +146,7 @@ export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string =>
   ].join("\n\n")
 
 const truncateToTokenCap = (text: string, tokenCap: number): string => {
-  const characterCap = tokenCap * CHARS_PER_TOKEN
+  const characterCap = conventionsCharacterCap(tokenCap)
 
   if (text.length <= characterCap) return text
   // toWellFormed: a cut mid-surrogate-pair would leave a lone surrogate,
