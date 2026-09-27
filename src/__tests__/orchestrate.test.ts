@@ -1914,7 +1914,7 @@ describe("orchestrate", () => {
       const truncationWarnings = (logger: ReturnType<typeof createTestLogger>) => {
         return logger.messages.filter((entry) => entry.message === truncationWarning)
       }
-      const instructionsLine = (reviewSummaryMarkdown: string | null): string | undefined => {
+      const conventionsLine = (reviewSummaryMarkdown: string | null): string | undefined => {
         return reviewSummaryMarkdown?.split("\n")[4]
       }
       const expectedCheckSummary = (note: string | null): string => {
@@ -1951,7 +1951,7 @@ describe("orchestrate", () => {
             conventionsNote: noCopyNote,
           }),
         ])
-        expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
+        expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
           "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; no full copy reached the model)",
         )
         expect(result.conventionsNote).toBe(noCopyNote)
@@ -1989,7 +1989,7 @@ describe("orchestrate", () => {
             totalCount: expectedSelection.selected.length,
           }),
         ])
-        expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
+        expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
           "**Conventions:** AGENTS.md (sent in full as a priority doc; its 32001 characters exceed the 32000-character section cap)",
         )
         expect(result.conventionsNote).toBeNull()
@@ -2062,7 +2062,7 @@ describe("orchestrate", () => {
             conventionsNote: crossingNote,
           }),
         ])
-        expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
+        expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
           "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; full copy in changed files)",
         )
         expect(result.conventionsNote).toBe(crossingNote)
@@ -2090,7 +2090,7 @@ describe("orchestrate", () => {
         const result = await orchestrate(stubs.deps, logger)
 
         expect(truncationWarnings(logger)).toEqual([])
-        expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
+        expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
           "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; full copy in related files)",
         )
         expect(result.conventionsNote).toBe(crossingNote)
@@ -2110,7 +2110,7 @@ describe("orchestrate", () => {
         const result = await orchestrate(stubs.deps, logger)
 
         expect(truncationWarnings(logger)).toEqual([])
-        expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
+        expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
           "**Conventions:** ./AGENTS.md (truncated to 32000 of 32001 characters; full copy in the diff of the added file)",
         )
         expect(result.conventionsNote).toBe(

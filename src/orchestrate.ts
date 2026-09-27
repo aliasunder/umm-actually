@@ -630,8 +630,8 @@ const runReviewPipeline = async (
     .flatMap((file) => {
       const toPath = newFilePath(file)
       const fromPath = file.from
-      // parse-diff: from is undefined for binary files, "/dev/null" for
-      // added files — neither is a pre-rename path worth tracing
+      // parse-diff: from can be undefined for a binary file and is "/dev/null"
+      // for an added file (binary or not) — neither is a pre-rename path worth tracing
       const isRename =
         toPath !== null && fromPath && fromPath !== "/dev/null" && fromPath !== file.to
       return isRename ? [toPath, fromPath] : [toPath]
