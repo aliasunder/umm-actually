@@ -113,7 +113,11 @@ const expectedReviewSummary = (overrides: Partial<ReviewSummaryStats> = {}): str
   renderReviewSummary({
     prContext: fixturePrContext,
     conventionsFile: "AGENTS.md",
-    conventionsCoverage: { status: "full", totalCharacters: "# Test conventions".length },
+    conventionsCoverage: {
+      status: "full",
+      characterCap: 32_000,
+      totalCharacters: "# Test conventions".length,
+    },
     phasesCompleted: ["combined"],
     phasesIncomplete: [],
     changedFilePaths: [fixtureChangedFile.path],
@@ -2094,6 +2098,18 @@ describe("orchestrate", () => {
           "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; full copy in related files)",
         )
         expect(result.conventionsNote).toBe(crossingNote)
+        expect(stubs.upsertSummaryCommentCalls).toEqual([
+          expectedStatus({
+            isFirstRun: true,
+            postedCount: expectedSelection.selected.length,
+            totalCount: expectedSelection.selected.length,
+            conventionsNote: crossingNote,
+          }),
+        ])
+        expect(first(stubs.updateCheckRunCalls).output).toEqual({
+          title: `${expectedSelection.selected.length} findings`,
+          summary: expectedCheckSummary(crossingNote),
+        })
       })
 
       it("warns ahead when the PR adds the conventions file", async () => {
@@ -2113,9 +2129,21 @@ describe("orchestrate", () => {
         expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
           "**Conventions:** ./AGENTS.md (truncated to 32000 of 32001 characters; full copy in the diff of the added file)",
         )
-        expect(result.conventionsNote).toBe(
-          "Conventions file `./AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that change neither it nor a file it imports will see only the first 32000 characters.",
-        )
+        const addedFileNote =
+          "Conventions file `./AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that change neither it nor a file it imports will see only the first 32000 characters."
+        expect(result.conventionsNote).toBe(addedFileNote)
+        expect(stubs.upsertSummaryCommentCalls).toEqual([
+          expectedStatus({
+            isFirstRun: true,
+            postedCount: expectedSelection.selected.length,
+            totalCount: expectedSelection.selected.length,
+            conventionsNote: addedFileNote,
+          }),
+        ])
+        expect(first(stubs.updateCheckRunCalls).output).toEqual({
+          title: `${expectedSelection.selected.length} findings`,
+          summary: expectedCheckSummary(addedFileNote),
+        })
       })
 
       it("does not treat an added binary conventions file's diff as a full copy", async () => {

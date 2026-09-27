@@ -52,7 +52,11 @@ const renderConventionsCoverage = ({
   conventionsCoverage,
 }: Pick<ReviewSummaryStats, "conventionsFile" | "conventionsCoverage">): string => {
   if (conventionsCoverage.status === "not-found") return "none"
-  if (conventionsCoverage.status === "full") return conventionsFile
+  // The size against the cap shows how close a fitting file is to truncating
+  if (conventionsCoverage.status === "full") {
+    const { characterCap, totalCharacters } = conventionsCoverage
+    return `${conventionsFile} (${totalCharacters} characters, within the ${characterCap}-character cap)`
+  }
 
   const { fullCopyChannel, characterCap, totalCharacters } = conventionsCoverage
 

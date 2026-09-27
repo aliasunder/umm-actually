@@ -251,7 +251,7 @@ describe("classifyConventionsCoverage", () => {
   it("reports a file exactly at the cap as full", () => {
     expect(
       classifyConventionsCoverage(makeCoverageInput({ conventions: conventionsAtCap })),
-    ).toEqual({ status: "full", totalCharacters: 40 })
+    ).toEqual({ status: "full", characterCap: 40, totalCharacters: 40 })
   })
 
   it("reports a file one character over the cap with no other copy as truncated with no channel", () => {
@@ -383,7 +383,7 @@ describe("buildConventionsNote", () => {
   )
 
   it.each([
-    { label: "a full file", coverage: { status: "full", totalCharacters: 40 } },
+    { label: "a full file", coverage: { status: "full", characterCap: 40, totalCharacters: 40 } },
     { label: "a missing file", coverage: { status: "not-found" } },
     { label: "a priority-doc copy", coverage: truncatedCoverage("priority-docs") },
   ] as const)("returns no note for $label", ({ coverage }) => {

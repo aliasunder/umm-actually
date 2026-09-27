@@ -91,7 +91,7 @@ export type ConventionsFullCopyChannel =
 /** How much of the conventions file reached the model. */
 export type ConventionsCoverage =
   | { status: "not-found" }
-  | { status: "full"; totalCharacters: number }
+  | { status: "full"; characterCap: number; totalCharacters: number }
   | {
       status: "truncated"
       /** Channel that carried the whole text; null when only the head was sent. */
@@ -151,15 +151,16 @@ export const classifyConventionsCoverage = ({
   if (conventions === null) return { status: "not-found" }
 
   const totalCharacters = conventions.length
+  const characterCap = conventionsCharacterCap(conventionsBudgetTokens)
 
   if (conventionsRenderInFull(conventions, conventionsBudgetTokens)) {
-    return { status: "full", totalCharacters }
+    return { status: "full", characterCap, totalCharacters }
   }
 
   return {
     status: "truncated",
     fullCopyChannel: findFullCopyChannel(fullCopyLookup),
-    characterCap: conventionsCharacterCap(conventionsBudgetTokens),
+    characterCap,
     totalCharacters,
   }
 }
