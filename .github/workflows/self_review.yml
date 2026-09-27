@@ -8,34 +8,67 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
-# Comments without the trigger phrase still create a (guard-skipped) run —
-# isolate them in a per-run group so they can't cancel an in-flight review.
-# Every reply a review session posts on the PR would otherwise kill the very
-# review run it's responding to.
-#   trigger comment / PR event → "self-review-{pr}" (cancels prior run)
-#   non-trigger comment        → "self-review-{pr}-noop-{run_id}" (unique, harmless)
+# Non-trigger events still create a (guard-skipped) run — isolate them in a
+# per-run group so they can't cancel an in-flight review. Every comment the
+# review posts on the PR would otherwise kill the very run it belongs to.
+# The noop condition mirrors both legs of the job guard: concurrency resolves
+# before `if`, so a guard-failing run (non-trigger comment, fork-PR push,
+# non-owner push) would otherwise cancel a live review and then skip.
 concurrency:
-  group: self-review-${{ github.event.pull_request.number || github.event.issue.number }}${{ (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '@umm review')) && format('-noop-{0}', github.run_id) || '' }}
+  group: self-review-${{ github.event.pull_request.number || github.event.issue.number }}${{ ((github.event_name == 'issue_comment' && !(github.event.issue.pull_request && github.event.comment.user.login == github.repository_owner && startsWith(github.event.comment.body, '@umm review'))) || (github.event_name == 'pull_request' && !(github.event.pull_request.user.login == github.repository_owner && github.event.pull_request.head.repo.full_name == github.repository))) && format('-noop-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: >-
       (
         github.event_name == 'pull_request' &&
-        github.actor != 'dependabot[bot]'
+        github.event.pull_request.user.login == github.repository_owner &&
+        github.event.pull_request.head.repo.full_name == github.repository
       ) ||
       (
         github.event_name == 'issue_comment' &&
         github.event.issue.pull_request &&
-        contains(github.event.comment.body, '@umm review')
+        github.event.comment.user.login == github.repository_owner &&
+        startsWith(github.event.comment.body, '@umm review')
       )
+    permissions:
+      contents: read
+      # The comment-trigger step below reads the PR via the REST API
+      pull-requests: read
     steps:
+      # issue_comment events check out the default branch unless overridden.
+      # This workflow builds the action from the workspace (`uses: ./`) and
+      # the action reads workspace files for context, so a comment-triggered
+      # re-review needs the PR head to test the PR's own code. Only same-repo
+      # PR heads are eligible for checkout: fork code must never run in this
+      # secrets-bearing workflow. Fork PRs fall back to the default checkout.
+      # Runs before any checkout, on a read-only token, with no untrusted input.
+      - name: Resolve review checkout ref
+        id: review-ref
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          same_repo=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+            --jq '(.head.repo != null) and (.head.repo.full_name == .base.repo.full_name)')
+          if [ "$same_repo" = "true" ]; then
+            echo "ref=refs/pull/${PR_NUMBER}/head" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Empty for pull_request events (gate skipped) and fork PRs —
+          # checkout then uses its default ref
+          ref: ${{ steps.review-ref.outputs.ref }}
 
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
@@ -44,15 +77,93 @@ jobs:
           private-key: ${{ secrets.UMM_PRIVATE_KEY }}
           permission-contents: read
           permission-pull-requests: write
-          # Optional — enables the branded check run (App avatar in the checks list)
+          # Enables the branded check run (App avatar in the checks list)
           permission-checks: write
 
+      # Builds the action from the checked-out branch, so every review tests
+      # the PR's own code. Every optional input is overridable via a repo
+      # variable (Settings → Secrets and variables → Actions → Variables).
+      # Unset vars use the action default unless the expression below supplies
+      # an explicit workflow default. Inputs whose default is empty
+      # (fallback_model, max_findings) pass empty when the var is unset —
+      # identical to omitting them.
       - uses: ./
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           openrouter_api_key: ${{ secrets.OPENROUTER_KEY }}
+          # Full OpenRouter slug as listed on openrouter.ai/models — no
+          # "openrouter/" prefix, e.g. deepseek/deepseek-v4-pro
           model: ${{ vars.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4-6' }}
+          # Same slug format; retried when the primary fails structured
+          # output. Empty = no fallback
           fallback_model: ${{ vars.UMM_FALLBACK_MODEL }}
+          # Per-attempt cap on a single model request; a timed-out attempt
+          # aborts and advances the retry/fallback ladder. Empty = 900
           request_timeout_seconds: ${{ vars.UMM_REQUEST_TIMEOUT_SECONDS }}
+          # Shared cap across review work. Empty = 1500. Use 1500 or less
+          # to leave publication headroom before the 30-minute job timeout.
           review_timeout_seconds: ${{ vars.UMM_REVIEW_TIMEOUT_SECONDS }}
+          # Positive integer cap on posted findings (highest severity
+          # first). Empty = uncapped
+          max_findings: ${{ vars.UMM_MAX_FINDINGS }}
+          # Minimum severity to post: low | medium | high | critical
+          severity_threshold: ${{ vars.UMM_SEVERITY_THRESHOLD || 'low' }}
+          # Repo-relative path to the conventions/instructions file fed to
+          # the model
+          conventions_file: ${{ vars.UMM_CONVENTIONS_FILE || 'AGENTS.md' }}
+          # Approximate token budget for the conventions file section.
+          # Files over this are truncated; the status comment and check
+          # details say when no full copy reached the model. Empty = 8000
+          conventions_budget_tokens: ${{ vars.UMM_CONVENTIONS_BUDGET_TOKENS }}
+          # Comma-separated repo-relative paths always included in review
+          # context. Nested paths fine; spaces after commas fine; never
+          # quote individual paths (quotes are not stripped), e.g.
+          # README.md, docs/deploy/lightsail.md
+          # No count cap — bounded only by the shared token budget below;
+          # docs that don't fit are named in the review's context notes
+          priority_docs: ${{ vars.UMM_PRIORITY_DOCS || 'README.md' }}
+          # How the review dimensions are dispatched: combined (one model
+          # call carrying every dimension) | parallel (three focused calls
+          # at once — deeper reads, roughly triple the prompt tokens) |
+          # sequential (the same three calls in order, each seeing the
+          # earlier findings). Empty = combined
           phases: ${{ vars.UMM_PHASES }}
+          # One shared token pool for all prompt context, spent in this
+          # order: diff → priority docs (up to 10% of the budget, read
+          # before changed files) → changed files → import-traced related
+          # files → priority docs that didn't fit earlier → mention-matched
+          # docs. (Conventions file has its own separate cap inside the
+          # action.)
+          context_budget_tokens: ${{ vars.UMM_CONTEXT_BUDGET_TOKENS || '300000' }}
+          # true | false — import-tracing (caller regressions) and
+          # doc-mention scanning (staleness)
+          trace_related_files: ${{ vars.UMM_TRACE_RELATED_FILES || 'true' }}
+          # BFS walk cap — total files indexed for import-tracing and
+          # doc-mention scanning. Walk terminates early at the cap; files
+          # in unvisited directories are invisible to related-file detection.
+          max_scan_files: ${{ vars.UMM_MAX_SCAN_FILES || '5000' }}
+          # Per-file byte cap — files larger than this are silently
+          # excluded from the scan index (stat check only, not read).
+          # 524288 = 512 KiB ≈ 8 000 lines of typical code.
+          max_scan_bytes: ${{ vars.UMM_MAX_SCAN_BYTES || '524288' }}
+          # Count caps are independent buckets: max_related_files caps
+          # import-traced code files only; max_related_docs caps
+          # mention-matched docs only and NEVER counts priority_docs
+          # (those are excluded from its bucket)
+          max_related_files: ${{ vars.UMM_MAX_RELATED_FILES || '8' }}
+          max_related_docs: ${{ vars.UMM_MAX_RELATED_DOCS || '4' }}
+          # Comma-separated folder prefixes excluded from the workspace
+          # scan — invisible to import-tracing and doc-mention matching.
+          # Changed files and priority_docs are never excluded.
+          exclude_paths: ${{ vars.UMM_EXCLUDE_PATHS }}
+          # Comma-separated folder prefixes or globs removed from the review
+          # diff before the token budget check — excluded files are named in
+          # the review but their content is not reviewed. Extends the built-in
+          # generated-file list (lockfiles, *.min.js, *.min.css, *.map); a
+          # leading `none` drops it. Empty = built-in list only
+          diff_exclude_paths: ${{ vars.UMM_DIFF_EXCLUDE_PATHS }}
+          # true | false — also exclude changed files the root .gitattributes
+          # marks linguist-generated=true
+          respect_linguist_generated: ${{ vars.UMM_RESPECT_LINGUIST_GENERATED || 'true' }}
+          # true | false — per-run cost report in the workflow step summary
+          cost_summary: ${{ vars.UMM_COST_SUMMARY || 'true' }}
