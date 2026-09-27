@@ -1,8 +1,11 @@
 import type { PrContext } from "../github/event.js"
+import type { ConventionsCoverage, ConventionsFullCopyChannel } from "./context-notes.js"
 
 export type ReviewSummaryStats = {
   prContext: PrContext
-  conventionsFile: string | null
+  /** The configured path, whether or not the file was found. */
+  conventionsFile: string
+  conventionsCoverage: ConventionsCoverage
   phasesCompleted: string[]
   /** Phases that ended without an accepted response — their findings are absent. */
   phasesIncomplete: string[]
@@ -40,6 +43,36 @@ export type ReviewSummaryStats = {
 const renderPaths = (paths: string[]): string =>
   paths.length === 0 ? "—" : paths.map((path) => path.replaceAll("|", "\\|")).join(", ")
 
+/** The conventions file and how much of it reached the model. */
+const renderInstructions = ({
+  conventionsFile,
+  conventionsCoverage,
+}: Pick<ReviewSummaryStats, "conventionsFile" | "conventionsCoverage">): string => {
+  const channelLabels: Record<Exclude<ConventionsFullCopyChannel, "priority-docs">, string> = {
+    "changed-files": "changed files",
+    "related-files": "related files",
+    "added-in-diff": "the diff of the added file",
+  }
+
+  if (conventionsCoverage.status === "not-found") return "none"
+  if (conventionsCoverage.status === "full") return conventionsFile
+
+  const { fullCopyChannel, characterCap, totalCharacters } = conventionsCoverage
+
+  // A priority-doc copy replaces the truncated section, so no head was sent
+  if (fullCopyChannel === "priority-docs") {
+    return `${conventionsFile} (sent in full as a priority doc; ${totalCharacters} characters over a ${characterCap}-character section cap)`
+  }
+
+  const truncationClause = `truncated to ${characterCap} of ${totalCharacters} characters`
+
+  if (!fullCopyChannel) {
+    return `${conventionsFile} (${truncationClause}; no full copy reached the model)`
+  }
+
+  return `${conventionsFile} (${truncationClause}; full copy in ${channelLabels[fullCopyChannel]})`
+}
+
 /** Markdown summary for the workflow job summary — renders a context
  *  table showing what the model saw (and which priority docs it did not),
  *  the token budget split, and a pipeline table showing what happened to
@@ -54,7 +87,7 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     "",
     `PR #${stats.prContext.prNumber} · \`${stats.prContext.headRef}\` → \`${stats.prContext.baseRef}\` · \`${sha}\``,
     "",
-    `**Instructions:** ${stats.conventionsFile ?? "none"}`,
+    `**Instructions:** ${renderInstructions(stats)}`,
     "",
     `**Phases:** ${renderPaths(stats.phasesCompleted)}${incompleteClause}`,
     ...(stats.reviewDeadlineExceeded

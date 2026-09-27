@@ -444,6 +444,7 @@ export const buildStatusComment = ({
   droppedByCap,
   model,
   contextNotes = [],
+  conventionsNote = null,
   incompletePhases = [],
   reviewDeadlineExceeded = false,
 }: {
@@ -455,6 +456,9 @@ export const buildStatusComment = ({
   droppedByCap: Finding[]
   model: string
   contextNotes?: string[]
+  /** Truncated-conventions line; shown outside the collapsed context notes
+   *  because, like the cap and incomplete-phase notes, it reports lost coverage. */
+  conventionsNote?: string | null
   /** Ids of review phases that ended without an accepted response. */
   incompletePhases?: string[]
   /** True when deadline expiry left phases incomplete. */
@@ -484,6 +488,7 @@ export const buildStatusComment = ({
   ]
     .filter(Boolean)
     .join("\n\n")
+  const conventionsLine = conventionsNote ? `_${conventionsNote}_` : ""
   const contextSection =
     contextNotes.length === 0
       ? ""
@@ -496,6 +501,7 @@ export const buildStatusComment = ({
     unpostedNote,
     capNote,
     incompleteNote,
+    conventionsLine,
     contextSection,
     attribution,
   ]

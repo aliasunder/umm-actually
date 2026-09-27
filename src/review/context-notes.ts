@@ -1,6 +1,6 @@
 import { posix } from "node:path"
 import { describeExclusionSource, type ExcludedDiffFile } from "../diff/exclusion.js"
-import type { PromptFile } from "./prompt.js"
+import { CHARS_PER_TOKEN, conventionsRenderInFull, type PromptFile } from "./prompt.js"
 
 export type ContextNotesInput = {
   /** config.priorityDocs, in the spelling the operator configured. */
@@ -81,6 +81,118 @@ export const findAbsentPriorityDocs = ({
   }
 
   return absentPaths
+}
+
+/** A context channel that can carry the conventions file's whole text. */
+export type ConventionsFullCopyChannel =
+  "priority-docs" | "changed-files" | "related-files" | "added-in-diff"
+
+/** How much of the conventions file reached the model. */
+export type ConventionsCoverage =
+  | { status: "not-found" }
+  | { status: "full"; totalCharacters: number }
+  | {
+      status: "truncated"
+      /** Channel that carried the whole text; null when only the head was sent. */
+      fullCopyChannel: ConventionsFullCopyChannel | null
+      characterCap: number
+      totalCharacters: number
+    }
+
+type ConventionsChannels = {
+  conventionsFile: string
+  priorityDocFiles: PromptFile[]
+  changedFiles: PromptFile[]
+  relatedFiles: PromptFile[]
+  /** True when the PR adds the conventions file — its diff hunks carry every line. */
+  conventionsAddedInDiff: boolean
+}
+
+const findFullCopyChannel = ({
+  conventionsFile,
+  priorityDocFiles,
+  changedFiles,
+  relatedFiles,
+  conventionsAddedInDiff,
+}: ConventionsChannels): ConventionsFullCopyChannel | null => {
+  const conventionsPath = normalizePath(conventionsFile)
+  const carriesConventionsInFull = (file: PromptFile): boolean => {
+    return file.includedAs === "full" && normalizePath(file.path) === conventionsPath
+  }
+
+  // Checked first because a priority-doc copy also suppresses the truncated
+  // conventions section, so it decides what the prompt contains
+  if (priorityDocFiles.some(carriesConventionsInFull)) return "priority-docs"
+  if (changedFiles.some(carriesConventionsInFull)) return "changed-files"
+
+  // Related files are traced only from JS/TS imports, so this matches only a
+  // conventions file with a JS/TS extension
+  if (relatedFiles.some(carriesConventionsInFull)) return "related-files"
+  if (conventionsAddedInDiff) return "added-in-diff"
+
+  return null
+}
+
+/** Classifies whether the conventions section carries the whole file, and when
+ *  it truncates, which other channel (if any) still delivered the full text. */
+export const classifyConventionsCoverage = ({
+  conventions,
+  conventionsBudgetTokens,
+  ...channels
+}: ConventionsChannels & {
+  conventions: string | null
+  conventionsBudgetTokens: number
+}): ConventionsCoverage => {
+  if (conventions === null) return { status: "not-found" }
+
+  const totalCharacters = conventions.length
+
+  if (conventionsRenderInFull(conventions, conventionsBudgetTokens)) {
+    return { status: "full", totalCharacters }
+  }
+
+  return {
+    status: "truncated",
+    fullCopyChannel: findFullCopyChannel(channels),
+    characterCap: conventionsBudgetTokens * CHARS_PER_TOKEN,
+    totalCharacters,
+  }
+}
+
+/** PR-facing line for a truncated conventions file. Null when the file fits
+ *  its section, or a priority-doc or related-file copy delivered the whole text. */
+export const buildConventionsNote = ({
+  conventionsCoverage,
+  conventionsFile,
+  listedInPriorityDocs,
+}: {
+  conventionsCoverage: ConventionsCoverage
+  conventionsFile: string
+  /** Whether the priority_docs input names the file, in any spelling. */
+  listedInPriorityDocs: boolean
+}): string | null => {
+  if (conventionsCoverage.status !== "truncated") return null
+
+  const { fullCopyChannel, characterCap, totalCharacters } = conventionsCoverage
+  const fileLabel = `\`${conventionsFile}\``
+
+  // This PR changes or adds the file, so its review had the full text, but
+  // the next PR that leaves the file alone gets only the head
+  const onlyThisPrCarriesFullText =
+    fullCopyChannel === "changed-files" || fullCopyChannel === "added-in-diff"
+
+  if (onlyThisPrCarriesFullText) {
+    return `Conventions file ${fileLabel} exceeds \`conventions_budget_tokens\` (${totalCharacters} characters against a ${characterCap}-character cap) — this PR carried the full text, but later PRs that don't change it will see only the first ${characterCap} characters.`
+  }
+  if (fullCopyChannel) return null
+
+  const truncationLead = `Conventions file ${fileLabel} was truncated to its first ${characterCap} of ${totalCharacters} characters, and no full copy reached the model`
+
+  if (listedInPriorityDocs) {
+    return `${truncationLead} — raise \`conventions_budget_tokens\`; the file is listed in \`priority_docs\` but did not fit or was excluded.`
+  }
+
+  return `${truncationLead} — raise \`conventions_budget_tokens\` or list the file in \`priority_docs\`.`
 }
 
 /** Operator-facing notes on what the review context did and did not carry,

@@ -34,6 +34,8 @@ import {
 } from "./review/comment-mapping.js"
 import {
   buildContextNotes,
+  buildConventionsNote,
+  classifyConventionsCoverage,
   findAbsentPriorityDocs,
   findInContextPriorityDocs,
 } from "./review/context-notes.js"
@@ -96,6 +98,8 @@ export type OrchestrateResult = {
   phases: PhaseStatus[]
   reviewSummaryMarkdown: string | null
   costSummaryMarkdown: string | null
+  /** PR-facing line when the conventions file was truncated; null otherwise. */
+  conventionsNote: string | null
 }
 
 export type OrchestrateDeps = {
@@ -263,6 +267,7 @@ const SKIPPED_RESULT_BASE: Omit<OrchestrateResult, "reviewUrl" | "skippedReason"
   phases: [],
   reviewSummaryMarkdown: null,
   costSummaryMarkdown: null,
+  conventionsNote: null,
 }
 
 type CheckRunHandle = { checkRunId: number } | null
@@ -362,13 +367,14 @@ const resolveCheckRunCompletion = ({
       : `\n\nIncomplete phases: ${incompletePhases
           .map((phase) => `\`${phase.phase}\` (${phase.reason})`)
           .join(", ")}`
+  const conventionsSection = result.conventionsNote ? `\n\n${result.conventionsNote}` : ""
 
   if (result.findingsCount === 0) {
     return {
       conclusion: "success",
       output: {
         title: `No findings above threshold${incompleteSuffix}`,
-        summary: `Reviewed with \`${result.modelUsed}\` — no findings above threshold.${incompleteSection}${costSection}`,
+        summary: `Reviewed with \`${result.modelUsed}\` — no findings above threshold.${incompleteSection}${conventionsSection}${costSection}`,
       },
     }
   }
@@ -378,7 +384,7 @@ const resolveCheckRunCompletion = ({
     conclusion: "success",
     output: {
       title: `${findingsLabel}${incompleteSuffix}`,
-      summary: `Reviewed with \`${result.modelUsed}\` — ${findingsLabel} posted.${incompleteSection}${costSection}`,
+      summary: `Reviewed with \`${result.modelUsed}\` — ${findingsLabel} posted.${incompleteSection}${conventionsSection}${costSection}`,
     },
   }
 }
@@ -739,15 +745,47 @@ const runReviewPipeline = async (
   )
   const docRemainingTokens = latePriorityDocsResult.remainingTokens
 
+  // A new conventions file's diff hunks carry every line of it
+  const conventionsAddedInDiff = reviewableFiles.some((file) => {
+    const toPath = newFilePath(file)
+    return (
+      Boolean(file.new) &&
+      toPath !== null &&
+      posix.normalize(toPath) === posix.normalize(config.conventionsFile)
+    )
+  })
+  const conventionsCoverage = classifyConventionsCoverage({
+    conventions,
+    conventionsFile: config.conventionsFile,
+    conventionsBudgetTokens: config.conventionsBudgetTokens,
+    priorityDocFiles,
+    changedFiles,
+    relatedFiles,
+    conventionsAddedInDiff,
+  })
+  const conventionsNote = buildConventionsNote({
+    conventionsCoverage,
+    conventionsFile: config.conventionsFile,
+    listedInPriorityDocs: config.priorityDocs.some((docPath) => {
+      return posix.normalize(docPath) === posix.normalize(config.conventionsFile)
+    }),
+  })
+
+  // Logged before any model call so the warning survives a run that fails later
+  if (conventionsCoverage.status === "truncated" && !conventionsCoverage.fullCopyChannel) {
+    logger.warn("conventions file truncated with no full copy in context", {
+      conventionsFile: config.conventionsFile,
+      conventionsCharacters: conventionsCoverage.totalCharacters,
+      conventionsCharacterCap: conventionsCoverage.characterCap,
+    })
+  }
+
   // When the conventions section truncated but priority docs read the full
   // file, suppress the truncated head — the full copy in the priority-docs
   // section is strictly better, and rendering both wastes ~8K tokens.
   const conventionsReadInFullByPriorityDocs =
-    conventions !== null &&
-    !conventionsAlreadyRenderedInFull &&
-    priorityDocFiles.some(
-      (file) => posix.normalize(file.path) === posix.normalize(config.conventionsFile),
-    )
+    conventionsCoverage.status === "truncated" &&
+    conventionsCoverage.fullCopyChannel === "priority-docs"
 
   if (conventionsReadInFullByPriorityDocs) {
     logger.info(
@@ -755,7 +793,7 @@ const runReviewPipeline = async (
       {
         conventionsFile: config.conventionsFile,
         conventionsTokenCap: config.conventionsBudgetTokens,
-        conventionsLength: conventions.length,
+        conventionsLength: conventionsCoverage.totalCharacters,
       },
     )
   }
@@ -1015,6 +1053,7 @@ const runReviewPipeline = async (
     droppedByCap,
     model: modelUsed,
     contextNotes,
+    conventionsNote,
     incompletePhases: incompletePhaseIds(phases),
     reviewDeadlineExceeded: coverageLostToReviewDeadline,
   })
@@ -1032,7 +1071,8 @@ const runReviewPipeline = async (
 
   const reviewSummaryMarkdown = renderReviewSummary({
     prContext,
-    conventionsFile: conventions ? config.conventionsFile : null,
+    conventionsFile: config.conventionsFile,
+    conventionsCoverage,
     phasesCompleted: completedPhases.map((outcome) => outcome.phase.id),
     phasesIncomplete: incompletePhaseIds(phases),
     reviewDeadlineExceeded: coverageLostToReviewDeadline,
@@ -1067,6 +1107,7 @@ const runReviewPipeline = async (
     phases,
     reviewSummaryMarkdown,
     costSummaryMarkdown,
+    conventionsNote,
   }
 }
 

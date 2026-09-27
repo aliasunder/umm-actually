@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { buildContextNotes, type ContextNotesInput } from "../context-notes.js"
+import {
+  buildContextNotes,
+  buildConventionsNote,
+  classifyConventionsCoverage,
+  type ContextNotesInput,
+  type ConventionsCoverage,
+} from "../context-notes.js"
 import type { PromptFile } from "../prompt.js"
 
 const makeInput = (overrides: Partial<ContextNotesInput> = {}): ContextNotesInput => ({
@@ -203,5 +209,173 @@ describe("buildContextNotes", () => {
       "1 related doc(s) excluded by `max_related_docs` cap: `docs/overflow.md`",
       "1 changed file(s) excluded from review: `package-lock.json` (built-in default list)",
     ])
+  })
+})
+
+// A 10-token budget caps the conventions section at 40 characters
+const CONVENTIONS_BUDGET_TOKENS = 10
+const conventionsAtCap = "c".repeat(40)
+const conventionsOverCap = "c".repeat(41)
+
+const makeFullFile = (path: string): PromptFile => ({ path, content: "body", includedAs: "full" })
+
+const makeCoverageInput = (
+  overrides: Partial<Parameters<typeof classifyConventionsCoverage>[0]> = {},
+): Parameters<typeof classifyConventionsCoverage>[0] => ({
+  conventions: conventionsOverCap,
+  conventionsFile: "AGENTS.md",
+  conventionsBudgetTokens: CONVENTIONS_BUDGET_TOKENS,
+  priorityDocFiles: [],
+  changedFiles: [],
+  relatedFiles: [],
+  conventionsAddedInDiff: false,
+  ...overrides,
+})
+
+const truncatedCoverage = (
+  fullCopyChannel: Extract<ConventionsCoverage, { status: "truncated" }>["fullCopyChannel"],
+): ConventionsCoverage => ({
+  status: "truncated",
+  fullCopyChannel,
+  characterCap: 40,
+  totalCharacters: 41,
+})
+
+describe("classifyConventionsCoverage", () => {
+  it("reports a missing conventions file as not found", () => {
+    expect(classifyConventionsCoverage(makeCoverageInput({ conventions: null }))).toEqual({
+      status: "not-found",
+    })
+  })
+
+  it("reports a file exactly at the cap as full", () => {
+    expect(
+      classifyConventionsCoverage(makeCoverageInput({ conventions: conventionsAtCap })),
+    ).toEqual({ status: "full", totalCharacters: 40 })
+  })
+
+  it("reports a file one character over the cap with no other copy as truncated with no channel", () => {
+    expect(classifyConventionsCoverage(makeCoverageInput())).toEqual(truncatedCoverage(null))
+  })
+
+  it("names priority docs when they carried the full file", () => {
+    const coverage = classifyConventionsCoverage(
+      makeCoverageInput({
+        priorityDocFiles: [makeFullFile("README.md"), makeFullFile("AGENTS.md")],
+      }),
+    )
+
+    expect(coverage).toEqual(truncatedCoverage("priority-docs"))
+  })
+
+  it("names changed files when the changed-file copy is full", () => {
+    const coverage = classifyConventionsCoverage(
+      makeCoverageInput({ changedFiles: [makeFullFile("src/a.ts"), makeFullFile("AGENTS.md")] }),
+    )
+
+    expect(coverage).toEqual(truncatedCoverage("changed-files"))
+  })
+
+  it("does not count a changed-file copy that was included diff-only", () => {
+    const coverage = classifyConventionsCoverage(
+      makeCoverageInput({
+        changedFiles: [{ path: "AGENTS.md", content: "", includedAs: "diff-only" }],
+      }),
+    )
+
+    expect(coverage).toEqual(truncatedCoverage(null))
+  })
+
+  it("names related files when a related-file copy is full", () => {
+    const coverage = classifyConventionsCoverage(
+      makeCoverageInput({
+        conventionsFile: "conventions.ts",
+        relatedFiles: [makeFullFile("src/b.ts"), makeFullFile("conventions.ts")],
+      }),
+    )
+
+    expect(coverage).toEqual(truncatedCoverage("related-files"))
+  })
+
+  it("names the added-file diff when the PR adds the conventions file", () => {
+    const coverage = classifyConventionsCoverage(
+      makeCoverageInput({ conventionsAddedInDiff: true }),
+    )
+
+    expect(coverage).toEqual(truncatedCoverage("added-in-diff"))
+  })
+
+  it("matches a dot-prefixed priority-doc path against the configured path", () => {
+    const coverage = classifyConventionsCoverage(
+      makeCoverageInput({ priorityDocFiles: [makeFullFile("./AGENTS.md")] }),
+    )
+
+    expect(coverage).toEqual(truncatedCoverage("priority-docs"))
+  })
+
+  it("prefers priority docs when changed files also carried the full file", () => {
+    const coverage = classifyConventionsCoverage(
+      makeCoverageInput({
+        changedFiles: [makeFullFile("AGENTS.md")],
+        priorityDocFiles: [makeFullFile("AGENTS.md")],
+      }),
+    )
+
+    expect(coverage).toEqual(truncatedCoverage("priority-docs"))
+  })
+
+  it("ignores full copies of other files", () => {
+    const coverage = classifyConventionsCoverage(
+      makeCoverageInput({
+        priorityDocFiles: [makeFullFile("README.md")],
+        changedFiles: [makeFullFile("docs/AGENTS.md")],
+        relatedFiles: [makeFullFile("src/b.ts")],
+      }),
+    )
+
+    expect(coverage).toEqual(truncatedCoverage(null))
+  })
+})
+
+describe("buildConventionsNote", () => {
+  const buildNote = (
+    coverage: ConventionsCoverage,
+    listedInPriorityDocs = false,
+  ): string | null => {
+    return buildConventionsNote({
+      conventionsCoverage: coverage,
+      conventionsFile: "AGENTS.md",
+      listedInPriorityDocs,
+    })
+  }
+
+  it("suggests both remedies when no full copy reached the model", () => {
+    expect(buildNote(truncatedCoverage(null))).toBe(
+      "Conventions file `AGENTS.md` was truncated to its first 40 of 41 characters, and no full copy reached the model — raise `conventions_budget_tokens` or list the file in `priority_docs`.",
+    )
+  })
+
+  it("drops the priority_docs remedy when the file is already listed there", () => {
+    expect(buildNote(truncatedCoverage(null), true)).toBe(
+      "Conventions file `AGENTS.md` was truncated to its first 40 of 41 characters, and no full copy reached the model — raise `conventions_budget_tokens`; the file is listed in `priority_docs` but did not fit or was excluded.",
+    )
+  })
+
+  it.each([
+    { label: "changed files", fullCopyChannel: "changed-files" },
+    { label: "the added-file diff", fullCopyChannel: "added-in-diff" },
+  ] as const)("warns ahead when only $label carried the full text", ({ fullCopyChannel }) => {
+    expect(buildNote(truncatedCoverage(fullCopyChannel))).toBe(
+      "Conventions file `AGENTS.md` exceeds `conventions_budget_tokens` (41 characters against a 40-character cap) — this PR carried the full text, but later PRs that don't change it will see only the first 40 characters.",
+    )
+  })
+
+  it.each([
+    { label: "a full file", coverage: { status: "full", totalCharacters: 40 } },
+    { label: "a missing file", coverage: { status: "not-found" } },
+    { label: "a priority-doc copy", coverage: truncatedCoverage("priority-docs") },
+    { label: "a related-file copy", coverage: truncatedCoverage("related-files") },
+  ] as const)("returns no note for $label", ({ coverage }) => {
+    expect(buildNote(coverage)).toBeNull()
   })
 })

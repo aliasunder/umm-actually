@@ -41,7 +41,7 @@ inputs:
     required: false
     default: AGENTS.md
   conventions_budget_tokens:
-    description: Approximate token budget for the conventions file section of the prompt. Files exceeding this are truncated with a notice; the full file may still reach the model via the priority_docs channel. Empty = the 8000 default, so workflows can wire an unset repo variable directly
+    description: Approximate token budget for the conventions file section of the prompt. Files exceeding this are truncated with a notice; the full file may still reach the model via the priority_docs channel. When no full copy reaches the model, or only this PR's change to the file carried one, the status comment and the check run's details page say so. Empty = the 8000 default, so workflows can wire an unset repo variable directly
     required: false
     default: "8000"
   phases:

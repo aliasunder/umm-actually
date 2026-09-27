@@ -11,6 +11,7 @@ const baseStats: ReviewSummaryStats = {
     baseRef: "main",
   },
   conventionsFile: "AGENTS.md",
+  conventionsCoverage: { status: "full", totalCharacters: 1200 },
   phasesCompleted: ["combined"],
   phasesIncomplete: [],
   changedFilePaths: ["src/greeter.ts"],
@@ -257,25 +258,73 @@ describe("renderReviewSummary", () => {
       tokenBudgetRemainingForDocs: 154,
     })
 
-    expect(summary).toContain(
+    expect(summary.split("\n")[21]).toBe(
       "**Token budget:** 300000 total · 92180 diff · 154 priority-doc floor · 154 left for docs",
     )
   })
 
-  it("renders 'none' when conventionsFile is null", () => {
+  it("renders 'none' when the conventions file was not found", () => {
     const summary = renderReviewSummary({
       ...baseStats,
-      conventionsFile: null,
+      conventionsCoverage: { status: "not-found" },
     })
 
-    expect(summary).toContain("**Instructions:** none")
+    expect(summary.split("\n")[4]).toBe("**Instructions:** none")
     expect(summary).not.toContain("AGENTS.md")
   })
+
+  it.each([
+    {
+      label: "no full copy",
+      fullCopyChannel: null,
+      expected:
+        "**Instructions:** AGENTS.md (truncated to 4000 of 14991 characters; no full copy reached the model)",
+    },
+    {
+      label: "a priority-doc copy",
+      fullCopyChannel: "priority-docs",
+      expected:
+        "**Instructions:** AGENTS.md (sent in full as a priority doc; 14991 characters over a 4000-character section cap)",
+    },
+    {
+      label: "a changed-file copy",
+      fullCopyChannel: "changed-files",
+      expected:
+        "**Instructions:** AGENTS.md (truncated to 4000 of 14991 characters; full copy in changed files)",
+    },
+    {
+      label: "a related-file copy",
+      fullCopyChannel: "related-files",
+      expected:
+        "**Instructions:** AGENTS.md (truncated to 4000 of 14991 characters; full copy in related files)",
+    },
+    {
+      label: "an added-file diff",
+      fullCopyChannel: "added-in-diff",
+      expected:
+        "**Instructions:** AGENTS.md (truncated to 4000 of 14991 characters; full copy in the diff of the added file)",
+    },
+  ] as const)(
+    "reports a truncated conventions file with $label",
+    ({ fullCopyChannel, expected }) => {
+      const summary = renderReviewSummary({
+        ...baseStats,
+        conventionsCoverage: {
+          status: "truncated",
+          fullCopyChannel,
+          characterCap: 4000,
+          totalCharacters: 14991,
+        },
+      })
+
+      expect(summary.split("\n")[4]).toBe(expected)
+    },
+  )
 
   it("truncates the commit SHA to 7 characters", () => {
     const summary = renderReviewSummary(baseStats)
 
-    expect(summary).toContain("`abc123d`")
+    expect(summary.split("\n")[2]).toBe("PR #7 · `feat/trim-names` → `main` · `abc123d`")
     expect(summary).not.toContain(baseStats.prContext.headSha)
   })
 
@@ -285,7 +334,7 @@ describe("renderReviewSummary", () => {
       changedFilePaths: ["src/a|b.ts"],
     })
 
-    expect(summary).toContain("| Changed files | 1 | src/a\\|b.ts |")
+    expect(summary.split("\n")[12]).toBe("| Changed files | 1 | src/a\\|b.ts |")
     expect(summary).not.toContain("| src/a|b.ts |")
   })
 })
