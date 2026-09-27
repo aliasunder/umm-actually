@@ -166,8 +166,8 @@ export const classifyConventionsCoverage = ({
 }
 
 /** PR-facing line for a truncated conventions file. Null when the file fits
- *  its section, or when a full copy reached the model and priority_docs will
- *  keep sending one to later PRs. */
+ *  its section, or when a full copy reached the model and the file is in
+ *  priority_docs, which retries it on every later PR. */
 export const buildConventionsNote = ({
   conventionsCoverage,
   conventionsFile,
@@ -183,12 +183,12 @@ export const buildConventionsNote = ({
   const { fullCopyChannel, characterCap, totalCharacters } = conventionsCoverage
   const fileLabel = `\`${conventionsFile}\``
 
-  // priority_docs reads a listed file on every PR, so a full copy from any
-  // channel needs no note; a later PR that cannot fit it reports it then
-  const laterPrsKeepFullCopy =
+  // priority_docs retries a listed file on every PR, and a later PR that cannot
+  // fit it gets its own no-copy note, so a listed file needs no warn-ahead
+  const warnAheadUnneeded =
     fullCopyChannel === "priority-docs" || (fullCopyChannel !== null && listedInPriorityDocs)
 
-  if (laterPrsKeepFullCopy) return null
+  if (warnAheadUnneeded) return null
 
   // This PR changes or adds the file, or changes a file it imports, so its
   // review had the full text; a later PR that does none of those gets the head
