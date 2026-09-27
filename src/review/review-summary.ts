@@ -90,8 +90,7 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     "",
     `PR #${stats.prContext.prNumber} · \`${stats.prContext.headRef}\` → \`${stats.prContext.baseRef}\` · \`${sha}\``,
     "",
-    // "Instructions" is the reader-facing name for the conventions file
-    `**Instructions:** ${renderConventionsCoverage(stats)}`,
+    `**Conventions:** ${renderConventionsCoverage(stats)}`,
     "",
     `**Phases:** ${renderCommaList(stats.phasesCompleted)}${incompleteClause}`,
     ...(stats.reviewDeadlineExceeded

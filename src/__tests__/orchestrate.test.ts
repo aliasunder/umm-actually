@@ -1952,7 +1952,7 @@ describe("orchestrate", () => {
           }),
         ])
         expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
-          "**Instructions:** AGENTS.md (truncated to 32000 of 32001 characters; no full copy reached the model)",
+          "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; no full copy reached the model)",
         )
         expect(result.conventionsNote).toBe(noCopyNote)
         expect(first(stubs.updateCheckRunCalls).output).toEqual({
@@ -1990,7 +1990,7 @@ describe("orchestrate", () => {
           }),
         ])
         expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
-          "**Instructions:** AGENTS.md (sent in full as a priority doc; its 32001 characters exceed the 32000-character section cap)",
+          "**Conventions:** AGENTS.md (sent in full as a priority doc; its 32001 characters exceed the 32000-character section cap)",
         )
         expect(result.conventionsNote).toBeNull()
         expect(first(stubs.updateCheckRunCalls).output).toEqual({
@@ -2063,7 +2063,7 @@ describe("orchestrate", () => {
           }),
         ])
         expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
-          "**Instructions:** AGENTS.md (truncated to 32000 of 32001 characters; full copy in changed files)",
+          "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; full copy in changed files)",
         )
         expect(result.conventionsNote).toBe(crossingNote)
         expect(first(stubs.updateCheckRunCalls).output).toEqual({
@@ -2091,7 +2091,7 @@ describe("orchestrate", () => {
 
         expect(truncationWarnings(logger)).toEqual([])
         expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
-          "**Instructions:** AGENTS.md (truncated to 32000 of 32001 characters; full copy in related files)",
+          "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; full copy in related files)",
         )
         expect(result.conventionsNote).toBe(crossingNote)
       })
@@ -2111,7 +2111,7 @@ describe("orchestrate", () => {
 
         expect(truncationWarnings(logger)).toEqual([])
         expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
-          "**Instructions:** ./AGENTS.md (truncated to 32000 of 32001 characters; full copy in the diff of the added file)",
+          "**Conventions:** ./AGENTS.md (truncated to 32000 of 32001 characters; full copy in the diff of the added file)",
         )
         expect(result.conventionsNote).toBe(
           "Conventions file `./AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that change neither it nor a file it imports will see only the first 32000 characters.",

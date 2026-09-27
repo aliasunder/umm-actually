@@ -47,7 +47,7 @@ describe("renderReviewSummary", () => {
         "",
         "PR #7 · `feat/trim-names` → `main` · `abc123d`",
         "",
-        "**Instructions:** AGENTS.md",
+        "**Conventions:** AGENTS.md",
         "",
         "**Phases:** combined",
         "",
@@ -102,7 +102,7 @@ describe("renderReviewSummary", () => {
         "",
         "PR #7 · `feat/trim-names` → `main` · `abc123d`",
         "",
-        "**Instructions:** AGENTS.md",
+        "**Conventions:** AGENTS.md",
         "",
         "**Phases:** combined",
         "",
@@ -158,7 +158,7 @@ describe("renderReviewSummary", () => {
         "",
         "PR #7 · `feat/trim-names` → `main` · `abc123d`",
         "",
-        "**Instructions:** AGENTS.md",
+        "**Conventions:** AGENTS.md",
         "",
         "**Phases:** combined",
         "",
@@ -210,7 +210,7 @@ describe("renderReviewSummary", () => {
           "",
           "PR #7 · `feat/trim-names` → `main` · `abc123d`",
           "",
-          "**Instructions:** AGENTS.md",
+          "**Conventions:** AGENTS.md",
           "",
           "**Phases:** correctness-security, conventions-tests · incomplete: subtle-bugs",
           ...(reviewDeadlineExceeded
@@ -269,7 +269,7 @@ describe("renderReviewSummary", () => {
       conventionsCoverage: { status: "not-found" },
     })
 
-    expect(summary.split("\n")[4]).toBe("**Instructions:** none")
+    expect(summary.split("\n")[4]).toBe("**Conventions:** none")
     expect(summary).not.toContain("AGENTS.md")
   })
 
@@ -278,31 +278,31 @@ describe("renderReviewSummary", () => {
       label: "no full copy",
       fullCopyChannel: null,
       expected:
-        "**Instructions:** AGENTS.md (truncated to 4000 of 14991 characters; no full copy reached the model)",
+        "**Conventions:** AGENTS.md (truncated to 4000 of 14991 characters; no full copy reached the model)",
     },
     {
       label: "a priority-doc copy",
       fullCopyChannel: "priority-docs",
       expected:
-        "**Instructions:** AGENTS.md (sent in full as a priority doc; its 14991 characters exceed the 4000-character section cap)",
+        "**Conventions:** AGENTS.md (sent in full as a priority doc; its 14991 characters exceed the 4000-character section cap)",
     },
     {
       label: "a changed-file copy",
       fullCopyChannel: "changed-files",
       expected:
-        "**Instructions:** AGENTS.md (truncated to 4000 of 14991 characters; full copy in changed files)",
+        "**Conventions:** AGENTS.md (truncated to 4000 of 14991 characters; full copy in changed files)",
     },
     {
       label: "a related-file copy",
       fullCopyChannel: "related-files",
       expected:
-        "**Instructions:** AGENTS.md (truncated to 4000 of 14991 characters; full copy in related files)",
+        "**Conventions:** AGENTS.md (truncated to 4000 of 14991 characters; full copy in related files)",
     },
     {
       label: "an added-file diff",
       fullCopyChannel: "added-in-diff",
       expected:
-        "**Instructions:** AGENTS.md (truncated to 4000 of 14991 characters; full copy in the diff of the added file)",
+        "**Conventions:** AGENTS.md (truncated to 4000 of 14991 characters; full copy in the diff of the added file)",
     },
   ] as const)(
     "reports a truncated conventions file with $label",
