@@ -214,6 +214,8 @@ export const isDuplicateFinding = (finding: AnchorEntry, anchors: AnchorEntry[])
  *  title vocabulary. */
 export const coalesceAnchors = (anchors: AnchorEntry[]): AnchorEntry[] => {
   return anchors.reduce<AnchorEntry[]>((kept, anchor) => {
+    // The positional check is symmetric, so which anchor fills the
+    // `finding` role does not change the result
     const positionalMatch = kept.some((existing) => {
       return isPositionalDuplicate({ finding: anchor, anchor: existing })
     })
@@ -320,19 +322,19 @@ const classifyFinding = (
   if (commentable.rightLines.has(finding.line)) {
     const endLine = multiLineEnd(finding, commentable)
     // GitHub's API: `line` is the LAST line of a multi-line range, `start_line` the first
-    const comment: ReviewComment = !endLine
+    const comment: ReviewComment = endLine
       ? {
-          path: finding.file,
-          line: finding.line,
-          side: "RIGHT",
-          body: renderCommentBody(finding),
-        }
-      : {
           path: finding.file,
           line: endLine,
           side: "RIGHT",
           start_line: finding.line,
           start_side: "RIGHT",
+          body: renderCommentBody(finding),
+        }
+      : {
+          path: finding.file,
+          line: finding.line,
+          side: "RIGHT",
           body: renderCommentBody(finding),
         }
     return { comment }
@@ -444,7 +446,7 @@ export const buildStatusComment = ({
   droppedByCap,
   model,
   contextNotes = [],
-  conventionsNote = null,
+  conventionsNote,
   incompletePhases = [],
   reviewDeadlineExceeded = false,
 }: {
@@ -458,7 +460,7 @@ export const buildStatusComment = ({
   contextNotes?: string[]
   /** Truncated-conventions line; shown outside the collapsed context notes
    *  because, like the cap and incomplete-phase notes, it reports lost coverage. */
-  conventionsNote?: string | null
+  conventionsNote?: string
   /** Ids of review phases that ended without an accepted response. */
   incompletePhases?: string[]
   /** True when deadline expiry left phases incomplete. */

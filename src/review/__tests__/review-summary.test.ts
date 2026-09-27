@@ -284,7 +284,7 @@ describe("renderReviewSummary", () => {
       label: "a priority-doc copy",
       fullCopyChannel: "priority-docs",
       expected:
-        "**Instructions:** AGENTS.md (sent in full as a priority doc; 14991 characters over a 4000-character section cap)",
+        "**Instructions:** AGENTS.md (sent in full as a priority doc; its 14991 characters exceed the 4000-character section cap)",
     },
     {
       label: "a changed-file copy",

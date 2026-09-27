@@ -38,22 +38,19 @@ export type ReviewSummaryStats = {
   posted: number
 }
 
-/** Formats paths for a markdown table cell — em-dash when empty so cells
- *  are never blank. Pipes are escaped so paths can't break the table. */
-const renderPaths = (paths: string[]): string =>
-  paths.length === 0 ? "—" : paths.map((path) => path.replaceAll("|", "\\|")).join(", ")
+/** Comma-joined items for one markdown line or table cell — em-dash when
+ *  empty so cells are never blank. Pipes are escaped so an item can't break
+ *  a table row. */
+const renderCommaList = (items: string[]): string => {
+  if (items.length === 0) return "—"
+  return items.map((item) => item.replaceAll("|", "\\|")).join(", ")
+}
 
 /** The conventions file and how much of it reached the model. */
-const renderInstructions = ({
+const renderConventionsCoverage = ({
   conventionsFile,
   conventionsCoverage,
 }: Pick<ReviewSummaryStats, "conventionsFile" | "conventionsCoverage">): string => {
-  const channelLabels: Record<Exclude<ConventionsFullCopyChannel, "priority-docs">, string> = {
-    "changed-files": "changed files",
-    "related-files": "related files",
-    "added-in-diff": "the diff of the added file",
-  }
-
   if (conventionsCoverage.status === "not-found") return "none"
   if (conventionsCoverage.status === "full") return conventionsFile
 
@@ -61,13 +58,19 @@ const renderInstructions = ({
 
   // A priority-doc copy replaces the truncated section, so no head was sent
   if (fullCopyChannel === "priority-docs") {
-    return `${conventionsFile} (sent in full as a priority doc; ${totalCharacters} characters over a ${characterCap}-character section cap)`
+    return `${conventionsFile} (sent in full as a priority doc; its ${totalCharacters} characters exceed the ${characterCap}-character section cap)`
   }
 
   const truncationClause = `truncated to ${characterCap} of ${totalCharacters} characters`
 
   if (!fullCopyChannel) {
     return `${conventionsFile} (${truncationClause}; no full copy reached the model)`
+  }
+
+  const channelLabels: Record<Exclude<ConventionsFullCopyChannel, "priority-docs">, string> = {
+    "changed-files": "changed files",
+    "related-files": "related files",
+    "added-in-diff": "the diff of the added file",
   }
 
   return `${conventionsFile} (${truncationClause}; full copy in ${channelLabels[fullCopyChannel]})`
@@ -87,9 +90,10 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     "",
     `PR #${stats.prContext.prNumber} · \`${stats.prContext.headRef}\` → \`${stats.prContext.baseRef}\` · \`${sha}\``,
     "",
-    `**Instructions:** ${renderInstructions(stats)}`,
+    // "Instructions" is the reader-facing name for the conventions file
+    `**Instructions:** ${renderConventionsCoverage(stats)}`,
     "",
-    `**Phases:** ${renderPaths(stats.phasesCompleted)}${incompleteClause}`,
+    `**Phases:** ${renderCommaList(stats.phasesCompleted)}${incompleteClause}`,
     ...(stats.reviewDeadlineExceeded
       ? ["", "The review deadline expired; results from completed phases are shown."]
       : []),
@@ -98,14 +102,14 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     "",
     "| type | count | paths |",
     "| --- | --- | --- |",
-    `| Changed files | ${stats.changedFilePaths.length} | ${renderPaths(stats.changedFilePaths)} |`,
-    `| Related files | ${stats.relatedFilePaths.length} | ${renderPaths(stats.relatedFilePaths)} |`,
-    `| Priority docs | ${stats.priorityDocPaths.length} | ${renderPaths(stats.priorityDocPaths)} |`,
-    `| Priority docs (already in context) | ${stats.priorityDocsInContextPaths.length} | ${renderPaths(stats.priorityDocsInContextPaths)} |`,
-    `| Priority docs (not included) | ${stats.priorityDocsAbsentPaths.length} | ${renderPaths(stats.priorityDocsAbsentPaths)} |`,
-    `| Mention-matched docs | ${stats.mentionMatchedDocPaths.length} | ${renderPaths(stats.mentionMatchedDocPaths)} |`,
-    `| Excluded (related files cap) | ${stats.relatedFilesExcludedPaths.length} | ${renderPaths(stats.relatedFilesExcludedPaths)} |`,
-    `| Excluded (docs cap) | ${stats.docsExcludedPaths.length} | ${renderPaths(stats.docsExcludedPaths)} |`,
+    `| Changed files | ${stats.changedFilePaths.length} | ${renderCommaList(stats.changedFilePaths)} |`,
+    `| Related files | ${stats.relatedFilePaths.length} | ${renderCommaList(stats.relatedFilePaths)} |`,
+    `| Priority docs | ${stats.priorityDocPaths.length} | ${renderCommaList(stats.priorityDocPaths)} |`,
+    `| Priority docs (already in context) | ${stats.priorityDocsInContextPaths.length} | ${renderCommaList(stats.priorityDocsInContextPaths)} |`,
+    `| Priority docs (not included) | ${stats.priorityDocsAbsentPaths.length} | ${renderCommaList(stats.priorityDocsAbsentPaths)} |`,
+    `| Mention-matched docs | ${stats.mentionMatchedDocPaths.length} | ${renderCommaList(stats.mentionMatchedDocPaths)} |`,
+    `| Excluded (related files cap) | ${stats.relatedFilesExcludedPaths.length} | ${renderCommaList(stats.relatedFilesExcludedPaths)} |`,
+    `| Excluded (docs cap) | ${stats.docsExcludedPaths.length} | ${renderCommaList(stats.docsExcludedPaths)} |`,
     "",
     `**Token budget:** ${stats.tokenBudgetTotal} total · ${stats.tokenBudgetUsedByDiff} diff · ${stats.tokenBudgetPriorityDocFloor} priority-doc floor · ${stats.tokenBudgetRemainingForDocs} left for docs`,
     "",

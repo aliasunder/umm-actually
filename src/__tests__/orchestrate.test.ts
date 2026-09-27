@@ -174,7 +174,7 @@ const expectedStatus = ({
   totalCount,
   droppedByCap = [],
   contextNotes = [],
-  conventionsNote = null,
+  conventionsNote,
   incompletePhases = [],
 }: {
   isFirstRun: boolean
@@ -183,7 +183,7 @@ const expectedStatus = ({
   totalCount: number
   droppedByCap?: Finding[]
   contextNotes?: string[]
-  conventionsNote?: string | null
+  conventionsNote?: string
   incompletePhases?: string[]
 }) => ({
   prNumber: 7,
@@ -197,7 +197,7 @@ const expectedStatus = ({
     droppedByCap,
     model: "test/model",
     contextNotes,
-    conventionsNote,
+    ...(conventionsNote && { conventionsNote }),
     incompletePhases,
   }),
 })
@@ -1909,7 +1909,7 @@ describe("orchestrate", () => {
       const listedNoCopyNote =
         "Conventions file `AGENTS.md` was truncated to its first 32000 of 32001 characters, and no full copy reached the model — raise `conventions_budget_tokens`; the file is listed in `priority_docs` but did not fit or was excluded."
       const crossingNote =
-        "Conventions file `AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that don't change it will see only the first 32000 characters."
+        "Conventions file `AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that don't change or import it will see only the first 32000 characters."
 
       const truncationWarnings = (logger: ReturnType<typeof createTestLogger>) => {
         return logger.messages.filter((entry) => entry.message === truncationWarning)
@@ -1990,7 +1990,7 @@ describe("orchestrate", () => {
           }),
         ])
         expect(instructionsLine(result.reviewSummaryMarkdown)).toBe(
-          "**Instructions:** AGENTS.md (sent in full as a priority doc; 32001 characters over a 32000-character section cap)",
+          "**Instructions:** AGENTS.md (sent in full as a priority doc; its 32001 characters exceed the 32000-character section cap)",
         )
         expect(result.conventionsNote).toBeNull()
         expect(first(stubs.updateCheckRunCalls).output).toEqual({

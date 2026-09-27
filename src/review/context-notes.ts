@@ -21,8 +21,9 @@ export type ContextNotesInput = {
  *  when only its spelling differs. */
 const normalizePath = (filePath: string): string => posix.normalize(filePath)
 
-const renderPaths = (paths: string[]): string =>
-  paths.map((filePath) => `\`${filePath}\``).join(", ")
+const renderCodePaths = (paths: string[]): string => {
+  return paths.map((filePath) => `\`${filePath}\``).join(", ")
+}
 
 const renderExcludedFile = (file: ExcludedDiffFile): string => {
   return `\`${file.path}\` (${describeExclusionSource(file.source)})`
@@ -99,7 +100,8 @@ export type ConventionsCoverage =
       totalCharacters: number
     }
 
-type ConventionsChannels = {
+/** The file to look for and the channels that might carry it whole. */
+type FullCopyLookup = {
   conventionsFile: string
   priorityDocFiles: PromptFile[]
   changedFiles: PromptFile[]
@@ -114,7 +116,7 @@ const findFullCopyChannel = ({
   changedFiles,
   relatedFiles,
   conventionsAddedInDiff,
-}: ConventionsChannels): ConventionsFullCopyChannel | null => {
+}: FullCopyLookup): ConventionsFullCopyChannel | null => {
   const conventionsPath = normalizePath(conventionsFile)
   const carriesConventionsInFull = (file: PromptFile): boolean => {
     return file.includedAs === "full" && normalizePath(file.path) === conventionsPath
@@ -125,9 +127,12 @@ const findFullCopyChannel = ({
   if (priorityDocFiles.some(carriesConventionsInFull)) return "priority-docs"
   if (changedFiles.some(carriesConventionsInFull)) return "changed-files"
 
-  // Related files are traced only from JS/TS imports, so this matches only a
-  // conventions file with a JS/TS extension
+  // Related files are traced from JS/TS imports, so this check fires only for
+  // a conventions file with a JS/TS extension that a changed file imports
   if (relatedFiles.some(carriesConventionsInFull)) return "related-files"
+
+  // Fallback for a new file the changed-file read could not carry in full
+  // (over budget): its diff hunks still hold every line
   if (conventionsAddedInDiff) return "added-in-diff"
 
   return null
@@ -138,8 +143,8 @@ const findFullCopyChannel = ({
 export const classifyConventionsCoverage = ({
   conventions,
   conventionsBudgetTokens,
-  ...channels
-}: ConventionsChannels & {
+  ...fullCopyLookup
+}: FullCopyLookup & {
   conventions: string | null
   conventionsBudgetTokens: number
 }): ConventionsCoverage => {
@@ -153,14 +158,15 @@ export const classifyConventionsCoverage = ({
 
   return {
     status: "truncated",
-    fullCopyChannel: findFullCopyChannel(channels),
+    fullCopyChannel: findFullCopyChannel(fullCopyLookup),
+    // The same cap conventionsRenderInFull and the prompt's truncation apply
     characterCap: conventionsBudgetTokens * CHARS_PER_TOKEN,
     totalCharacters,
   }
 }
 
 /** PR-facing line for a truncated conventions file. Null when the file fits
- *  its section, or a priority-doc or related-file copy delivered the whole text. */
+ *  its section, or a priority-doc copy delivered the whole text. */
 export const buildConventionsNote = ({
   conventionsCoverage,
   conventionsFile,
@@ -176,15 +182,19 @@ export const buildConventionsNote = ({
   const { fullCopyChannel, characterCap, totalCharacters } = conventionsCoverage
   const fileLabel = `\`${conventionsFile}\``
 
-  // This PR changes or adds the file, so its review had the full text, but
-  // the next PR that leaves the file alone gets only the head
+  // This PR changes, adds, or imports the file, so its review had the full
+  // text, but a later PR that does none of those gets only the head
   const onlyThisPrCarriesFullText =
-    fullCopyChannel === "changed-files" || fullCopyChannel === "added-in-diff"
+    fullCopyChannel === "changed-files" ||
+    fullCopyChannel === "added-in-diff" ||
+    fullCopyChannel === "related-files"
 
   if (onlyThisPrCarriesFullText) {
-    return `Conventions file ${fileLabel} exceeds \`conventions_budget_tokens\` (${totalCharacters} characters against a ${characterCap}-character cap) — this PR carried the full text, but later PRs that don't change it will see only the first ${characterCap} characters.`
+    return `Conventions file ${fileLabel} exceeds \`conventions_budget_tokens\` (${totalCharacters} characters against a ${characterCap}-character cap) — this PR carried the full text, but later PRs that don't change or import it will see only the first ${characterCap} characters.`
   }
-  if (fullCopyChannel) return null
+
+  // priority_docs reads the file on every PR, so its full copy needs no note
+  if (fullCopyChannel === "priority-docs") return null
 
   const truncationLead = `Conventions file ${fileLabel} was truncated to its first ${characterCap} of ${totalCharacters} characters, and no full copy reached the model`
 
@@ -218,19 +228,19 @@ export const buildContextNotes = ({
   const inContextNote =
     inContextDocs.length === 0
       ? null
-      : `Priority docs already in context: ${renderPaths(inContextDocs)}`
+      : `Priority docs already in context: ${renderCodePaths(inContextDocs)}`
   const priorityDocsNote =
     absentPriorityDocs.length === 0
       ? null
-      : `Priority docs not included: ${renderPaths(absentPriorityDocs)} (missing, unreadable, or over budget)`
+      : `Priority docs not included: ${renderCodePaths(absentPriorityDocs)} (missing, unreadable, or over budget)`
   const relatedFilesNote =
     relatedFilesExcludedPaths.length === 0
       ? null
-      : `${relatedFilesExcludedPaths.length} related file(s) excluded by \`max_related_files\` cap: ${renderPaths(relatedFilesExcludedPaths)}`
+      : `${relatedFilesExcludedPaths.length} related file(s) excluded by \`max_related_files\` cap: ${renderCodePaths(relatedFilesExcludedPaths)}`
   const relatedDocsNote =
     docsExcludedPaths.length === 0
       ? null
-      : `${docsExcludedPaths.length} related doc(s) excluded by \`max_related_docs\` cap: ${renderPaths(docsExcludedPaths)}`
+      : `${docsExcludedPaths.length} related doc(s) excluded by \`max_related_docs\` cap: ${renderCodePaths(docsExcludedPaths)}`
   const diffExcludedNote =
     diffExcludedFiles.length === 0
       ? null

@@ -364,9 +364,10 @@ describe("buildConventionsNote", () => {
   it.each([
     { label: "changed files", fullCopyChannel: "changed-files" },
     { label: "the added-file diff", fullCopyChannel: "added-in-diff" },
+    { label: "related files", fullCopyChannel: "related-files" },
   ] as const)("warns ahead when only $label carried the full text", ({ fullCopyChannel }) => {
     expect(buildNote(truncatedCoverage(fullCopyChannel))).toBe(
-      "Conventions file `AGENTS.md` exceeds `conventions_budget_tokens` (41 characters against a 40-character cap) — this PR carried the full text, but later PRs that don't change it will see only the first 40 characters.",
+      "Conventions file `AGENTS.md` exceeds `conventions_budget_tokens` (41 characters against a 40-character cap) — this PR carried the full text, but later PRs that don't change or import it will see only the first 40 characters.",
     )
   })
 
@@ -374,7 +375,6 @@ describe("buildConventionsNote", () => {
     { label: "a full file", coverage: { status: "full", totalCharacters: 40 } },
     { label: "a missing file", coverage: { status: "not-found" } },
     { label: "a priority-doc copy", coverage: truncatedCoverage("priority-docs") },
-    { label: "a related-file copy", coverage: truncatedCoverage("related-files") },
   ] as const)("returns no note for $label", ({ coverage }) => {
     expect(buildNote(coverage)).toBeNull()
   })
