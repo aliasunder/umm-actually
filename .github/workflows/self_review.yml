@@ -41,12 +41,14 @@ jobs:
       # The comment-trigger step below reads the PR via the REST API
       pull-requests: read
     steps:
-      # issue_comment events check out the default branch unless overridden.
-      # This workflow builds the action from the workspace (`uses: ./`) and
-      # the action reads workspace files for context, so a comment-triggered
-      # re-review needs the PR head to test the PR's own code. Only same-repo
-      # PR heads are eligible for checkout: fork code must never run in this
-      # secrets-bearing workflow. Fork PRs fall back to the default checkout.
+      # Comment-triggered re-reviews check out the PR head so they test the PR's
+      # own code.
+      # - issue_comment events otherwise check out the default branch, and this
+      #   workflow builds the action from the workspace (`uses: ./`)
+      # - only same-repo PR heads are checked out; fork code must never run in
+      #   this secrets-bearing workflow, so fork PRs keep the default checkout
+      # - the checkout pins the head SHA read here, so a push that lands after
+      #   the owner's comment cannot swap in unvetted code
       # Runs before any checkout, on a read-only token, with no untrusted input.
       - name: Resolve review checkout ref
         id: review-ref
@@ -55,13 +57,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.issue.number }}
         run: |
-          same_repo=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
-            --jq '(.head.repo != null) and (.head.repo.full_name == .base.repo.full_name)')
-          if [ "$same_repo" = "true" ]; then
-            echo "ref=refs/pull/${PR_NUMBER}/head" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=" >> "$GITHUB_OUTPUT"
-          fi
+          head_sha=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+            --jq 'if (.head.repo != null) and (.head.repo.full_name == .base.repo.full_name) then .head.sha else "" end')
+          echo "ref=${head_sha}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
