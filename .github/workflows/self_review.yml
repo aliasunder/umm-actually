@@ -52,6 +52,7 @@ jobs:
           github_token: ${{ steps.app-token.outputs.token }}
           openrouter_api_key: ${{ secrets.OPENROUTER_KEY }}
           model: ${{ vars.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4-6' }}
+          fallback_model: ${{ vars.UMM_FALLBACK_MODEL }}
           request_timeout_seconds: ${{ vars.UMM_REQUEST_TIMEOUT_SECONDS }}
           review_timeout_seconds: ${{ vars.UMM_REVIEW_TIMEOUT_SECONDS }}
           phases: ${{ vars.UMM_PHASES }}
