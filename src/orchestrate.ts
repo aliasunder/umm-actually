@@ -73,6 +73,7 @@ export type ReviewContext = {
   prContext: PrContext
   phase: ReviewPhase
   conventions: string | null
+  conventionsFile: string
   conventionsBudgetTokens: number
   changedFiles: PromptFile[]
   relatedFiles: PromptFile[]
@@ -650,6 +651,10 @@ const runReviewPipeline = async (
   const conventionsAlreadyRenderedInFull =
     conventions !== null && conventionsRenderInFull(conventions, config.conventionsBudgetTokens)
 
+  // The conventions path when its section carries the whole file, else empty.
+  // Each channel below spreads it into the paths it must not send again.
+  const conventionsFullCopyPaths = conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []
+
   const fileBudgetTokens = config.contextBudgetTokens - diffTokens
 
   // The floor is a share of the whole context budget, but never more than the
@@ -705,10 +710,7 @@ const runReviewPipeline = async (
   const { files: changedFiles, remainingTokens } = await contextReader.readChangedFiles({
     changedPaths,
     budgetTokens: fileBudgetTokens - earlyPriorityDocTokens,
-    diffOnlyPaths: [
-      ...(conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []),
-      ...earlyPriorityDocFiles.map((file) => file.path),
-    ],
+    diffOnlyPaths: [...conventionsFullCopyPaths, ...earlyPriorityDocFiles.map((file) => file.path)],
   })
 
   // Keep only the unspent part of the floor for docs still missing after
@@ -718,7 +720,7 @@ const runReviewPipeline = async (
     ...changedFiles
       .filter((file) => file.includedAs === "full")
       .map((file) => posix.normalize(file.path)),
-    ...(conventionsAlreadyRenderedInFull ? [posix.normalize(config.conventionsFile)] : []),
+    ...conventionsFullCopyPaths.map((conventionsPath) => posix.normalize(conventionsPath)),
   ])
   const needsPriorityDocFloor =
     reviewablePriorityDocs.length > 0 &&
@@ -752,7 +754,7 @@ const runReviewPipeline = async (
   const priorityDocsInContext = [
     ...changedFiles.filter((file) => file.includedAs === "full").map((file) => file.path),
     ...relatedFiles.map((file) => file.path),
-    ...(conventionsAlreadyRenderedInFull ? [config.conventionsFile] : []),
+    ...conventionsFullCopyPaths,
   ]
 
   // The late read retries any doc the early read couldn't fit, using whatever
@@ -792,8 +794,9 @@ const runReviewPipeline = async (
     )
   })
 
-  // Repeats conventionsAlreadyRenderedInFull's check as the `full` status; the
-  // classification runs here because its channel lookup needs the reads above
+  // Runs after the reads because, when the conventions section truncates, the
+  // classifier looks for a full copy among the files read above. Its `full`
+  // status is the same fits-in-section check as conventionsAlreadyRenderedInFull.
   const conventionsCoverage = classifyConventionsCoverage({
     conventions,
     conventionsFile: config.conventionsFile,
@@ -842,6 +845,9 @@ const runReviewPipeline = async (
     )
   }
 
+  // The placeholder still renders under the conventions file's path. The
+  // priority-doc block holding the full text carries a path that normalizes to
+  // it, so a finding quoting the file stays attributed to it.
   const conventionsForPrompt = conventionsReadInFullByPriorityDocs
     ? "(conventions file included in full as priority documentation below — ground convention findings in that copy)"
     : conventions
@@ -940,6 +946,7 @@ const runReviewPipeline = async (
       prContext,
       phase,
       conventions: conventionsForPrompt,
+      conventionsFile: config.conventionsFile,
       conventionsBudgetTokens: config.conventionsBudgetTokens,
       changedFiles,
       relatedFiles,

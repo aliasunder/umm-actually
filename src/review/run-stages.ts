@@ -48,10 +48,23 @@ export class AllPhasesFailedError extends Error {
   }
 }
 
-/** The client marks an auth/credit failure as aborted: the key is bad for
+// The two checks below read ReviewRequestError's flags by property name, not
+// instanceof: review/ is a pure layer and may import openrouter/ only as types,
+// so the class itself is not available here at runtime.
+
+/** The client marks an auth/credit failure as aborted. The key is bad for
  *  every model, so no later stage can succeed either. */
 const isAbortedRequest = (error: unknown): boolean => {
   return typeof error === "object" && error !== null && "aborted" in error && error.aborted === true
+}
+
+const isDeadlineExceeded = (error: unknown): boolean => {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "deadlineExceeded" in error &&
+    error.deadlineExceeded === true
+  )
 }
 
 /** Fires one stage's phases concurrently. Each phase is tried
@@ -78,18 +91,19 @@ const runStage = async (
           attemptCount: result.attempts.length,
           findingsCount: result.review.findings.length,
         })
+        logger.debug("review phase analysis", {
+          phase: phase.id,
+          analysis: result.review.analysis,
+        })
         return { phase, status: "completed", result }
       } catch (error) {
         logger.warn("review phase failed", {
           phase: phase.id,
           error: describeError(error),
         })
-        // duck-typed — instanceof needs a runtime import of the class
-        const deadlineExceeded =
-          typeof error === "object" &&
-          error !== null &&
-          "deadlineExceeded" in error &&
-          error.deadlineExceeded === true
+
+        const deadlineExceeded = isDeadlineExceeded(error)
+
         return {
           phase,
           status: "failed",

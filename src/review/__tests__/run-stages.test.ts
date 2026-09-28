@@ -11,19 +11,22 @@ const runStages = (
     remainingReviewMs?: () => number
   },
   logger: Parameters<typeof dispatchStages>[1],
-) => dispatchStages({ remainingReviewMs: () => Infinity, ...params }, logger)
+) => {
+  return dispatchStages({ remainingReviewMs: () => Infinity, ...params }, logger)
+}
 
-const makePhase = (id: string): ReviewPhase => ({
-  id,
-  instructionSections: [`instructions for ${id}`],
-})
+const makePhase = (id: string): ReviewPhase => {
+  return { id, instructionSections: [`instructions for ${id}`] }
+}
 
-const makeResult = (overrides: Partial<StructuredReviewResult> = {}): StructuredReviewResult => ({
-  review: { analysis: "", findings: [] },
-  modelUsed: "test/model",
-  attempts: [],
-  ...overrides,
-})
+const makeResult = (overrides: Partial<StructuredReviewResult> = {}): StructuredReviewResult => {
+  return {
+    review: { analysis: "", findings: [] },
+    modelUsed: "test/model",
+    attempts: [],
+    ...overrides,
+  }
+}
 
 type RecordedCall = { phase: string; priorFindings: Finding[] }
 
@@ -178,10 +181,7 @@ describe("runStages", () => {
       title: "N/A — the guard is correct",
     })
     const { runPhase, calls } = makeRunPhase({
-      a: () =>
-        makeResult({
-          review: { analysis: "", findings: [realFinding, nonFinding] },
-        }),
+      a: () => makeResult({ review: { analysis: "", findings: [realFinding, nonFinding] } }),
       b: () => makeResult(),
     })
 
@@ -286,13 +286,16 @@ describe("runStages", () => {
     expect(calls).toEqual([])
   })
 
-  it("logs each phase's completion or failure under its id", async () => {
+  it("logs each phase's completion or failure under its id, with a completed phase's analysis at debug", async () => {
     const logger = createTestLogger()
     const findingA = makeFinding()
     const { runPhase } = makeRunPhase({
-      a: () =>
-        makeResult({
-          review: { analysis: "", findings: [findingA] },
+      a: () => {
+        return makeResult({
+          review: {
+            analysis: 'Guard the empty name — src/greeter.ts: "return name.trim()"',
+            findings: [findingA],
+          },
           modelUsed: "model/a",
           attempts: [
             {
@@ -304,7 +307,8 @@ describe("runStages", () => {
               errorSummary: null,
             },
           ],
-        }),
+        })
+      },
       b: () => Promise.reject(new Error("boom")),
     })
 
@@ -319,6 +323,14 @@ describe("runStages", () => {
           modelUsed: "model/a",
           attemptCount: 1,
           findingsCount: 1,
+        },
+      },
+      {
+        level: "debug",
+        message: "review phase analysis",
+        data: {
+          phase: "a",
+          analysis: 'Guard the empty name — src/greeter.ts: "return name.trim()"',
         },
       },
       {
