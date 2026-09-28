@@ -1159,6 +1159,18 @@ describe("orchestrate", () => {
       expect(first(stubs.generateFindingsCalls).relatedDocs).toEqual([])
     })
 
+    it("matches a fully rendered conventions file to its priority doc across a ./ prefix", async () => {
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "./AGENTS.md", priorityDocs: ["AGENTS.md"] },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(stubs.readPriorityDocsCalls).toEqual([])
+      expect(first(stubs.findRelatedFilesCalls).budgetTokens).toBe(40_000)
+      expect(first(stubs.generateFindingsCalls).relatedDocs).toEqual([])
+    })
+
     it("keeps an early priority doc out of the related-file scan", async () => {
       const priorityDoc: PromptFile = {
         path: "src/caller.ts",
