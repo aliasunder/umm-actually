@@ -132,6 +132,11 @@ const CONTEXT_OVERFLOW_PATTERN =
  *  OpenRouter's estimate ("about"), not the provider tokenizer's count. */
 const CONTEXT_FIT_MARGIN_TOKENS = 8_192
 
+/** Smallest fitted ceiling worth a same-model retry. A smaller one would
+ *  likely cut the review off mid-JSON and still bill the full prompt, so the
+ *  ladder moves to the fallback instead. */
+const MIN_FITTED_MAX_COMPLETION_TOKENS = 16_384
+
 /** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs
  *  and future SDK versions need no instanceof on SDK internals. */
 const errorStatusCode = (error: unknown): number | undefined => {
@@ -143,7 +148,8 @@ const errorStatusCode = (error: unknown): number | undefined => {
 }
 
 /** The largest output ceiling that fits the endpoint a context-overflow error
- *  names, or null when the error is something else or no smaller ceiling fits. */
+ *  names, or null when the error is something else or no usable smaller
+ *  ceiling fits. */
 const fittedMaxCompletionTokens = ({
   error,
   rejectedMaxCompletionTokens,
@@ -161,8 +167,10 @@ const fittedMaxCompletionTokens = ({
 
   const fittedCeiling = Number(contextLength) - Number(inputTokens) - CONTEXT_FIT_MARGIN_TOKENS
 
+  if (fittedCeiling < MIN_FITTED_MAX_COMPLETION_TOKENS) return null
+
   // A ceiling at or above the rejected one would overflow the same endpoint again
-  if (fittedCeiling <= 0 || fittedCeiling >= rejectedMaxCompletionTokens) return null
+  if (fittedCeiling >= rejectedMaxCompletionTokens) return null
   return fittedCeiling
 }
 

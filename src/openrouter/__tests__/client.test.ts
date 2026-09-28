@@ -1196,6 +1196,24 @@ describe("requestReview", () => {
     ])
   })
 
+  it("advances to the fallback without a retry when the fitted output ceiling is too small for a review", async () => {
+    // 262,144 window − 240,000 input − 8,192 margin = 13,952, under the 16,384 floor
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 240_000 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
+  })
+
   it("does not lower the ceiling when the context-overflow 400 was the model's last attempt", async () => {
     const stub = makeSdkStub({
       sendResponses: [
