@@ -529,8 +529,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(stubs.fetchPullRequestCalls).toHaveLength(1)
-      expect(stubs.fetchPullRequestCalls[0]).toEqual({ prNumber: 42 })
+      expect(stubs.fetchPullRequestCalls).toEqual([{ prNumber: 42 }])
     })
   })
 
@@ -4544,13 +4543,11 @@ describe("createPromptedGenerateFindings", () => {
       priorBotComments: [],
     })
 
-    expect(requestReviewCalls).toHaveLength(1)
-    expect(requestReviewCalls[0]).toEqual(
-      expect.objectContaining({
-        model: "test/primary",
-        fallbackModel: "test/fallback",
-      }),
-    )
+    // The prompts carry a random delimiter nonce, so each call is mapped to
+    // the ladder models under test
+    expect(
+      requestReviewCalls.map(({ model, fallbackModel }) => ({ model, fallbackModel })),
+    ).toEqual([{ model: "test/primary", fallbackModel: "test/fallback" }])
   })
 
   it("includes annotated diff in the user prompt", async () => {
