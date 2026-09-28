@@ -4550,7 +4550,9 @@ describe("createPromptedGenerateFindings", () => {
     })
 
     const call = first(requestReviewCalls)
-    expect(call.userPrompt).toContain("src/greeter.ts")
+    expect(call.userPrompt).toContain(
+      `note="line numbers shown are new-file line numbers">\n${annotated}\n</diff-`,
+    )
   })
 
   it("labels the user prompt's conventions section with the review context's conventions file", async () => {
