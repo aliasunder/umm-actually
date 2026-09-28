@@ -1216,6 +1216,24 @@ describe("requestReview", () => {
     expect(logger.messages.filter((entry) => entry.message === CEILING_RETRY_LOG)).toEqual([])
   })
 
+  it("keeps the full ceiling when a non-400 error carries context-overflow wording", async () => {
+    const overflowWordedGatewayError = Object.assign(
+      makeContextOverflowError({ contextLength: 262_144, inputTokens: 135_762 }),
+      { statusCode: 502 },
+    )
+    const stub = makeSdkStub({
+      sendResponses: [{ error: overflowWordedGatewayError }, { value: acceptedChatResult }],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+    ])
+  })
+
   it("advances to the fallback without a retry on a 400 that is not a context overflow", async () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: makeStatusError(400) }, { value: acceptedChatResult }],
