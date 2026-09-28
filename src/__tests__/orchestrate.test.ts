@@ -113,6 +113,11 @@ const expectedReviewSummary = (overrides: Partial<ReviewSummaryStats> = {}): str
   renderReviewSummary({
     prContext: fixturePrContext,
     conventionsFile: "AGENTS.md",
+    conventionsCoverage: {
+      status: "full",
+      characterCap: 32_000,
+      totalCharacters: "# Test conventions".length,
+    },
     phasesCompleted: ["combined"],
     phasesIncomplete: [],
     changedFilePaths: [fixtureChangedFile.path],
@@ -173,6 +178,7 @@ const expectedStatus = ({
   totalCount,
   droppedByCap = [],
   contextNotes = [],
+  conventionsNote,
   incompletePhases = [],
 }: {
   isFirstRun: boolean
@@ -181,6 +187,7 @@ const expectedStatus = ({
   totalCount: number
   droppedByCap?: Finding[]
   contextNotes?: string[]
+  conventionsNote?: string
   incompletePhases?: string[]
 }) => ({
   prNumber: 7,
@@ -194,6 +201,7 @@ const expectedStatus = ({
     droppedByCap,
     model: "test/model",
     contextNotes,
+    ...(conventionsNote && { conventionsNote }),
     incompletePhases,
   }),
 })
@@ -507,6 +515,7 @@ describe("orchestrate", () => {
         phases: [],
         reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
+        conventionsNote: null,
       })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(0)
@@ -545,6 +554,7 @@ describe("orchestrate", () => {
         phases: [],
         reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
+        conventionsNote: null,
       })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
@@ -574,6 +584,7 @@ describe("orchestrate", () => {
         phases: [],
         reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
+        conventionsNote: null,
       })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
@@ -602,6 +613,7 @@ describe("orchestrate", () => {
         phases: [],
         reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
+        conventionsNote: null,
       })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(1)
@@ -635,6 +647,7 @@ describe("orchestrate", () => {
         phases: [],
         reviewSummaryMarkdown: null,
         costSummaryMarkdown: null,
+        conventionsNote: null,
       })
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.readChangedFilesCalls).toHaveLength(0)
@@ -892,6 +905,7 @@ describe("orchestrate", () => {
         phases: [{ phase: "combined", status: "completed" }],
         reviewSummaryMarkdown: expectedReviewSummary(),
         costSummaryMarkdown: expectedCostSummary,
+        conventionsNote: null,
       })
 
       expect(stubs.submitReviewCalls).toHaveLength(0)
@@ -1890,6 +1904,403 @@ describe("orchestrate", () => {
       expect(reviewContext.conventions).toBe(overCapConventions)
     })
 
+    describe("truncation reporting", () => {
+      // The default 8000-token cap is 32,000 characters; one more truncates
+      const overCapConventions = "c".repeat(32_001)
+      const truncationWarning = "conventions file truncated with no full copy in context"
+      const noCopyNote =
+        "Conventions file `AGENTS.md` was truncated to its first 32000 of 32001 characters, and no full copy reached the model — raise `conventions_budget_tokens` or list the file in `priority_docs`."
+      const listedNoCopyNote =
+        "Conventions file `AGENTS.md` was truncated to its first 32000 of 32001 characters, and no full copy reached the model — raise `conventions_budget_tokens`; the file is listed in `priority_docs` but did not fit or was excluded."
+      const crossingNote =
+        "Conventions file `AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that change neither it nor a file it imports will see only the first 32000 characters."
+
+      const truncationWarnings = (logger: ReturnType<typeof createTestLogger>) => {
+        return logger.messages.filter((entry) => entry.message === truncationWarning)
+      }
+      const conventionsLine = (reviewSummaryMarkdown: string | null): string | undefined => {
+        return reviewSummaryMarkdown?.split("\n")[4]
+      }
+      const expectedCheckSummary = (note: string | null): string => {
+        const noteSection = note ? `\n\n${note}` : ""
+        return `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.${noteSection}\n\n${expectedCostSummary}`
+      }
+
+      it("warns and reports on every surface when no channel carried the full file", async () => {
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: [] },
+          contextReader: { readConventions: async () => overCapConventions },
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(first(stubs.generateFindingsCalls).conventions).toBe(overCapConventions)
+        expect(truncationWarnings(logger)).toEqual([
+          {
+            level: "warn",
+            message: truncationWarning,
+            data: {
+              conventionsFile: "AGENTS.md",
+              conventionsCharacters: 32_001,
+              conventionsCharacterCap: 32_000,
+            },
+          },
+        ])
+        expect(stubs.upsertSummaryCommentCalls).toEqual([
+          expectedStatus({
+            isFirstRun: true,
+            postedCount: expectedSelection.selected.length,
+            totalCount: expectedSelection.selected.length,
+            conventionsNote: noCopyNote,
+          }),
+        ])
+        expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
+          "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; no full copy reached the model)",
+        )
+        expect(result.conventionsNote).toBe(noCopyNote)
+        expect(first(stubs.updateCheckRunCalls).output).toEqual({
+          title: `${expectedSelection.selected.length} findings`,
+          summary: expectedCheckSummary(noCopyNote),
+        })
+      })
+
+      it("stays quiet when an early priority-doc read carried the full file", async () => {
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: ["AGENTS.md"] },
+          contextReader: {
+            readConventions: async () => overCapConventions,
+            readPriorityDocs: async (params) => ({
+              files: [
+                { path: "AGENTS.md", content: overCapConventions, includedAs: "full" as const },
+              ],
+              remainingTokens: params.budgetTokens - 8001,
+            }),
+          },
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(first(stubs.generateFindingsCalls).conventions).toBe(
+          "(conventions file included in full as priority documentation below — ground convention findings in that copy)",
+        )
+        expect(truncationWarnings(logger)).toEqual([])
+        expect(stubs.upsertSummaryCommentCalls).toEqual([
+          expectedStatus({
+            isFirstRun: true,
+            postedCount: expectedSelection.selected.length,
+            totalCount: expectedSelection.selected.length,
+          }),
+        ])
+        expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
+          "**Conventions:** AGENTS.md (sent in full as a priority doc; its 32001 characters exceed the 32000-character section cap)",
+        )
+        expect(result.conventionsNote).toBeNull()
+        expect(first(stubs.updateCheckRunCalls).output).toEqual({
+          title: `${expectedSelection.selected.length} findings`,
+          summary: expectedCheckSummary(null),
+        })
+      })
+
+      it("warns without suggesting priority_docs when the listed file was not read", async () => {
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: ["./AGENTS.md"] },
+          contextReader: { readConventions: async () => overCapConventions },
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(first(stubs.generateFindingsCalls).conventions).toBe(overCapConventions)
+        expect(truncationWarnings(logger)).toEqual([
+          {
+            level: "warn",
+            message: truncationWarning,
+            data: {
+              conventionsFile: "AGENTS.md",
+              conventionsCharacters: 32_001,
+              conventionsCharacterCap: 32_000,
+            },
+          },
+        ])
+        expect(stubs.upsertSummaryCommentCalls).toEqual([
+          expectedStatus({
+            isFirstRun: true,
+            postedCount: expectedSelection.selected.length,
+            totalCount: expectedSelection.selected.length,
+            contextNotes: [
+              "Priority docs not included: `./AGENTS.md` (missing, unreadable, or over budget)",
+            ],
+            conventionsNote: listedNoCopyNote,
+          }),
+        ])
+        expect(result.conventionsNote).toBe(listedNoCopyNote)
+      })
+
+      it("warns ahead without a log warning when this PR's changed file carried the full text", async () => {
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: [] },
+          contextReader: {
+            readConventions: async () => overCapConventions,
+            readChangedFiles: async () => ({
+              files: [
+                fixtureChangedFile,
+                { path: "AGENTS.md", content: overCapConventions, includedAs: "full" as const },
+              ],
+              remainingTokens: 10_000,
+            }),
+          },
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(first(stubs.generateFindingsCalls).conventions).toBe(overCapConventions)
+        expect(truncationWarnings(logger)).toEqual([])
+        expect(stubs.upsertSummaryCommentCalls).toEqual([
+          expectedStatus({
+            isFirstRun: true,
+            postedCount: expectedSelection.selected.length,
+            totalCount: expectedSelection.selected.length,
+            conventionsNote: crossingNote,
+          }),
+        ])
+        expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
+          "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; full copy in changed files)",
+        )
+        expect(result.conventionsNote).toBe(crossingNote)
+        expect(first(stubs.updateCheckRunCalls).output).toEqual({
+          title: `${expectedSelection.selected.length} findings`,
+          summary: expectedCheckSummary(crossingNote),
+        })
+      })
+
+      it("warns ahead when a related-file copy carried the full text", async () => {
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: [] },
+          contextReader: {
+            readConventions: async () => overCapConventions,
+            findRelatedFiles: async () => ({
+              files: [
+                { path: "AGENTS.md", content: overCapConventions, includedAs: "full" as const },
+              ],
+              excludedByCapPaths: [],
+            }),
+          },
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(truncationWarnings(logger)).toEqual([])
+        expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
+          "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; full copy in related files)",
+        )
+        expect(result.conventionsNote).toBe(crossingNote)
+        expect(stubs.upsertSummaryCommentCalls).toEqual([
+          expectedStatus({
+            isFirstRun: true,
+            postedCount: expectedSelection.selected.length,
+            totalCount: expectedSelection.selected.length,
+            conventionsNote: crossingNote,
+          }),
+        ])
+        expect(first(stubs.updateCheckRunCalls).output).toEqual({
+          title: `${expectedSelection.selected.length} findings`,
+          summary: expectedCheckSummary(crossingNote),
+        })
+      })
+
+      it("warns ahead when the PR adds the conventions file", async () => {
+        const addedConventionsDiff = `${sampleDiff}diff --git a/AGENTS.md b/AGENTS.md\nnew file mode 100644\nindex 0000000..4444444\n--- /dev/null\n+++ b/AGENTS.md\n@@ -0,0 +1 @@\n+# Conventions\n`
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "./AGENTS.md", priorityDocs: [] },
+          githubClient: {
+            fetchDiff: async () => ({ kind: "ok" as const, diff: addedConventionsDiff }),
+          },
+          contextReader: { readConventions: async () => overCapConventions },
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(truncationWarnings(logger)).toEqual([])
+        expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
+          "**Conventions:** ./AGENTS.md (truncated to 32000 of 32001 characters; full copy in the diff of the added file)",
+        )
+        const addedFileNote =
+          "Conventions file `./AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that change neither it nor a file it imports will see only the first 32000 characters."
+        expect(result.conventionsNote).toBe(addedFileNote)
+        expect(stubs.upsertSummaryCommentCalls).toEqual([
+          expectedStatus({
+            isFirstRun: true,
+            postedCount: expectedSelection.selected.length,
+            totalCount: expectedSelection.selected.length,
+            conventionsNote: addedFileNote,
+          }),
+        ])
+        expect(first(stubs.updateCheckRunCalls).output).toEqual({
+          title: `${expectedSelection.selected.length} findings`,
+          summary: expectedCheckSummary(addedFileNote),
+        })
+      })
+
+      it("does not treat an added binary conventions file's diff as a full copy", async () => {
+        const binaryConventionsDiff = `${sampleDiff}diff --git a/AGENTS.md b/AGENTS.md\nnew file mode 100644\nindex 0000000..4444444\nBinary files /dev/null and b/AGENTS.md differ\n`
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: [] },
+          githubClient: {
+            fetchDiff: async () => ({ kind: "ok" as const, diff: binaryConventionsDiff }),
+          },
+          contextReader: { readConventions: async () => overCapConventions },
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(truncationWarnings(logger)).toEqual([
+          {
+            level: "warn",
+            message: truncationWarning,
+            data: {
+              conventionsFile: "AGENTS.md",
+              conventionsCharacters: 32_001,
+              conventionsCharacterCap: 32_000,
+            },
+          },
+        ])
+        expect(result.conventionsNote).toBe(noCopyNote)
+      })
+
+      it("does not treat a modified conventions file's diff as a full copy", async () => {
+        const modifiedConventionsDiff = `${sampleDiff}diff --git a/AGENTS.md b/AGENTS.md\nindex 1111111..4444444 100644\n--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -1 +1 @@\n-# Old conventions\n+# Conventions\n`
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: [] },
+          githubClient: {
+            fetchDiff: async () => ({ kind: "ok" as const, diff: modifiedConventionsDiff }),
+          },
+          contextReader: { readConventions: async () => overCapConventions },
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(truncationWarnings(logger)).toEqual([
+          {
+            level: "warn",
+            message: truncationWarning,
+            data: {
+              conventionsFile: "AGENTS.md",
+              conventionsCharacters: 32_001,
+              conventionsCharacterCap: 32_000,
+            },
+          },
+        ])
+        expect(result.conventionsNote).toBe(noCopyNote)
+      })
+
+      it("carries the note into the check summary when the review posts no findings", async () => {
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: [] },
+          contextReader: { readConventions: async () => overCapConventions },
+          fixtureResult: { review: { analysis: "clean", findings: [] } },
+        })
+        const logger = createTestLogger()
+
+        await orchestrate(stubs.deps, logger)
+
+        expect(first(stubs.updateCheckRunCalls).output).toEqual({
+          title: "No findings above threshold",
+          summary: `Reviewed with \`test/model\` — no findings above threshold.\n\n${noCopyNote}\n\n${expectedCostSummary}`,
+        })
+      })
+
+      it("logs the suppression with the conventions character counts", async () => {
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: ["AGENTS.md"] },
+          contextReader: {
+            readConventions: async () => overCapConventions,
+            readPriorityDocs: async (params) => ({
+              files: [
+                { path: "AGENTS.md", content: overCapConventions, includedAs: "full" as const },
+              ],
+              remainingTokens: params.budgetTokens - 8001,
+            }),
+          },
+        })
+        const logger = createTestLogger()
+
+        await orchestrate(stubs.deps, logger)
+
+        const suppressionMessage =
+          "conventions file read in full by priority-doc channel — suppressing truncated conventions section to avoid duplication"
+        expect(logger.messages.filter((entry) => entry.message === suppressionMessage)).toEqual([
+          {
+            level: "info",
+            message: suppressionMessage,
+            data: {
+              conventionsFile: "AGENTS.md",
+              conventionsCharacters: 32_001,
+              conventionsCharacterCap: 32_000,
+            },
+          },
+        ])
+      })
+    })
+
+    describe("context log conventions entry", () => {
+      const loggedConventionsEntries = (logger: ReturnType<typeof createTestLogger>): unknown[] => {
+        return logger.messages
+          .filter((entry) => entry.message === "context sent to model")
+          .map((entry) => entry.data.conventionsFile)
+      }
+
+      it("names the configured file when the conventions section is sent", async () => {
+        const stubs = makeOrchestrateDeps({ config: { conventionsFile: "AGENTS.md" } })
+        const logger = createTestLogger()
+
+        await orchestrate(stubs.deps, logger)
+
+        expect(loggedConventionsEntries(logger)).toEqual(["AGENTS.md"])
+      })
+
+      it("marks the file as suppressed when priority docs carried the full copy", async () => {
+        const overCapConventions = "c".repeat(32_001)
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md", priorityDocs: ["AGENTS.md"] },
+          contextReader: {
+            readConventions: async () => overCapConventions,
+            readPriorityDocs: async (params) => ({
+              files: [
+                { path: "AGENTS.md", content: overCapConventions, includedAs: "full" as const },
+              ],
+              remainingTokens: params.budgetTokens - 8001,
+            }),
+          },
+        })
+        const logger = createTestLogger()
+
+        await orchestrate(stubs.deps, logger)
+
+        expect(loggedConventionsEntries(logger)).toEqual([
+          "AGENTS.md (suppressed — full copy in priority docs)",
+        ])
+      })
+
+      it("reports not found when the conventions file is missing", async () => {
+        const stubs = makeOrchestrateDeps({
+          config: { conventionsFile: "AGENTS.md" },
+          contextReader: { readConventions: async () => null },
+        })
+        const logger = createTestLogger()
+
+        await orchestrate(stubs.deps, logger)
+
+        expect(loggedConventionsEntries(logger)).toEqual(["not found"])
+      })
+    })
+
     it("omits the conventions file from the priority-doc exclusions when it is not found", async () => {
       const stubs = makeOrchestrateDeps({
         config: { conventionsFile: "AGENTS.md", priorityDocs: ["README.md"] },
@@ -2308,6 +2719,7 @@ describe("orchestrate", () => {
           posted: 1,
         }),
         costSummaryMarkdown: expectedCostSummary,
+        conventionsNote: null,
       })
 
       expect(stubs.postFindingsReviewCalls).toEqual([
@@ -2372,6 +2784,7 @@ describe("orchestrate", () => {
           posted: 1,
         }),
         costSummaryMarkdown: expectedCostSummary,
+        conventionsNote: null,
       })
       expect(stubs.postIssueCommentCalls).toEqual([
         {
@@ -2417,6 +2830,7 @@ describe("orchestrate", () => {
           posted: 1,
         }),
         costSummaryMarkdown: expectedCostSummary,
+        conventionsNote: null,
       })
       expect(stubs.postIssueCommentCalls).toEqual([])
       expect(stubs.postFindingsReviewCalls).toEqual([
@@ -3405,6 +3819,7 @@ describe("staged phases", () => {
         attempts: splitAttempts,
         modelUsed: "test/model",
       }),
+      conventionsNote: null,
     })
     expect(stubs.postFindingsReviewCalls).toEqual([
       expectedFindingsReview(expectedSelection.selected),
@@ -3511,6 +3926,7 @@ describe("staged phases", () => {
         phases: [{ phase: "combined", status: "completed" }],
         reviewSummaryMarkdown: expectedReviewSummary(),
         costSummaryMarkdown: expectedCost,
+        conventionsNote: null,
       })
       expect(stubs.upsertSummaryCommentCalls).toEqual([
         expectedStatus({
@@ -3700,6 +4116,7 @@ describe("staged phases", () => {
         duplicatesAcrossPhases: fixtureReviewResponse.findings.length,
       }),
       costSummaryMarkdown: expectedCost,
+      conventionsNote: null,
     })
     expect(stubs.postFindingsReviewCalls).toEqual([
       expectedFindingsReview(expectedSelection.selected),
@@ -3869,6 +4286,48 @@ describe("staged phases", () => {
     ])
   })
 
+  it("lists each attempted model once in the failure summary", async () => {
+    const primaryTimeout: ModelAttempt = {
+      model: "test/model",
+      outcome: "timeout",
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      errorSummary: "no response within 900s",
+    }
+    const fallbackTimeout: ModelAttempt = { ...primaryTimeout, model: "fallback/model" }
+    const attempts = [primaryTimeout, primaryTimeout, fallbackTimeout]
+    const stubs = makeOrchestrateDeps({
+      generateFindings: async () => {
+        throw new ReviewRequestError({
+          message: "review request failed after 3 attempt(s)",
+          attempts,
+          aborted: false,
+        })
+      },
+    })
+    const logger = createTestLogger()
+
+    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+      "every review phase failed: combined: [ReviewRequestError]: review request failed after 3 attempt(s)",
+    )
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "failure",
+        output: {
+          title: "Error — review did not complete",
+          summary: `[AllPhasesFailedError]: every review phase failed: combined: [ReviewRequestError]: review request failed after 3 attempt(s)\n\n${renderCostSummary(
+            {
+              attempts: attempts.map((attempt) => ({ ...attempt, phase: "combined" })),
+              modelUsed: "test/model, fallback/model",
+            },
+          )}`,
+        },
+      },
+    ])
+  })
+
   it("attributes a cross-phase winner to its routed model while reporting all run models", async () => {
     const fixtureLowFinding = fixtureReviewResponse.findings.find((finding) => finding.line === 3)
 
@@ -3965,6 +4424,7 @@ describe("staged phases", () => {
         posted: 0,
       }),
       costSummaryMarkdown: expectedCost,
+      conventionsNote: null,
     })
     expect(stubs.updateCheckRunCalls).toEqual([
       {

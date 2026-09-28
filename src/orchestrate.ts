@@ -34,6 +34,8 @@ import {
 } from "./review/comment-mapping.js"
 import {
   buildContextNotes,
+  buildConventionsNote,
+  classifyConventionsCoverage,
   findAbsentPriorityDocs,
   findInContextPriorityDocs,
 } from "./review/context-notes.js"
@@ -96,6 +98,8 @@ export type OrchestrateResult = {
   phases: PhaseStatus[]
   reviewSummaryMarkdown: string | null
   costSummaryMarkdown: string | null
+  /** PR-facing line when the conventions file was truncated; null otherwise. */
+  conventionsNote: string | null
 }
 
 export type OrchestrateDeps = {
@@ -180,11 +184,16 @@ const fetchIssueCommentState = async (
 ): Promise<IssueCommentState> => {
   try {
     const comments = await githubClient.fetchBotIssueComments({ prNumber })
-    const findingComments = comments.filter((comment) => !comment.body.startsWith(STATUS_ANCHOR))
+
+    // startsWith, not includes: a finding comment's model-generated text
+    // could quote the marker mid-body and misclassify the run as a re-run.
+    const isStatusComment = (comment: { body: string }): boolean => {
+      return comment.body.startsWith(STATUS_ANCHOR)
+    }
+    const findingComments = comments.filter((comment) => !isStatusComment(comment))
+
     return {
-      // startsWith, not includes: a finding comment's model-generated text
-      // could quote the marker mid-body and misclassify the run as a re-run.
-      statusCommentExists: comments.length > findingComments.length,
+      statusCommentExists: comments.some(isStatusComment),
       // Issue comments carry no line position — extractAnchors falls back
       // to the line embedded in the anchor key
       anchors: extractAnchors(
@@ -263,6 +272,7 @@ const SKIPPED_RESULT_BASE: Omit<OrchestrateResult, "reviewUrl" | "skippedReason"
   phases: [],
   reviewSummaryMarkdown: null,
   costSummaryMarkdown: null,
+  conventionsNote: null,
 }
 
 type CheckRunHandle = { checkRunId: number } | null
@@ -326,12 +336,15 @@ const completeCheckRunSafely = async (
 }
 
 /** Maps the pipeline outcome to the check's conclusion and details page.
- *  The conclusion grades the run, not the code: a completed review is
- *  `success` whether or not it posted findings (the count lives in the
- *  title), a skip is `neutral` (no review happened), and `failure` is
- *  reserved for the pipeline itself erroring. A review that lost some of
- *  its phases still ran and posted, so it stays `success` and the title
- *  carries the gap. */
+ *  The conclusion grades the run, not the code:
+ *  - `success` for a completed review, with or without findings (the count
+ *    lives in the title). A review that lost some phases still ran and
+ *    posted, so it stays `success` and the title carries the gap.
+ *  - `neutral` for a skip — no review happened.
+ *  - `failure` only when the pipeline itself errors.
+ *
+ *  Only the `success` summaries carry the conventions-truncation note; a
+ *  skip never builds a prompt, so it has no note. */
 const resolveCheckRunCompletion = ({
   result,
   costSummaryMarkdown,
@@ -362,13 +375,14 @@ const resolveCheckRunCompletion = ({
       : `\n\nIncomplete phases: ${incompletePhases
           .map((phase) => `\`${phase.phase}\` (${phase.reason})`)
           .join(", ")}`
+  const conventionsSection = result.conventionsNote ? `\n\n${result.conventionsNote}` : ""
 
   if (result.findingsCount === 0) {
     return {
       conclusion: "success",
       output: {
         title: `No findings above threshold${incompleteSuffix}`,
-        summary: `Reviewed with \`${result.modelUsed}\` — no findings above threshold.${incompleteSection}${costSection}`,
+        summary: `Reviewed with \`${result.modelUsed}\` — no findings above threshold.${incompleteSection}${conventionsSection}${costSection}`,
       },
     }
   }
@@ -378,7 +392,7 @@ const resolveCheckRunCompletion = ({
     conclusion: "success",
     output: {
       title: `${findingsLabel}${incompleteSuffix}`,
-      summary: `Reviewed with \`${result.modelUsed}\` — ${findingsLabel} posted.${incompleteSection}${costSection}`,
+      summary: `Reviewed with \`${result.modelUsed}\` — ${findingsLabel} posted.${incompleteSection}${conventionsSection}${costSection}`,
     },
   }
 }
@@ -461,12 +475,33 @@ const describePipelineFailure = ({
   if (!costSummary || !(pipelineError instanceof AllPhasesFailedError)) {
     return description
   }
+
   const attempts = pipelineError.outcomes.flatMap(phaseAttempts)
 
   if (attempts.length === 0) return description
-  const models = [...new Set(attempts.map((attempt) => attempt.model))]
-  const modelUsed = models.length > 0 ? models.join(", ") : "none"
+
+  const modelUsed = [...new Set(attempts.map((attempt) => attempt.model))].join(", ")
+
   return `${description}\n\n${renderCostSummary({ attempts, modelUsed })}`
+}
+
+/** The conventions entry of the "context sent to model" log. */
+const describeConventionsContext = ({
+  conventionsFile,
+  conventionsFound,
+  conventionsReadInFullByPriorityDocs,
+}: {
+  conventionsFile: string
+  conventionsFound: boolean
+  conventionsReadInFullByPriorityDocs: boolean
+}): string => {
+  if (!conventionsFound) return "not found"
+
+  if (conventionsReadInFullByPriorityDocs) {
+    return `${conventionsFile} (suppressed — full copy in priority docs)`
+  }
+
+  return conventionsFile
 }
 
 const sumBy = <Item>(items: Item[], valueOf: (item: Item) => number): number => {
@@ -595,8 +630,8 @@ const runReviewPipeline = async (
     .flatMap((file) => {
       const toPath = newFilePath(file)
       const fromPath = file.from
-      // parse-diff: from is undefined for binary files, "/dev/null" for
-      // added files — neither is a pre-rename path worth tracing
+      // parse-diff: from can be undefined for a binary file and is "/dev/null"
+      // for an added file (binary or not) — neither is a pre-rename path worth tracing
       const isRename =
         toPath !== null && fromPath && fromPath !== "/dev/null" && fromPath !== file.to
       return isRename ? [toPath, fromPath] : [toPath]
@@ -645,8 +680,14 @@ const runReviewPipeline = async (
     }),
   ]
 
-  // The early read runs before changed files can spend the budget. Only the
-  // tokens these docs actually use come out of the changed-file budget.
+  // Priority-doc budget, in read order:
+  // 1. Early read: docs spend up to the floor limit before changed files read.
+  // 2. Changed files get the file budget minus what the early read spent.
+  // 3. If a doc is still missing, the unspent floor is held back from related files.
+  // 4. Late read: missing docs retry with whatever changed and related files left.
+  //
+  // Zero when no doc needs the early read or the diff left no floor — either
+  // way the read is skipped and spends nothing.
   const earlyPriorityDocBudget = earlyPriorityDocsInReadOrder.length > 0 ? priorityDocFloorLimit : 0
   const earlyPriorityDocsResult =
     earlyPriorityDocBudget > 0
@@ -739,23 +780,64 @@ const runReviewPipeline = async (
   )
   const docRemainingTokens = latePriorityDocsResult.remainingTokens
 
+  // A new conventions file's diff hunks carry every line of it. A binary file's
+  // diff has no hunks, so it carries nothing.
+  const conventionsAddedInDiff = reviewableFiles.some((file) => {
+    const toPath = newFilePath(file)
+    return (
+      Boolean(file.new) &&
+      file.chunks.length > 0 &&
+      toPath !== null &&
+      posix.normalize(toPath) === posix.normalize(config.conventionsFile)
+    )
+  })
+
+  // Repeats conventionsAlreadyRenderedInFull's check as the `full` status; the
+  // classification runs here because its channel lookup needs the reads above
+  const conventionsCoverage = classifyConventionsCoverage({
+    conventions,
+    conventionsFile: config.conventionsFile,
+    conventionsBudgetTokens: config.conventionsBudgetTokens,
+    priorityDocFiles,
+    changedFiles,
+    relatedFiles,
+    conventionsAddedInDiff,
+  })
+  const conventionsNote = buildConventionsNote({
+    conventionsCoverage,
+    conventionsFile: config.conventionsFile,
+    // The raw input, not reviewablePriorityDocs: a listing the diff exclusion
+    // dropped still means the operator listed the file, so the note must not
+    // advise listing it
+    listedInPriorityDocs: config.priorityDocs.some((docPath) => {
+      return posix.normalize(docPath) === posix.normalize(config.conventionsFile)
+    }),
+  })
+
+  // Logged before any model call so the warning survives a run that fails later
+  if (conventionsCoverage.status === "truncated" && !conventionsCoverage.fullCopyChannel) {
+    logger.warn("conventions file truncated with no full copy in context", {
+      conventionsFile: config.conventionsFile,
+      conventionsCharacters: conventionsCoverage.totalCharacters,
+      conventionsCharacterCap: conventionsCoverage.characterCap,
+    })
+  }
+
   // When the conventions section truncated but priority docs read the full
   // file, suppress the truncated head — the full copy in the priority-docs
-  // section is strictly better, and rendering both wastes ~8K tokens.
+  // section is strictly better, and rendering both spends the whole
+  // conventions budget on a duplicate.
   const conventionsReadInFullByPriorityDocs =
-    conventions !== null &&
-    !conventionsAlreadyRenderedInFull &&
-    priorityDocFiles.some(
-      (file) => posix.normalize(file.path) === posix.normalize(config.conventionsFile),
-    )
+    conventionsCoverage.status === "truncated" &&
+    conventionsCoverage.fullCopyChannel === "priority-docs"
 
   if (conventionsReadInFullByPriorityDocs) {
     logger.info(
       "conventions file read in full by priority-doc channel — suppressing truncated conventions section to avoid duplication",
       {
         conventionsFile: config.conventionsFile,
-        conventionsTokenCap: config.conventionsBudgetTokens,
-        conventionsLength: conventions.length,
+        conventionsCharacters: conventionsCoverage.totalCharacters,
+        conventionsCharacterCap: conventionsCoverage.characterCap,
       },
     )
   }
@@ -769,6 +851,9 @@ const runReviewPipeline = async (
         changedPaths,
         budgetTokens: docRemainingTokens,
         conventionsFile: config.conventionsFile,
+        // Every configured priority doc, read or not: the priority-doc channel
+        // owns those paths, so mention-matching never sends a second copy or
+        // retries a doc that channel left out
         excludePaths: [...config.priorityDocs, ...diffExcludedPaths],
       })
     : { files: [], excludedByCapPaths: [] }
@@ -791,11 +876,11 @@ const runReviewPipeline = async (
   ]
 
   logger.info("context sent to model", {
-    conventionsFile: conventions
-      ? conventionsReadInFullByPriorityDocs
-        ? `${config.conventionsFile} (suppressed — full copy in priority docs)`
-        : config.conventionsFile
-      : "not found",
+    conventionsFile: describeConventionsContext({
+      conventionsFile: config.conventionsFile,
+      conventionsFound: conventions !== null,
+      conventionsReadInFullByPriorityDocs,
+    }),
     changedFilesCount: changedFiles.length,
     changedFilePaths: changedFiles.map((file) => file.path).join(", "),
     relatedFilesCount: relatedFiles.length,
@@ -1015,6 +1100,7 @@ const runReviewPipeline = async (
     droppedByCap,
     model: modelUsed,
     contextNotes,
+    ...(conventionsNote && { conventionsNote }),
     incompletePhases: incompletePhaseIds(phases),
     reviewDeadlineExceeded: coverageLostToReviewDeadline,
   })
@@ -1032,7 +1118,8 @@ const runReviewPipeline = async (
 
   const reviewSummaryMarkdown = renderReviewSummary({
     prContext,
-    conventionsFile: conventions ? config.conventionsFile : null,
+    conventionsFile: config.conventionsFile,
+    conventionsCoverage,
     phasesCompleted: completedPhases.map((outcome) => outcome.phase.id),
     phasesIncomplete: incompletePhaseIds(phases),
     reviewDeadlineExceeded: coverageLostToReviewDeadline,
@@ -1067,6 +1154,7 @@ const runReviewPipeline = async (
     phases,
     reviewSummaryMarkdown,
     costSummaryMarkdown,
+    conventionsNote,
   }
 }
 

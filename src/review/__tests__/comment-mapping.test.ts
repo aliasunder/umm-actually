@@ -531,6 +531,26 @@ describe("buildStatusComment", () => {
     )
   })
 
+  it("renders the conventions note as a visible line after the cap note and before context notes", () => {
+    const body = buildStatusComment({
+      sha: "abc123def456abc123def456abc123def456abc1",
+      isFirstRun: true,
+      postedCount: 1,
+      unpostedCount: 0,
+      totalCount: 1,
+      droppedByCap: [makeFinding({ file: "src/greeter.ts", line: 5 })],
+      model: "anthropic/claude-sonnet-4-6",
+      contextNotes: [
+        "Priority docs not included: `README.md` (missing, unreadable, or over budget)",
+      ],
+      conventionsNote: "Conventions file `AGENTS.md` was truncated.",
+    })
+
+    expect(body).toBe(
+      `${STATUS_ANCHOR}\n\n**umm-actually** reviewed at \`abc123d\`\n\n1 new finding(s) posted (1 tracked finding(s) across all runs).\n\n_1 lower-severity finding(s) omitted by the max_findings cap: \`src/greeter.ts:5\`_\n\n_Conventions file \`AGENTS.md\` was truncated._\n\n<details>\n<summary>Context notes</summary>\n\n- Priority docs not included: \`README.md\` (missing, unreadable, or over budget)\n\n</details>\n\n---\n*umm-actually · anthropic/claude-sonnet-4-6*`,
+    )
+  })
+
   it("renders a collapsible context notes section when contextNotes are provided", () => {
     const body = buildStatusComment({
       sha: "abc123def456abc123def456abc123def456abc1",
