@@ -125,8 +125,8 @@ them with their real file and line; they are posted as standalone PR comments
 instead of inline.
 
 File anchoring: when you fill "file", copy the exact path="…" attribute of one
-file block or the path in one "=== path ===" diff header — nothing appended,
-nothing paraphrased. Boundary: a finding on a path that has no file block and
+file block or the conventions section, or the path in one "=== path ===" diff
+header — nothing appended, nothing paraphrased. Boundary: a finding on a path that has no file block and
 no diff header is dropped before posting, so when the defect lives in a file
 you were not given, report it against the provided file that calls into it.
 
@@ -207,6 +207,7 @@ const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
 export const buildUserPrompt = ({
   prContext,
   conventions,
+  conventionsFile,
   conventionsBudgetTokens,
   changedFiles,
   relatedFiles,
@@ -218,6 +219,8 @@ export const buildUserPrompt = ({
 }: {
   prContext: PrContext
   conventions: string | null
+  /** Repo-relative path of the conventions file — the section's path attribute. */
+  conventionsFile: string
   conventionsBudgetTokens: number
   changedFiles: PromptFile[]
   relatedFiles: PromptFile[]
@@ -247,7 +250,7 @@ export const buildUserPrompt = ({
   const conventionsSection =
     conventions === null
       ? `<${conventionsTag}>\n(no conventions file found in this repository)\n</${conventionsTag}>`
-      : `<${conventionsTag}>\n${truncateToTokenCap(conventions, conventionsBudgetTokens)}\n</${conventionsTag}>`
+      : `<${conventionsTag} path="${escapeAttributeValue(conventionsFile)}">\n${truncateToTokenCap(conventions, conventionsBudgetTokens)}\n</${conventionsTag}>`
 
   const changedFilesSection = changedFiles
     .map((changedFile) => renderFileBlock(changedFile, delimiterNonce))

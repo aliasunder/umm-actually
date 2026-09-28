@@ -22,6 +22,7 @@ const prContext: PrContext = {
 const makeUserPromptParts = () => ({
   prContext,
   conventions: "# AGENTS.md\n\nUse explicit names.",
+  conventionsFile: "AGENTS.md",
   conventionsBudgetTokens: 8_000,
   changedFiles: [
     {
@@ -82,8 +83,8 @@ describe("buildSystemPrompt", () => {
         "instead of inline.",
         "",
         'File anchoring: when you fill "file", copy the exact path="…" attribute of one',
-        'file block or the path in one "=== path ===" diff header — nothing appended,',
-        "nothing paraphrased. Boundary: a finding on a path that has no file block and",
+        'file block or the conventions section, or the path in one "=== path ===" diff',
+        "header — nothing appended, nothing paraphrased. Boundary: a finding on a path that has no file block and",
         "no diff header is dropped before posting, so when the defect lives in a file",
         "you were not given, report it against the provided file that calls into it.",
       ].join("\n"),
@@ -94,7 +95,7 @@ describe("buildSystemPrompt", () => {
     const systemPrompt = buildSystemPrompt({ phase: combinedPhase }).replace(/\s+/g, " ")
 
     expect(systemPrompt).toContain(
-      'copy the exact path="…" attribute of one file block or the path in one "=== path ===" diff header — nothing appended, nothing paraphrased',
+      'copy the exact path="…" attribute of one file block or the conventions section, or the path in one "=== path ===" diff header — nothing appended, nothing paraphrased',
     )
     expect(systemPrompt).toContain(
       "a finding on a path that has no file block and no diff header is dropped before posting",
@@ -251,7 +252,7 @@ describe("buildUserPrompt", () => {
     })
 
     const metadataIndex = userPrompt.indexOf("PR title:")
-    const conventionsIndex = userPrompt.indexOf("<conventions-abc123def456>")
+    const conventionsIndex = userPrompt.indexOf('<conventions-abc123def456 path="AGENTS.md">')
     const changedFileIndex = userPrompt.indexOf('<file-abc123def456 path="src/greeter.ts">')
     const relatedFileIndex = userPrompt.indexOf('<file-abc123def456 path="src/caller.ts"')
     const relatedDocsIndex = userPrompt.indexOf("Documentation that may describe changed code")
@@ -299,6 +300,17 @@ describe("buildUserPrompt", () => {
 
     expect(userPrompt).toContain(
       "<conventions-abc123def456>\n(no conventions file found in this repository)\n</conventions-abc123def456>",
+    )
+  })
+
+  it("labels the conventions section with the conventions file path", () => {
+    const userPrompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      conventionsFile: "docs/CONVENTIONS.md",
+    })
+
+    expect(userPrompt).toContain(
+      '<conventions-abc123def456 path="docs/CONVENTIONS.md">\n# AGENTS.md\n\nUse explicit names.\n</conventions-abc123def456>',
     )
   })
 

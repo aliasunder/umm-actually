@@ -73,6 +73,7 @@ export type ReviewContext = {
   prContext: PrContext
   phase: ReviewPhase
   conventions: string | null
+  conventionsFile: string
   conventionsBudgetTokens: number
   changedFiles: PromptFile[]
   relatedFiles: PromptFile[]
@@ -940,6 +941,7 @@ const runReviewPipeline = async (
       prContext,
       phase,
       conventions: conventionsForPrompt,
+      conventionsFile: config.conventionsFile,
       conventionsBudgetTokens: config.conventionsBudgetTokens,
       changedFiles,
       relatedFiles,
