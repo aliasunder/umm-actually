@@ -199,19 +199,19 @@ const escapeAttributeValue = (value: string): string => value.replaceAll('"', "&
 
 const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
   const fileTag = `file-${delimiterNonce}`
-  const pathAttribute = escapeAttributeValue(file.path)
 
-  // The closing tag repeats the path: deep inside a long block the opening tag
-  // is tens of KB away, and models then attribute the text to a nearby file
-  const closingTag = `</${fileTag} path="${pathAttribute}">`
+  // The closing tag carries the path too: deep inside a long block the opening
+  // tag is tens of KB away, and models then attribute the text to a nearby file
+  const pathAttribute = `path="${escapeAttributeValue(file.path)}"`
 
   // Only changed files are sent diff-only, and a changed file needs no reason
   // attribute to explain why it is in the prompt
   if (file.includedAs === "diff-only") {
-    return `<${fileTag} path="${pathAttribute}" note="full content omitted — see diff">\n${closingTag}`
+    return `<${fileTag} ${pathAttribute} note="full content omitted — see diff">\n</${fileTag} ${pathAttribute}>`
   }
+
   const reasonAttribute = file.reason ? ` reason="${escapeAttributeValue(file.reason)}"` : ""
-  return `<${fileTag} path="${pathAttribute}"${reasonAttribute}>\n${file.content}\n${closingTag}`
+  return `<${fileTag} ${pathAttribute}${reasonAttribute}>\n${file.content}\n</${fileTag} ${pathAttribute}>`
 }
 
 /**
