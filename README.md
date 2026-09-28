@@ -152,7 +152,7 @@ To see the model's reasoning behind its findings, set the `LOG_LEVEL` environmen
     openrouter_api_key: ${{ secrets.OPENROUTER_KEY }}
 ```
 
-- **What it logs:** the `analysis` field of each completed review phase, as one JSON line with the message `review phase analysis` in the umm-actually step's log. The default `phases: combined` runs one phase per review; `parallel` and `sequential` run three.
+- **What it logs:** the `analysis` field of each completed review phase, as one JSON line with the message `review phase analysis` in the umm-actually step's log. The default `phases: combined` runs one phase per review; `parallel` and `sequential` each run three.
 - **Matching a finding:** the model is asked to write one analysis line per changed file, plus one line per finding outside the diff in the form `<finding title> — <path>: "<quoted passage>"`. Search the analysis for an outside-the-diff finding's title, or for an inline finding's file path.
 - **Findings already posted:** the analysis is logged only on runs with debug on. Turn it on and trigger a new review with a push or an `@umm review` comment (the Actions **Re-run** button replays the original run's workflow file, without the new `env:` line); the new review is a new model call and may not report the same finding. An `@umm review` comment runs the workflow file from the default branch, so the `env:` line must be merged there first.
 - **Who can read it:** the analysis quotes repository content, and anyone who can read the workflow's logs can read it. On a public repository, that is everyone.
