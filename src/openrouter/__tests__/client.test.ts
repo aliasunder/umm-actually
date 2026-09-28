@@ -516,7 +516,24 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams)
 
-    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["empty_content", "accepted"])
+    expect(result.attempts).toEqual([
+      {
+        model: "openai/gpt-5-mini",
+        outcome: "empty_content",
+        promptTokens: 10,
+        completionTokens: 0,
+        costUsd: null,
+        errorSummary: "response had no text content",
+      },
+      {
+        model: "openai/gpt-5-mini",
+        outcome: "accepted",
+        promptTokens: 12000,
+        completionTokens: 800,
+        costUsd: 0.0421,
+        errorSummary: null,
+      },
+    ])
   })
 
   it("advances to the fallback model after two schema mismatches", async () => {
@@ -536,10 +553,27 @@ describe("requestReview", () => {
       "openai/gpt-5-mini",
       "anthropic/claude-haiku-4.5",
     ])
-    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual([
-      "schema_mismatch",
-      "schema_mismatch",
-      "accepted",
+
+    const schemaMismatchAttempt = {
+      model: "openai/gpt-5-mini",
+      outcome: "schema_mismatch",
+      promptTokens: 11900,
+      completionTokens: 12,
+      costUsd: 0.001,
+      errorSummary:
+        "schema mismatch at analysis: Invalid input: expected string, received undefined",
+    }
+    expect(result.attempts).toEqual([
+      schemaMismatchAttempt,
+      schemaMismatchAttempt,
+      {
+        model: "anthropic/claude-haiku-4.5",
+        outcome: "accepted",
+        promptTokens: 12000,
+        completionTokens: 800,
+        costUsd: 0.0421,
+        errorSummary: null,
+      },
     ])
   })
 
@@ -1010,6 +1044,49 @@ describe("requestReview", () => {
     }
   })
 
+  it("reports the review deadline as the cost lookup's failure when that deadline cuts the lookup short", async () => {
+    vi.useFakeTimers()
+    try {
+      const stub = makeSdkStub({
+        sendResponses: [{ value: makeNoCostChatResult() }],
+        generationResponses: [{ pending: () => new Promise(() => undefined) }],
+      })
+      const logger = createTestLogger()
+      const deadline = performance.now() + 100
+      const client = createOpenRouterClient(
+        {
+          sdk: stub.sdk,
+          requestTimeoutMs: 45_000,
+          remainingReviewMs: () => deadline - performance.now(),
+        },
+        logger,
+      )
+
+      const reviewPromise = client.requestReview(requestParams)
+      await vi.advanceTimersByTimeAsync(100)
+      await reviewPromise
+
+      expect(logger.messages.filter((entry) => entry.level === "warn")).toEqual([
+        {
+          level: "warn",
+          message: "request deadline elapsed",
+          data: {
+            operation: "generation cost lookup",
+            generationId: "gen-no-cost",
+            timeoutMs: 100,
+          },
+        },
+        {
+          level: "warn",
+          message: "generation cost lookup failed",
+          data: { error: "review deadline exceeded" },
+        },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("degrades to a null cost with both warnings when the generation lookup exceeds the deadline", async () => {
     vi.useFakeTimers()
     try {
@@ -1131,7 +1208,24 @@ describe("requestReview", () => {
       "openai/gpt-5-mini",
       "anthropic/claude-haiku-4.5",
     ])
-    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["api_error", "accepted"])
+    expect(result.attempts).toEqual([
+      {
+        model: "openai/gpt-5-mini",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: "HTTP 404: HTTP 404",
+      },
+      {
+        model: "anthropic/claude-haiku-4.5",
+        outcome: "accepted",
+        promptTokens: 12000,
+        completionTokens: 800,
+        costUsd: 0.0421,
+        errorSummary: null,
+      },
+    ])
   })
 
   it("retries the same model with an output ceiling that fits after a context-overflow 400", async () => {
@@ -1150,7 +1244,29 @@ describe("requestReview", () => {
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
       { model: "openai/gpt-5-mini", maxCompletionTokens: 118_190 },
     ])
-    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["api_error", "accepted"])
+    expect(result).toEqual({
+      review: acceptedReview,
+      modelUsed: "openai/gpt-5-mini",
+      attempts: [
+        {
+          model: "openai/gpt-5-mini",
+          outcome: "api_error",
+          promptTokens: null,
+          completionTokens: null,
+          costUsd: null,
+          errorSummary:
+            "HTTP 400: This endpoint's maximum context length is 262144 tokens. However, you requested about 263762 tokens (135762 of text input, 128000 in the output). Please reduce the length of either one, or use the con…",
+        },
+        {
+          model: "openai/gpt-5-mini",
+          outcome: "accepted",
+          promptTokens: 12000,
+          completionTokens: 800,
+          costUsd: 0.0421,
+          errorSummary: null,
+        },
+      ],
+    })
     expect(logger.messages.filter((entry) => entry.message === CEILING_RETRY_LOG)).toEqual([
       {
         level: "info",
@@ -1212,6 +1328,44 @@ describe("requestReview", () => {
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
       { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
     ])
+  })
+
+  it("retries at a fitted output ceiling exactly at the 32,768-token floor", async () => {
+    // 262,144 window − 221,184 input − 8,192 margin = 32,768, the floor itself
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 221_184 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 32_768 },
+    ])
+  })
+
+  it("advances to the fallback without a retry when the rejected ceiling already fit the endpoint's window", async () => {
+    // 262,144 window − 125,952 input − 8,192 margin = 128,000, the rejected
+    // ceiling itself, so lowering it cannot fix the 400
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 125_952 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
+    expect(logger.messages.filter((entry) => entry.message === CEILING_RETRY_LOG)).toEqual([])
   })
 
   it("does not lower the ceiling when the context-overflow 400 was the model's last attempt", async () => {
