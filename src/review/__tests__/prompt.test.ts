@@ -66,15 +66,21 @@ describe("buildSystemPrompt", () => {
     expect(systemPrompt).toContain(
       [
         'Before reporting findings, fill the "analysis" field: for each changed file,',
-        "one line stating what you checked per dimension and which callers or related",
-        "files you traced. When verifying documentation or description claims, quote",
-        'the sentence you checked with its file path, as path: "sentence". Findings',
-        "emitted without corresponding analysis are not trustworthy.",
+        "one line stating what you checked under each DIMENSION section above and which",
+        "callers or related files you traced. When verifying documentation or",
+        'description claims, quote the sentence you checked as path: "sentence" — the',
+        "file path it came from, or PR description for a claim in the PR description.",
+        "Report a finding only when an analysis line supports it; without one, the",
+        "finding is unverified, so trace it first or leave it out.",
       ].join("\n"),
     )
     expect(systemPrompt).toContain("Severity rubric:")
     expect(systemPrompt).toContain(
       [
+        "Prompt sections: the annotated diff is the <diff-…> section, a file block is",
+        'one <file-… path="…"> section, and the conventions section is the',
+        '<conventions-… path="…"> section.',
+        "",
         'Line anchoring: "line" and "end_line" use the new-file line numbers printed in',
         "the annotated diff. For inline placement, reference only numbers that appear",
         "there, and keep end_line in the same hunk as line. Findings in code outside",
@@ -84,9 +90,9 @@ describe("buildSystemPrompt", () => {
         "",
         'File anchoring: when you fill "file", copy the exact path="…" attribute of one',
         'file block or the conventions section, or the path in one "=== path ===" diff',
-        "header — nothing appended, nothing paraphrased. Boundary: a finding on a path that has no file block and",
-        "no diff header is dropped before posting, so when the defect lives in a file",
-        "you were not given, report it against the provided file that calls into it.",
+        "header — nothing appended, nothing paraphrased. Boundary: a finding on any",
+        "other path is dropped before posting, so when the defect lives in a file you",
+        "were not given, report it against the provided file that calls into it.",
       ].join("\n"),
     )
   })
@@ -97,9 +103,7 @@ describe("buildSystemPrompt", () => {
     expect(systemPrompt).toContain(
       'copy the exact path="…" attribute of one file block or the conventions section, or the path in one "=== path ===" diff header — nothing appended, nothing paraphrased',
     )
-    expect(systemPrompt).toContain(
-      "a finding on a path that has no file block and no diff header is dropped before posting",
-    )
+    expect(systemPrompt).toContain("a finding on any other path is dropped before posting")
   })
 
   it("requires a path-attributed quote for every finding outside the annotated diff", () => {
@@ -109,14 +113,15 @@ describe("buildSystemPrompt", () => {
       [
         "File attribution: for every finding on a line outside the annotated diff,",
         '"file" is where the text the finding describes lives. Before filing it, find',
-        'the passage inside that path\'s own file block (it opens with path="…" and its',
-        'closing </file-…> tag repeats the same path="…"), under that path\'s',
+        "the passage inside that path's own file block (its closing </file-…> tag",
+        'repeats the same path="…"), among the removed (-) lines under that path\'s',
         '"=== path ===" diff header, or in the conventions section. Then add one line',
-        'to "analysis": <finding title> — <path>: "<quoted passage>". Boundary:',
+        'to "analysis" in the path: "sentence" form above, led by the finding title:',
+        '<finding title> — <path>: "<quoted passage>". Boundary:',
         "findings on lines inside the annotated diff are already attributed by their",
-        "diff header and need no quote line. When the passage sits in a different",
-        "block, file the finding on that block's path — or drop it when that path has",
-        "no defect.",
+        "diff header and need no quote line. When the passage sits in another file's",
+        "block, file the finding on that other file's path — or drop the finding when",
+        "that other file's text has no defect.",
         'Wrong: "file": "docs/setup.md" for a "Session End" section that appears only',
         "inside the docs/guide.md block.",
         'Right: "file": "docs/guide.md", with the analysis line',
@@ -303,14 +308,14 @@ describe("buildUserPrompt", () => {
     )
   })
 
-  it("labels the conventions section with the conventions file path", () => {
+  it("labels the conventions section's opening and closing tags with the conventions file path", () => {
     const userPrompt = buildUserPrompt({
       ...makeUserPromptParts(),
       conventionsFile: "docs/CONVENTIONS.md",
     })
 
     expect(userPrompt).toContain(
-      '<conventions-abc123def456 path="docs/CONVENTIONS.md">\n# AGENTS.md\n\nUse explicit names.\n</conventions-abc123def456>',
+      '<conventions-abc123def456 path="docs/CONVENTIONS.md">\n# AGENTS.md\n\nUse explicit names.\n</conventions-abc123def456 path="docs/CONVENTIONS.md">',
     )
   })
 

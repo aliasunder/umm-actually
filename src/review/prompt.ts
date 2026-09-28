@@ -51,10 +51,12 @@ dimensions. When in doubt about a borderline nitpick, omit it — but never omit
 a traced regression or a concrete bug.`
 
 const PROOF_OF_WORK = `Before reporting findings, fill the "analysis" field: for each changed file,
-one line stating what you checked per dimension and which callers or related
-files you traced. When verifying documentation or description claims, quote
-the sentence you checked with its file path, as path: "sentence". Findings
-emitted without corresponding analysis are not trustworthy.`
+one line stating what you checked under each DIMENSION section above and which
+callers or related files you traced. When verifying documentation or
+description claims, quote the sentence you checked as path: "sentence" — the
+file path it came from, or PR description for a claim in the PR description.
+Report a finding only when an analysis line supports it; without one, the
+finding is unverified, so trace it first or leave it out.`
 
 const SEVERITY_RUBRIC = `Severity rubric:
 - critical: exploitable security issue, data loss, or corruption
@@ -74,8 +76,9 @@ triggers the problem and what goes wrong. If you cannot state a concrete
 failure scenario, do not report the finding.`
 
 /** Rendered as `"a"|"b"|…` so the prompt's enum unions read like the schema. */
-const enumUnion = (values: readonly string[]): string =>
-  values.map((value) => `"${value}"`).join("|")
+const enumUnion = (values: readonly string[]): string => {
+  return values.map((value) => `"${value}"`).join("|")
+}
 
 /** The wire schema also travels as response_format json_schema, but providers
  *  without structured-output support silently drop that parameter — this prose
@@ -117,7 +120,11 @@ the code is correct — including that a previously posted bot comment has
 been resolved by this revision — record that conclusion in "analysis" and
 move on — do not emit a finding for it.`
 
-const ANCHORING_CONTRACT = `Line anchoring: "line" and "end_line" use the new-file line numbers printed in
+const ANCHORING_CONTRACT = `Prompt sections: the annotated diff is the <diff-…> section, a file block is
+one <file-… path="…"> section, and the conventions section is the
+<conventions-… path="…"> section.
+
+Line anchoring: "line" and "end_line" use the new-file line numbers printed in
 the annotated diff. For inline placement, reference only numbers that appear
 there, and keep end_line in the same hunk as line. Findings in code outside
 the diff (traced regressions, pre-existing bugs) are still valuable — report
@@ -126,20 +133,21 @@ instead of inline.
 
 File anchoring: when you fill "file", copy the exact path="…" attribute of one
 file block or the conventions section, or the path in one "=== path ===" diff
-header — nothing appended, nothing paraphrased. Boundary: a finding on a path that has no file block and
-no diff header is dropped before posting, so when the defect lives in a file
-you were not given, report it against the provided file that calls into it.
+header — nothing appended, nothing paraphrased. Boundary: a finding on any
+other path is dropped before posting, so when the defect lives in a file you
+were not given, report it against the provided file that calls into it.
 
 File attribution: for every finding on a line outside the annotated diff,
 "file" is where the text the finding describes lives. Before filing it, find
-the passage inside that path's own file block (it opens with path="…" and its
-closing </file-…> tag repeats the same path="…"), under that path's
+the passage inside that path's own file block (its closing </file-…> tag
+repeats the same path="…"), among the removed (-) lines under that path's
 "=== path ===" diff header, or in the conventions section. Then add one line
-to "analysis": <finding title> — <path>: "<quoted passage>". Boundary:
+to "analysis" in the path: "sentence" form above, led by the finding title:
+<finding title> — <path>: "<quoted passage>". Boundary:
 findings on lines inside the annotated diff are already attributed by their
-diff header and need no quote line. When the passage sits in a different
-block, file the finding on that block's path — or drop it when that path has
-no defect.
+diff header and need no quote line. When the passage sits in another file's
+block, file the finding on that other file's path — or drop the finding when
+that other file's text has no defect.
 Wrong: "file": "docs/setup.md" for a "Session End" section that appears only
 inside the docs/guide.md block.
 Right: "file": "docs/guide.md", with the analysis line
@@ -149,8 +157,8 @@ Excluded files: files listed in the "changed file(s) excluded from review"
 trailer at the end of the diff are not in context — their content was not
 provided. Do not report findings on excluded file paths.`
 
-export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string =>
-  [
+export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string => {
+  return [
     IDENTITY_AND_SCOPE,
     ...phase.instructionSections,
     PROOF_OF_WORK,
@@ -159,22 +167,23 @@ export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string =>
     OUTPUT_DISCIPLINE,
     ANCHORING_CONTRACT,
   ].join("\n\n")
+}
 
-const truncateToTokenCap = (text: string, tokenCap: number): string => {
-  const characterCap = conventionsCharacterCap(tokenCap)
+const truncateConventions = (conventions: string, conventionsBudgetTokens: number): string => {
+  const characterCap = conventionsCharacterCap(conventionsBudgetTokens)
 
-  if (text.length <= characterCap) return text
+  if (conventions.length <= characterCap) return conventions
   // toWellFormed: a cut mid-surrogate-pair would leave a lone surrogate,
   // which some HTTP stacks and providers reject in the request body
-  return `${text.slice(0, characterCap).toWellFormed()}\n\n[conventions truncated at ~${tokenCap} tokens]`
+  return `${conventions.slice(0, characterCap).toWellFormed()}\n\n[conventions truncated at ~${conventionsBudgetTokens} tokens]`
 }
 
 /**
- * Per-run random suffix for untrusted-content wrapper tags
+ * Per-prompt random suffix for untrusted-content wrapper tags
  * (`<file-a1b2c3d4e5f6 …>`). PR content can contain a literal closing tag,
- * but it cannot predict this run's suffix — so it cannot forge a delimiter
+ * but it cannot predict this prompt's suffix — so it cannot forge a delimiter
  * and place instruction-shaped text outside the untrusted wrapper.
- * Generated once per run by the caller and passed to buildUserPrompt.
+ * The caller generates a fresh one for every buildUserPrompt call.
  */
 export const generateDelimiterNonce = (): string => randomBytes(6).toString("hex")
 
@@ -190,6 +199,8 @@ const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
   // is tens of KB away, and models then attribute the text to a nearby file
   const closingTag = `</${fileTag} path="${pathAttribute}">`
 
+  // Only changed files are sent diff-only, and a changed file needs no reason
+  // attribute to explain why it is in the prompt
   if (file.includedAs === "diff-only") {
     return `<${fileTag} path="${pathAttribute}" note="full content omitted — see diff">\n${closingTag}`
   }
@@ -218,6 +229,9 @@ export const buildUserPrompt = ({
   delimiterNonce,
 }: {
   prContext: PrContext
+  /** The conventions file's text, or a placeholder sentence pointing to its
+   *  full copy in a priority-doc file block. That block carries the same
+   *  path, so either way the section's path attribute names the right file. */
   conventions: string | null
   /** Repo-relative path of the conventions file — the section's path attribute. */
   conventionsFile: string
@@ -228,7 +242,7 @@ export const buildUserPrompt = ({
   annotatedDiff: string
   priorFindings: Finding[]
   priorBotComments: string[]
-  /** Per-run random tag suffix — see generateDelimiterNonce. */
+  /** Per-prompt random tag suffix — see generateDelimiterNonce. */
   delimiterNonce: string
 }): string => {
   const metadataTag = `pr_metadata-${delimiterNonce}`
@@ -247,10 +261,13 @@ export const buildUserPrompt = ({
     `</${metadataTag}>`,
   ].join("\n")
 
+  // Tagged like a file block, closing tag included, so the model attributes
+  // text deep in a long conventions file to the conventions path
+  const conventionsPathAttribute = `path="${escapeAttributeValue(conventionsFile)}"`
   const conventionsSection =
     conventions === null
       ? `<${conventionsTag}>\n(no conventions file found in this repository)\n</${conventionsTag}>`
-      : `<${conventionsTag} path="${escapeAttributeValue(conventionsFile)}">\n${truncateToTokenCap(conventions, conventionsBudgetTokens)}\n</${conventionsTag}>`
+      : `<${conventionsTag} ${conventionsPathAttribute}>\n${truncateConventions(conventions, conventionsBudgetTokens)}\n</${conventionsTag} ${conventionsPathAttribute}>`
 
   const changedFilesSection = changedFiles
     .map((changedFile) => renderFileBlock(changedFile, delimiterNonce))
