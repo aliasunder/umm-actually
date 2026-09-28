@@ -101,8 +101,9 @@ const generationResponseSchema = z.object({
 const ABORT_STATUSES = new Set([401, 402, 403])
 
 /** The transient 4xx statuses — HTTP request timeout (408) and rate limit
- *  (429). attemptOnce also retries 5xx and status-less network errors;
- *  any other 4xx is structural and skips the retry. */
+ *  (429). attemptOnce also retries 5xx and status-less network errors, and
+ *  a context-overflow 400 retries with a smaller output ceiling; any other
+ *  4xx is structural and skips the retry. */
 const RETRYABLE_4XX_STATUSES = new Set([408, 429])
 
 /** Cap on same-model attempts for failures that settle quickly (HTTP errors,
@@ -115,6 +116,22 @@ const MAX_ATTEMPTS_PER_MODEL = 2
  *  rate-limit burst has a recovery window. */
 const RETRY_DELAY_MS = 1_000
 
+/** Output ceiling for each model's first attempt. Without one, some providers
+ *  apply a default output limit that cuts a large review off mid-JSON. */
+const MAX_COMPLETION_TOKENS = 128_000
+
+/** OpenRouter's 400 when the prompt plus the output ceiling exceeds the routed
+ *  endpoint's context window, e.g. "This endpoint's maximum context length is
+ *  262144 tokens. However, you requested about 263762 tokens (135762 of text
+ *  input, 128000 in the output)". A model's endpoints differ in window size,
+ *  and routing does not check the prompt against it. */
+const CONTEXT_OVERFLOW_PATTERN =
+  /maximum context length is (?<contextLength>\d+) tokens\. However, you requested about \d+ tokens \((?<inputTokens>\d+) of text input/
+
+/** Headroom below the endpoint's window, because the error's input count is
+ *  OpenRouter's estimate ("about"), not the provider tokenizer's count. */
+const CONTEXT_FIT_MARGIN_TOKENS = 8_192
+
 /** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs
  *  and future SDK versions need no instanceof on SDK internals. */
 const errorStatusCode = (error: unknown): number | undefined => {
@@ -123,6 +140,30 @@ const errorStatusCode = (error: unknown): number | undefined => {
     return undefined
   }
   return error.statusCode
+}
+
+/** The largest output ceiling that fits the endpoint a context-overflow error
+ *  names, or null when the error is something else or no smaller ceiling fits. */
+const fittedMaxCompletionTokens = ({
+  error,
+  rejectedMaxCompletionTokens,
+}: {
+  error: unknown
+  rejectedMaxCompletionTokens: number
+}): number | null => {
+  if (errorStatusCode(error) !== 400 || !(error instanceof Error)) return null
+
+  const overflowGroups = CONTEXT_OVERFLOW_PATTERN.exec(error.message)?.groups
+  const contextLength = overflowGroups?.contextLength
+  const inputTokens = overflowGroups?.inputTokens
+
+  if (!contextLength || !inputTokens) return null
+
+  const fittedCeiling = Number(contextLength) - Number(inputTokens) - CONTEXT_FIT_MARGIN_TOKENS
+
+  // A ceiling at or above the rejected one would overflow the same endpoint again
+  if (fittedCeiling <= 0 || fittedCeiling >= rejectedMaxCompletionTokens) return null
+  return fittedCeiling
 }
 
 const summarizeError = (error: unknown): string => {
@@ -234,18 +275,19 @@ const buildChatRequest = ({
   systemPrompt,
   userPrompt,
   model,
+  maxCompletionTokens,
 }: {
   systemPrompt: string
   userPrompt: string
   model: string
+  maxCompletionTokens: number
 }): ChatRequestSubset => ({
   model,
   messages: [
     { role: "system", content: systemPrompt },
     { role: "user", content: userPrompt },
   ],
-  // High ceiling — providers clamp to each model's actual max output
-  maxCompletionTokens: 128_000,
+  maxCompletionTokens,
   responseFormat: {
     type: "json_schema",
     jsonSchema: {
@@ -270,6 +312,11 @@ type SingleAttempt =
       attempt: ModelAttempt
       retryable: boolean
       abort: boolean
+    }
+  | {
+      kind: "context_overflow"
+      attempt: ModelAttempt
+      fittedMaxCompletionTokens: number
     }
 
 /** Retains billed attempts when the ladder fails, distinguishing auth/credit
@@ -303,8 +350,9 @@ const describeAttempt = (attempt: ModelAttempt): string => {
   return `${attempt.model}: ${attempt.outcome}${errorSuffix}`
 }
 
-const summarizeAttempts = (attempts: ModelAttempt[]): string =>
-  attempts.map(describeAttempt).join("; ")
+const summarizeAttempts = (attempts: ModelAttempt[]): string => {
+  return attempts.map(describeAttempt).join("; ")
+}
 
 export const createOpenRouterClient = (
   {
@@ -364,27 +412,30 @@ export const createOpenRouterClient = (
     }
     if (sendResult.status === "rejected") {
       const statusCode = errorStatusCode(sendResult.error)
-      const abort = statusCode !== undefined && ABORT_STATUSES.has(statusCode)
-      // Retryable: unknown status, 5xx, 408 timeout, 429 rate-limit.
-      // Other 4xx (e.g. 400 bad request) is structural — don't retry.
-      const retryable =
-        statusCode === undefined || statusCode >= 500 || RETRYABLE_4XX_STATUSES.has(statusCode)
-      return {
-        kind: "failed",
-        attempt: {
-          model,
-          outcome: "api_error",
-          promptTokens: null,
-          completionTokens: null,
-          costUsd: null,
-          errorSummary:
-            statusCode === undefined
-              ? summarizeError(sendResult.error)
-              : `HTTP ${statusCode}: ${summarizeError(sendResult.error)}`,
-        },
-        retryable: abort ? false : retryable,
-        abort,
+      const attempt: ModelAttempt = {
+        model,
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: statusCode
+          ? `HTTP ${statusCode}: ${summarizeError(sendResult.error)}`
+          : summarizeError(sendResult.error),
       }
+      const fittedCeiling = fittedMaxCompletionTokens({
+        error: sendResult.error,
+        rejectedMaxCompletionTokens: chatRequest.maxCompletionTokens,
+      })
+
+      if (fittedCeiling) {
+        return { kind: "context_overflow", attempt, fittedMaxCompletionTokens: fittedCeiling }
+      }
+
+      const abort = statusCode ? ABORT_STATUSES.has(statusCode) : false
+      // An unknown status, a 5xx, a 408, or a 429 is transient and retries;
+      // any other 4xx, such as a 400 bad request, is structural and does not
+      const retryable = !statusCode || statusCode >= 500 || RETRYABLE_4XX_STATUSES.has(statusCode)
+      return { kind: "failed", attempt, retryable: abort ? false : retryable, abort }
     }
 
     const parsedResult = chatResultSchema.safeParse(sendResult.value)
@@ -437,9 +488,9 @@ export const createOpenRouterClient = (
       const firstIssue = parsedReview.error.issues[0]
       return failedValidation(
         "schema_mismatch",
-        firstIssue === undefined
-          ? "response JSON does not match the review schema"
-          : `schema mismatch at ${firstIssue.path.join(".")}: ${firstIssue.message}`,
+        firstIssue
+          ? `schema mismatch at ${firstIssue.path.join(".")}: ${firstIssue.message}`
+          : "response JSON does not match the review schema",
       )
     }
 
@@ -452,11 +503,13 @@ export const createOpenRouterClient = (
     }
   }
 
-  /** Best-effort: a cost lookup failure must never fail a completed review. */
+  /** A cost lookup failure must never fail a completed review, so every
+   *  failure degrades to a null cost. */
   const lookupGenerationCost = async (generationId: string): Promise<number | null> => {
     const generations = sdk.generations
 
     if (!generations || remainingReviewMs() <= 0) return null
+
     const lookup = await withDeadline(
       {
         start: (signal) => {
@@ -483,6 +536,7 @@ export const createOpenRouterClient = (
       })
       return null
     }
+
     const parsed = generationResponseSchema.safeParse(lookup.value)
 
     if (!parsed.success) {
@@ -517,18 +571,22 @@ export const createOpenRouterClient = (
     }
 
     for (const [ladderIndex, ladderModel] of modelLadder.entries()) {
-      const chatRequest = buildChatRequest({
-        systemPrompt,
-        userPrompt,
-        model: ladderModel,
-      })
       const nextLadderModel = modelLadder[ladderIndex + 1]
 
+      // Reassigned across attempts, like attemptNumber. Each model starts at
+      // the full ceiling because that model's endpoints decide what fits, so
+      // a context overflow lowers it only for the same model's retry
+      let maxCompletionTokens = MAX_COMPLETION_TOKENS
       let attemptNumber = 1
       while (attemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
         ensureReviewTimeRemaining()
         const attemptResult = await attemptOnce({
-          chatRequest,
+          chatRequest: buildChatRequest({
+            systemPrompt,
+            userPrompt,
+            model: ladderModel,
+            maxCompletionTokens,
+          }),
           model: ladderModel,
         })
 
@@ -558,14 +616,17 @@ export const createOpenRouterClient = (
           outcome: attemptResult.attempt.outcome,
           errorSummary: attemptResult.attempt.errorSummary,
         })
-        if (attemptResult.abort) {
+
+        if (attemptResult.kind === "failed" && attemptResult.abort) {
           throw new ReviewRequestError({
             message: `OpenRouter auth/credit error — aborting without fallback: ${summarizeAttempts(attempts)}`,
             attempts,
             aborted: true,
           })
         }
+
         ensureReviewTimeRemaining()
+
         // A timeout consumed a full deadline window and signals live provider
         // degradation. Retrying the same model would double the wait before
         // the fallback runs — past a typical workflow job timeout — so the
@@ -579,9 +640,19 @@ export const createOpenRouterClient = (
           })
           break
         }
-        if (!attemptResult.retryable) break
+        if (attemptResult.kind === "failed" && !attemptResult.retryable) break
+
         attemptNumber++
-        if (attemptNumber <= MAX_ATTEMPTS_PER_MODEL && retryDelayMs > 0) {
+        const retryRemains = attemptNumber <= MAX_ATTEMPTS_PER_MODEL
+
+        if (retryRemains && attemptResult.kind === "context_overflow") {
+          maxCompletionTokens = attemptResult.fittedMaxCompletionTokens
+          logger.info("retrying with an output ceiling that fits the endpoint's context window", {
+            model: ladderModel,
+            maxCompletionTokens,
+          })
+        }
+        if (retryRemains && retryDelayMs > 0) {
           await new Promise((resolve) => {
             setTimeout(resolve, Math.ceil(Math.min(retryDelayMs, remainingReviewMs())))
           })

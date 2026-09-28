@@ -117,8 +117,34 @@ const makeClient = (stub: { sdk: OpenRouterLike }) => {
   return { client, logger }
 }
 
-const makeStatusError = (statusCode: number): Error =>
-  Object.assign(new Error(`HTTP ${statusCode}`), { statusCode })
+const makeStatusError = (statusCode: number): Error => {
+  return Object.assign(new Error(`HTTP ${statusCode}`), { statusCode })
+}
+
+/** OpenRouter's 400 when the prompt plus the requested output ceiling exceeds
+ *  the routed endpoint's context window, worded as the live API words it. */
+const makeContextOverflowError = ({
+  contextLength,
+  inputTokens,
+}: {
+  contextLength: number
+  inputTokens: number
+}): Error => {
+  const message = `This endpoint's maximum context length is ${contextLength} tokens. However, you requested about ${inputTokens + 128_000} tokens (${inputTokens} of text input, 128000 in the output). Please reduce the length of either one, or use the context-compression plugin to compress your prompt automatically.`
+  return Object.assign(new Error(message), { statusCode: 400 })
+}
+
+/** The model and output ceiling of every chat request sent, in order. */
+const sentCeilings = (stub: {
+  sendCalls: { chatRequest: ChatRequestSubset }[]
+}): { model: string; maxCompletionTokens: number }[] => {
+  return stub.sendCalls.map(({ chatRequest }) => ({
+    model: chatRequest.model,
+    maxCompletionTokens: chatRequest.maxCompletionTokens,
+  }))
+}
+
+const CEILING_RETRY_LOG = "retrying with an output ceiling that fits the endpoint's context window"
 
 /** The rejection of a request expected to fail, so its fields can be asserted. */
 const captureRejection = async (request: Promise<unknown>): Promise<unknown> => {
@@ -1106,6 +1132,102 @@ describe("requestReview", () => {
       "anthropic/claude-haiku-4.5",
     ])
     expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["api_error", "accepted"])
+  })
+
+  it("retries the same model with an output ceiling that fits after a context-overflow 400", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 135_762 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams)
+
+    // 262,144 window − 135,762 input − 8,192 margin
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 118_190 },
+    ])
+    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["api_error", "accepted"])
+    expect(logger.messages.filter((entry) => entry.message === CEILING_RETRY_LOG)).toEqual([
+      {
+        level: "info",
+        message: CEILING_RETRY_LOG,
+        data: { model: "openai/gpt-5-mini", maxCompletionTokens: 118_190 },
+      },
+    ])
+  })
+
+  it("starts the fallback model at the full output ceiling after the primary lowered it", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 135_762 }) },
+        { error: makeStatusError(500) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 118_190 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
+  })
+
+  it("advances to the fallback without a retry when a context-overflow 400 leaves no room for output", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 258_000 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
+  })
+
+  it("does not lower the ceiling when the context-overflow 400 was the model's last attempt", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeStatusError(500) },
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 135_762 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
+    expect(logger.messages.filter((entry) => entry.message === CEILING_RETRY_LOG)).toEqual([])
+  })
+
+  it("advances to the fallback without a retry on a 400 that is not a context overflow", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [{ error: makeStatusError(400) }, { value: acceptedChatResult }],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
   })
 
   it.each([401, 402, 403])(
