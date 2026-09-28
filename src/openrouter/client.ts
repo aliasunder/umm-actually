@@ -101,9 +101,9 @@ const generationResponseSchema = z.object({
 const ABORT_STATUSES = new Set([401, 402, 403])
 
 /** The transient 4xx statuses — HTTP request timeout (408) and rate limit
- *  (429). attemptOnce also retries 5xx and status-less network errors, and
- *  a context-overflow 400 retries with a smaller output ceiling; any other
- *  4xx is structural and skips the retry. */
+ *  (429). attemptOnce also marks 5xx and status-less network errors
+ *  retryable, and a context-overflow 400 retries with a smaller output
+ *  ceiling; any other 4xx is structural and skips the retry. */
 const RETRYABLE_4XX_STATUSES = new Set([408, 429])
 
 /** Cap on same-model attempts for failures that settle quickly (HTTP errors,
@@ -117,9 +117,9 @@ const MAX_ATTEMPTS_PER_MODEL = 2
  *  rate-limit burst has a recovery window. */
 const RETRY_DELAY_MS = 1_000
 
-/** The output ceiling, sent as the request's `maxCompletionTokens`, for each
- *  model's first attempt. Without one, some providers apply a default output
- *  limit that cuts a large review off mid-JSON. */
+/** The output ceiling, sent as the request's `maxCompletionTokens`, for every
+ *  attempt except a context-overflow retry. Without one, some providers apply
+ *  a default output limit that cuts a large review off mid-JSON. */
 const MAX_COMPLETION_TOKENS = 128_000
 
 /** OpenRouter's 400 when the prompt plus the output ceiling exceeds the routed
@@ -137,8 +137,7 @@ const CONTEXT_FIT_MARGIN_TOKENS = 8_192
 /** Smallest fitted ceiling worth a same-model retry. Reviews often spend tens
  *  of thousands of output tokens, reasoning included, so a smaller ceiling
  *  would cut many off mid-JSON and still bill the full prompt. Below it, the
- *  400 fails like any other structural 4xx and the ladder moves to the
- *  fallback model. */
+ *  400 fails like any other structural 4xx. */
 const MIN_FITTED_MAX_COMPLETION_TOKENS = 32_768
 
 /** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs
@@ -247,9 +246,9 @@ const withDeadline = async <T>(
   const controller = new AbortController()
   const startedAt = DateTime.now()
 
-  // Wrapped before the race so a late rejection can never surface as an
-  // unhandled rejection
-  const settled = toResult(start(controller.signal))
+  // Promise.try settles a synchronous throw from start as a rejection, and
+  // toResult wraps it before the race so a late rejection never goes unhandled
+  const settled = toResult(Promise.try(start, controller.signal))
   const deadline = Promise.withResolvers<BoundedResult<T>>()
 
   // timeoutMs can be fractional because the review deadline is measured with
@@ -344,7 +343,7 @@ type SingleAttempt =
     }
 
 /** Thrown when the model ladder ends without an accepted review; retains every
- *  billed attempt. */
+ *  attempt, failed ones included. */
 export class ReviewRequestError extends Error {
   readonly attempts: ModelAttempt[]
   /** An auth or credit error (401/402/403) stopped the ladder. The key fails
@@ -691,7 +690,7 @@ export const createOpenRouterClient = (
         const retryRemains = attemptNumber <= MAX_ATTEMPTS_PER_MODEL
 
         // An overflow on the model's last attempt has no retry left to use the
-        // fitted ceiling, so the loop ends and the next model starts at the
+        // fitted ceiling, so the loop ends and any next model starts at the
         // full ceiling
         if (retryRemains && attemptResult.kind === "context_overflow") {
           maxCompletionTokens = attemptResult.fittedMaxCompletionTokens

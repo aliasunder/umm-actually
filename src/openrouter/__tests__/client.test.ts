@@ -1578,6 +1578,27 @@ describe("requestReview", () => {
     })
   })
 
+  it("degrades to a null cost with a warning when the generation lookup throws synchronously", async () => {
+    const sdkWithThrowingLookup: OpenRouterLike = {
+      chat: { send: async () => makeNoCostChatResult() },
+      generations: {
+        getGeneration: () => {
+          throw new Error("lookup threw before returning a promise")
+        },
+      },
+    }
+    const { client, logger } = makeClient({ sdk: sdkWithThrowingLookup })
+
+    const result = await client.requestReview(requestParams)
+
+    expect(result.attempts[0]?.costUsd).toBeNull()
+    expect(logger.messages).toContainEqual({
+      level: "warn",
+      message: "generation cost lookup failed",
+      data: { error: "lookup threw before returning a promise" },
+    })
+  })
+
   it("degrades to a null cost with a warning when the generation response has an unexpected shape", async () => {
     const stub = makeSdkStub({
       sendResponses: [{ value: makeNoCostChatResult() }],
