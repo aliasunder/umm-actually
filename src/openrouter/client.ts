@@ -107,8 +107,9 @@ const ABORT_STATUSES = new Set([401, 402, 403])
 const RETRYABLE_4XX_STATUSES = new Set([408, 429])
 
 /** Cap on same-model attempts for failures that settle quickly (HTTP errors,
- *  validation failures) and for timeouts on the last ladder model. A timeout
- *  with a fallback still available advances the ladder instead of retrying. */
+ *  validation failures), for context-overflow retries with a fitted output
+ *  ceiling, and for timeouts on the last ladder model. A timeout with a
+ *  fallback still available advances the ladder instead of retrying. */
 const MAX_ATTEMPTS_PER_MODEL = 2
 
 /** Fixed delay before a same-model retry. The SDK's backoff is disabled
@@ -116,8 +117,9 @@ const MAX_ATTEMPTS_PER_MODEL = 2
  *  rate-limit burst has a recovery window. */
 const RETRY_DELAY_MS = 1_000
 
-/** Output ceiling for each model's first attempt. Without one, some providers
- *  apply a default output limit that cuts a large review off mid-JSON. */
+/** The output ceiling, sent as the request's `maxCompletionTokens`, for each
+ *  model's first attempt. Without one, some providers apply a default output
+ *  limit that cuts a large review off mid-JSON. */
 const MAX_COMPLETION_TOKENS = 128_000
 
 /** OpenRouter's 400 when the prompt plus the output ceiling exceeds the routed
@@ -134,7 +136,9 @@ const CONTEXT_FIT_MARGIN_TOKENS = 8_192
 
 /** Smallest fitted ceiling worth a same-model retry. Reviews often spend tens
  *  of thousands of output tokens, reasoning included, so a smaller ceiling
- *  would cut many off mid-JSON and still bill the full prompt. */
+ *  would cut many off mid-JSON and still bill the full prompt. Below it, the
+ *  400 fails like any other structural 4xx and the ladder moves to the
+ *  fallback model. */
 const MIN_FITTED_MAX_COMPLETION_TOKENS = 32_768
 
 /** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs
@@ -167,16 +171,22 @@ const fittedMaxCompletionTokens = ({
 
   const fittedCeiling = Number(contextLength) - Number(inputTokens) - CONTEXT_FIT_MARGIN_TOKENS
 
+  // The endpoint leaves too little room for a review to finish its JSON
   if (fittedCeiling < MIN_FITTED_MAX_COMPLETION_TOKENS) return null
 
-  // A ceiling at or above the rejected one would overflow the same endpoint again
+  // The estimated input plus the rejected ceiling already fit the window, so
+  // that ceiling did not cause this 400 and lowering it cannot fix it
   if (fittedCeiling >= rejectedMaxCompletionTokens) return null
+
   return fittedCeiling
 }
 
+/** Caps the message at 200 characters because provider error bodies can run
+ *  long and the ladder's final error joins every attempt's summary into one line. */
 const summarizeError = (error: unknown): string => {
+  const maxSummaryLength = 200
   const message = error instanceof Error ? error.message : String(error)
-  return message.length > 200 ? `${message.slice(0, 200)}…` : message
+  return message.length > maxSummaryLength ? `${message.slice(0, maxSummaryLength)}…` : message
 }
 
 /** How the SDK call itself ended. */
@@ -236,10 +246,14 @@ const withDeadline = async <T>(
 ): Promise<BoundedResult<T>> => {
   const controller = new AbortController()
   const startedAt = DateTime.now()
+
   // Wrapped before the race so a late rejection can never surface as an
   // unhandled rejection
   const settled = toResult(start(controller.signal))
   const deadline = Promise.withResolvers<BoundedResult<T>>()
+
+  // timeoutMs can be fractional because the review deadline is measured with
+  // performance.now(); rounding up keeps the timer from firing early
   const timer = setTimeout(() => {
     // Resolve before aborting so the race winner never depends on
     // microtask ordering between the deadline and an honoured abort
@@ -254,6 +268,7 @@ const withDeadline = async <T>(
   if (bounded.status !== "timed_out") return bounded
 
   logger.warn("request deadline elapsed", { ...logContext, timeoutMs })
+
   const logLateSettlement = (late: SettledResult<T>): void => {
     logger.warn("deadline-elapsed request settled", {
       ...logContext,
@@ -263,6 +278,7 @@ const withDeadline = async <T>(
       ...(late.status === "rejected" ? { error: summarizeError(late.error) } : {}),
     })
   }
+
   // Observed, not awaited: the deadline has already been reported and the
   // caller must move on; only the eventual settlement is of interest
   void settled.then(logLateSettlement)
@@ -327,11 +343,16 @@ type SingleAttempt =
       fittedMaxCompletionTokens: number
     }
 
-/** Retains billed attempts when the ladder fails, distinguishing auth/credit
- *  errors from the shared review deadline. */
+/** Thrown when the model ladder ends without an accepted review; retains every
+ *  billed attempt. */
 export class ReviewRequestError extends Error {
   readonly attempts: ModelAttempt[]
+  /** An auth or credit error (401/402/403) stopped the ladder. The key fails
+   *  for every model, so callers skip the remaining work. Unrelated to the
+   *  AbortSignal that cancels a single HTTP call. */
   readonly aborted: boolean
+  /** The review deadline ran out. That deadline is the whole run's time
+   *  budget, which `remainingReviewMs` counts down. */
   readonly deadlineExceeded: boolean
 
   constructor({
@@ -376,22 +397,23 @@ export const createOpenRouterClient = (
      *  or not the provider connection closes. The HTTP call is aborted
      *  best-effort. */
     requestTimeoutMs: number
+    /** Milliseconds left in the whole review's time budget; 0 or less once
+     *  it has run out. Caps every attempt, cost lookup, and retry delay. */
     remainingReviewMs: () => number
     retryDelayMs?: number
   },
   logger: Logger,
 ): OpenRouterClient => {
-  const deadlineSummary = `no response within ${Math.round(requestTimeoutMs / 1000)}s`
+  const requestTimeoutSummary = `no response within ${Math.round(requestTimeoutMs / 1000)}s`
 
-  const attemptOnce = async ({
-    chatRequest,
-    model,
-  }: {
-    chatRequest: ChatRequestSubset
-    model: string
-  }): Promise<SingleAttempt> => {
+  const attemptOnce = async (chatRequest: ChatRequestSubset): Promise<SingleAttempt> => {
+    const { model } = chatRequest
     const remainingMs = remainingReviewMs()
-    const reviewDeadlineWins = remainingMs <= requestTimeoutMs
+
+    // The review deadline, not the per-attempt timeout, ends this attempt
+    // if it runs long
+    const reviewDeadlineIsBinding = remainingMs <= requestTimeoutMs
+
     const sendResult = await withDeadline(
       {
         start: (signal) => {
@@ -403,6 +425,8 @@ export const createOpenRouterClient = (
       logger,
     )
 
+    // Retryable even when the review deadline caused the timeout, because
+    // requestReview checks the deadline before any retry and throws there
     if (sendResult.status === "timed_out") {
       return {
         kind: "failed",
@@ -412,7 +436,9 @@ export const createOpenRouterClient = (
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
-          errorSummary: reviewDeadlineWins ? "review deadline exceeded" : deadlineSummary,
+          errorSummary: reviewDeadlineIsBinding
+            ? "review deadline exceeded"
+            : requestTimeoutSummary,
         },
         retryable: true,
         abort: false,
@@ -420,6 +446,9 @@ export const createOpenRouterClient = (
     }
     if (sendResult.status === "rejected") {
       const statusCode = errorStatusCode(sendResult.error)
+
+      // A context overflow is still recorded as api_error because the attempt
+      // did fail with an HTTP error; the context_overflow kind only steers the retry
       const attempt: ModelAttempt = {
         model,
         outcome: "api_error",
@@ -440,14 +469,19 @@ export const createOpenRouterClient = (
       }
 
       const abort = statusCode ? ABORT_STATUSES.has(statusCode) : false
+
       // An unknown status, a 5xx, a 408, or a 429 is transient and retries;
-      // any other 4xx, such as a 400 bad request, is structural and does not
+      // any other 4xx, such as a 400 bad request or a 401/402/403 abort
+      // status, is structural and does not
       const retryable = !statusCode || statusCode >= 500 || RETRYABLE_4XX_STATUSES.has(statusCode)
-      return { kind: "failed", attempt, retryable: abort ? false : retryable, abort }
+
+      return { kind: "failed", attempt, retryable, abort }
     }
 
     const parsedResult = chatResultSchema.safeParse(sendResult.value)
 
+    // A malformed response body points at a provider or gateway glitch rather
+    // than the request, so a second call can come back well-formed
     if (!parsedResult.success) {
       return {
         kind: "failed",
@@ -465,6 +499,7 @@ export const createOpenRouterClient = (
     }
 
     const chatResult = parsedResult.data
+
     // Failed-validation attempts still carry usage — they were billed too
     const usage = {
       promptTokens: chatResult.usage?.promptTokens ?? null,
@@ -515,8 +550,13 @@ export const createOpenRouterClient = (
    *  failure degrades to a null cost. */
   const lookupGenerationCost = async (generationId: string): Promise<number | null> => {
     const generations = sdk.generations
+    const remainingMs = remainingReviewMs()
 
-    if (!generations || remainingReviewMs() <= 0) return null
+    if (!generations || remainingMs <= 0) return null
+
+    // The review deadline, not the per-request timeout, ends the lookup if it
+    // runs long
+    const reviewDeadlineIsBinding = remainingMs <= requestTimeoutMs
 
     const lookup = await withDeadline(
       {
@@ -526,7 +566,7 @@ export const createOpenRouterClient = (
             { retries: { strategy: "none" }, signal },
           )
         },
-        timeoutMs: Math.min(requestTimeoutMs, remainingReviewMs()),
+        timeoutMs: Math.min(requestTimeoutMs, remainingMs),
         logContext: { operation: "generation cost lookup", generationId },
       },
       logger,
@@ -534,7 +574,7 @@ export const createOpenRouterClient = (
 
     if (lookup.status === "timed_out") {
       logger.warn("generation cost lookup failed", {
-        error: remainingReviewMs() <= 0 ? "review deadline exceeded" : deadlineSummary,
+        error: reviewDeadlineIsBinding ? "review deadline exceeded" : requestTimeoutSummary,
       })
       return null
     }
@@ -551,6 +591,7 @@ export const createOpenRouterClient = (
       logger.warn("unexpected generation response shape")
       return null
     }
+
     // parsed.data = Zod safeParse result; .data = API envelope's data property
     return parsed.data.data.totalCost
   }
@@ -588,18 +629,12 @@ export const createOpenRouterClient = (
       let attemptNumber = 1
       while (attemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
         ensureReviewTimeRemaining()
-        const attemptResult = await attemptOnce({
-          chatRequest: buildChatRequest({
-            systemPrompt,
-            userPrompt,
-            model: ladderModel,
-            maxCompletionTokens,
-          }),
-          model: ladderModel,
-        })
+        const attemptResult = await attemptOnce(
+          buildChatRequest({ systemPrompt, userPrompt, model: ladderModel, maxCompletionTokens }),
+        )
 
         if (attemptResult.kind === "accepted") {
-          /** Optional cost lookup expiry must not discard an accepted review. */
+          // The generation lookup runs only when the response's usage omits the cost
           const costUsd =
             attemptResult.attempt.costUsd ??
             (await lookupGenerationCost(attemptResult.generationId))
@@ -633,6 +668,8 @@ export const createOpenRouterClient = (
           })
         }
 
+        // Checked again after the failure so a spent deadline ends the ladder
+        // with the deadline error, never the generic ladder-exhausted error below
         ensureReviewTimeRemaining()
 
         // A timeout consumed a full deadline window and signals live provider
@@ -653,6 +690,9 @@ export const createOpenRouterClient = (
         attemptNumber++
         const retryRemains = attemptNumber <= MAX_ATTEMPTS_PER_MODEL
 
+        // An overflow on the model's last attempt has no retry left to use the
+        // fitted ceiling, so the loop ends and the next model starts at the
+        // full ceiling
         if (retryRemains && attemptResult.kind === "context_overflow") {
           maxCompletionTokens = attemptResult.fittedMaxCompletionTokens
           logger.info("retrying with an output ceiling that fits the endpoint's context window", {
@@ -660,6 +700,9 @@ export const createOpenRouterClient = (
             maxCompletionTokens,
           })
         }
+
+        // The delay shrinks to the time left so it never outlasts the review
+        // deadline; ensureReviewTimeRemaining above confirmed some time is left
         if (retryRemains && retryDelayMs > 0) {
           await new Promise((resolve) => {
             setTimeout(resolve, Math.ceil(Math.min(retryDelayMs, remainingReviewMs())))
