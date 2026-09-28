@@ -25,7 +25,7 @@ inputs:
     required: false
     default: "900"
   review_timeout_seconds:
-    description: Shared model-work budget from action start, in seconds, including context preparation, all phases, retries, fallbacks and cost lookups. At expiry, completed phases post with incomplete coverage identified; the run fails if no phase completed. Leave room below the job timeout for setup and GitHub publication. External cancellation still stops the run. Empty = 1500
+    description: Shared model-work budget from action start, in seconds, including context preparation, all phases, retries, fallbacks and cost lookups. Completed phases post when it expires, with incomplete coverage identified; the run fails if none completed. Leave room below the workflow job timeout for setup and GitHub publication. External cancellation stops the run at once; unlike the deadline, it does not post completed phases. Empty = 1500
     required: false
     default: "1500"
   max_findings:
@@ -41,7 +41,7 @@ inputs:
     required: false
     default: AGENTS.md
   conventions_budget_tokens:
-    description: Approximate token budget for the conventions file section of the prompt. A file over the budget is truncated to its beginning, with a notice in the prompt. To send the whole file, also list it in priority_docs, which reads it in full when the context budget allows. The job summary reports every truncation. The status comment and the check run's details page also report it when no full copy reached the model, or when this PR carried a full copy only because it changes the file or a file the conventions file imports and the file is not listed in priority_docs, since later PRs will see just the truncated beginning. A listed file that stops fitting is reported on the PR where it does not fit. Empty = the 8000 default, so workflows can wire an unset repo variable directly
+    description: Approximate token budget for the conventions file section of the prompt. A file over the budget is truncated to its beginning, with a notice in the prompt. To send the whole file, also list it in priority_docs, which reads it in full when the context budget allows. The job summary reports every truncation. The status comment and the check run's details page also report it when the whole file never reached the model, or when it reached the model only because this PR changes the file (or, for a JavaScript/TypeScript conventions file, a file it imports) and the file is not listed in priority_docs, since later PRs will see just the truncated beginning. A listed file that stops fitting is reported on the PR where it does not fit. Empty = the 8000 default, so workflows can wire an unset repo variable directly
     required: false
     default: "8000"
   phases:
@@ -72,11 +72,11 @@ inputs:
     required: false
     default: "README.md"
   max_scan_files:
-    description: Maximum files to walk during workspace scan for related file and doc detection
+    description: "Maximum files each repo scan collects before stopping. There are two scans, both run only when `trace_related_files` is on: JavaScript/TypeScript files for import tracing and `.md`/`.json` files for doc mentions. Files of other types or over `max_scan_bytes` don't count"
     required: false
     default: "5000"
   max_scan_bytes:
-    description: Maximum byte size of a single file to include in the workspace scan
+    description: Maximum byte size of a single file in the repo scans; larger files are skipped. It also caps the root `.gitattributes`; a larger one is ignored, so none of its `linguist-generated` rules apply
     required: false
     default: "262144"
   max_related_files:
@@ -84,17 +84,20 @@ inputs:
     required: false
     default: "8"
   max_related_docs:
-    description: Maximum mention-matched documentation files to include in review context (excludes priority docs)
+    description: Maximum mention-matched documentation files to include in review context. `priority_docs` entries are never mention-matched and don't count toward this cap
     required: false
     default: "4"
   exclude_paths:
     description: >-
-      Comma-separated folder prefixes excluded from the workspace scan.
-      Files under these paths are invisible to import-tracing and
-      doc-mention matching (they cannot become related files or
-      mention-matched docs). Changed files in the PR diff and
-      priority_docs are never excluded. Example: evals, fixtures,
-      __snapshots__
+      Comma-separated folder paths, relative to the repo root, excluded from
+      the repo scans (see `max_scan_files`). Files under these folders are
+      invisible to import-tracing and doc-mention matching. Entries match
+      folders only, by full path: `fixtures` skips the top-level `fixtures/`
+      but not `src/fixtures/`. The scans also always skip folders whose names
+      start with `.` and any folder named `node_modules`, `dist`, `build`,
+      `out`, or `coverage`. Changed files in the PR diff and `priority_docs`
+      are never excluded. Empty = no exclusions. Example: `evals, fixtures,
+      test/fixtures`
     required: false
     default: ""
   diff_exclude_paths:
@@ -132,7 +135,7 @@ inputs:
     required: false
     default: "true"
   pr_number:
-    description: PR number override — required only when the triggering event does not identify a PR directly
+    description: PR number override — required only when the triggering event does not identify a PR directly. Empty = taken from the event
     required: false
     default: ""
 
@@ -142,7 +145,7 @@ outputs:
   review_url:
     description: URL of the submitted review; empty when no review was posted
   model_used:
-    description: Model(s) that produced the accepted responses, comma-separated when phases were routed to different models
+    description: Model(s) that answered, as named in OpenRouter's response for each completed phase (the routed model, so a phase that fell back reports the fallback model), comma-separated when phases used different models. Empty when the review was skipped
   skipped_reason:
     description: Non-empty when the review was skipped (e.g. diff too large)
 
