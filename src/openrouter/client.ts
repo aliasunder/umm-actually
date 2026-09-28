@@ -132,10 +132,10 @@ const CONTEXT_OVERFLOW_PATTERN =
  *  OpenRouter's estimate ("about"), not the provider tokenizer's count. */
 const CONTEXT_FIT_MARGIN_TOKENS = 8_192
 
-/** Smallest fitted ceiling worth a same-model retry. A smaller one would
- *  likely cut the review off mid-JSON and still bill the full prompt, so the
- *  ladder moves to the fallback instead. */
-const MIN_FITTED_MAX_COMPLETION_TOKENS = 16_384
+/** Smallest fitted ceiling worth a same-model retry. Reviews often spend tens
+ *  of thousands of output tokens, reasoning included, so a smaller ceiling
+ *  would cut many off mid-JSON and still bill the full prompt. */
+const MIN_FITTED_MAX_COMPLETION_TOKENS = 32_768
 
 /** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs
  *  and future SDK versions need no instanceof on SDK internals. */

@@ -1197,7 +1197,7 @@ describe("requestReview", () => {
   })
 
   it("advances to the fallback without a retry when the fitted output ceiling is too small for a review", async () => {
-    // 262,144 window − 240,000 input − 8,192 margin = 13,952, under the 16,384 floor
+    // 262,144 window − 240,000 input − 8,192 margin = 13,952, under the 32,768 floor
     const stub = makeSdkStub({
       sendResponses: [
         { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 240_000 }) },
