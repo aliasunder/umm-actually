@@ -122,7 +122,7 @@ move on — do not emit a finding for it.`
 
 const ANCHORING_CONTRACT = `Prompt sections: the annotated diff is the <diff-…> section, a file block is
 one <file-… path="…"> section, and the conventions section is the
-<conventions-… path="…"> section.
+<conventions-…> section.
 
 Line anchoring: "line" and "end_line" use the new-file line numbers printed in
 the annotated diff. For inline placement, reference only numbers that appear
@@ -230,8 +230,8 @@ export const buildUserPrompt = ({
 }: {
   prContext: PrContext
   /** The conventions file's text, or a placeholder sentence pointing to its
-   *  full copy in a priority-doc file block. That block carries the same
-   *  path, so either way the section's path attribute names the right file. */
+   *  full copy in a priority-doc file block. That block's path normalizes to
+   *  the same file, so either way the section's path attribute names it. */
   conventions: string | null
   /** Repo-relative path of the conventions file — the section's path attribute. */
   conventionsFile: string

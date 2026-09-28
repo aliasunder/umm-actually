@@ -846,8 +846,8 @@ const runReviewPipeline = async (
   }
 
   // The placeholder still renders under the conventions file's path. The
-  // priority-doc block holding the full text carries that same path, so a
-  // finding quoting the file stays attributed to it.
+  // priority-doc block holding the full text carries a path that normalizes to
+  // it, so a finding quoting the file stays attributed to it.
   const conventionsForPrompt = conventionsReadInFullByPriorityDocs
     ? "(conventions file included in full as priority documentation below — ground convention findings in that copy)"
     : conventions

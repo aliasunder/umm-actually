@@ -79,7 +79,7 @@ describe("buildSystemPrompt", () => {
       [
         "Prompt sections: the annotated diff is the <diff-…> section, a file block is",
         'one <file-… path="…"> section, and the conventions section is the',
-        '<conventions-… path="…"> section.',
+        "<conventions-…> section.",
         "",
         'Line anchoring: "line" and "end_line" use the new-file line numbers printed in',
         "the annotated diff. For inline placement, reference only numbers that appear",
