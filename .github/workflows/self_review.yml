@@ -86,6 +86,8 @@ jobs:
       # (fallback_model, max_findings) pass empty when the var is unset —
       # identical to omitting them.
       - uses: ./
+        env:
+          LOG_LEVEL: debug
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           openrouter_api_key: ${{ secrets.OPENROUTER_KEY }}
