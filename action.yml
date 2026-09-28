@@ -78,15 +78,15 @@ inputs:
   max_scan_bytes:
     description: Maximum byte size of a single file in the repo scans; larger files are skipped. It also caps the root `.gitattributes`; a larger one is ignored, so none of its `linguist-generated` rules apply
     required: false
-    default: "262144"
+    default: "524288"
   max_related_files:
     description: Maximum import-traced related files to include in review context
     required: false
-    default: "8"
+    default: "15"
   max_related_docs:
     description: Maximum mention-matched documentation files to include in review context. `priority_docs` entries are never mention-matched and don't count toward this cap
     required: false
-    default: "4"
+    default: "10"
   exclude_paths:
     description: >-
       Comma-separated folder paths, relative to the repo root, excluded from

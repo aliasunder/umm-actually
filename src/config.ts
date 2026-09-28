@@ -20,22 +20,34 @@ const optionalPositiveInteger = z.string().transform((value, ctx) => {
   return value === "" ? undefined : parsePositiveInteger(value, ctx)
 })
 
-const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
+// An empty string means "not provided": a workflow wiring an unset repo
+// variable passes "", and that must select the action.yml default rather than
+// fail. Each default below mirrors action.yml, and a config.test.ts test
+// fails when they drift apart
+
+const positiveIntegerOrDefault = (defaultValue: number) => {
+  return z.string().transform((value, ctx) => {
+    return value === "" ? defaultValue : parsePositiveInteger(value, ctx)
+  })
+}
+
+const stringOrDefault = (defaultValue: string) => {
+  return z.string().transform((value) => value || defaultValue)
+}
+
+/** Booleans arrive from getBooleanInput already parsed, or undefined when the
+ *  input was empty (getBooleanInput itself throws on an empty value). */
+const booleanOrDefault = (defaultValue: boolean) => z.boolean().default(defaultValue)
 
 /** Ceiling that keeps seconds × 1000 within the 2^31−1 ms timer cap.
  *  Beyond it, setTimeout clamps the delay to 1 ms and every request
  *  would time out instantly. https://nodejs.org/api/timers.html#settimeoutcallback-delay-args */
 const maxTimeoutSeconds = Math.floor((2 ** 31 - 1) / 1000)
 
-/** Mirrors the action.yml default — keep the two in sync. */
-const defaultRequestTimeoutSeconds = 900
-const defaultReviewTimeoutSeconds = 1500
-
 const timerSafeSeconds = (defaultSeconds: number) => {
   return z.string().transform((value, ctx) => {
-    // Empty string means "not provided": workflows wiring a bare unset repo
-    // variable pass "", which would otherwise override the action.yml default.
     if (!value) return defaultSeconds
+
     const parsed = parsePositiveInteger(value, ctx)
 
     if (parsed > maxTimeoutSeconds) {
@@ -125,37 +137,31 @@ const diffExcludePathsInput = z.string().transform((value, ctx) => {
   }
 })
 
-/** Mirrors the action.yml default — keep the two in sync. */
-const defaultPhases = "combined"
-
-/** Shape-only: the value is validated by its domain owner
- *  (review/phases.ts resolveStages) at startup. Empty string means "not
- *  provided" for the same reason as timerSafeSeconds. */
-const phasesOrDefault = z.string().transform((value) => value || defaultPhases)
-
 const configSchema = z.object({
   githubToken: z.string().min(1, "github_token is required"),
   openrouterApiKey: z.string().min(1, "openrouter_api_key is required"),
-  model: z.string().min(1, "model must not be empty"),
+  model: stringOrDefault("anthropic/claude-sonnet-4-6"),
   fallbackModel: z.string(),
-  requestTimeoutSeconds: timerSafeSeconds(defaultRequestTimeoutSeconds),
-  reviewTimeoutSeconds: timerSafeSeconds(defaultReviewTimeoutSeconds),
+  requestTimeoutSeconds: timerSafeSeconds(900),
+  reviewTimeoutSeconds: timerSafeSeconds(1500),
   maxFindings: optionalPositiveInteger,
-  // Shape-only, like phases: the value is validated by its domain owner
-  // (review/finding.ts resolveSeverityThreshold) at startup
-  severityThreshold: z.string().min(1, "severity_threshold must not be empty"),
-  conventionsFile: z.string().min(1, "conventions_file must not be empty"),
-  conventionsBudgetTokens: z.string().transform((value, ctx) => {
-    return value === "" ? 8_000 : parsePositiveInteger(value, ctx)
-  }),
-  phases: phasesOrDefault,
-  contextBudgetTokens: requiredPositiveInteger,
-  traceRelatedFiles: z.boolean(),
-  maxScanFiles: requiredPositiveInteger,
-  maxScanBytes: requiredPositiveInteger,
-  maxRelatedFiles: requiredPositiveInteger,
-  maxRelatedDocs: requiredPositiveInteger,
-  // normalizeWorkspacePath("") yields "." — strip it alongside empty entries
+  // Checked for shape only; review/finding.ts resolveSeverityThreshold
+  // validates the value at startup
+  severityThreshold: stringOrDefault("low"),
+  conventionsFile: stringOrDefault("AGENTS.md"),
+  conventionsBudgetTokens: positiveIntegerOrDefault(8_000),
+  // Checked for shape only; review/phases.ts resolveStages validates the
+  // value at startup
+  phases: stringOrDefault("combined"),
+  contextBudgetTokens: positiveIntegerOrDefault(300_000),
+  traceRelatedFiles: booleanOrDefault(true),
+  maxScanFiles: positiveIntegerOrDefault(5_000),
+  maxScanBytes: positiveIntegerOrDefault(524_288),
+  maxRelatedFiles: positiveIntegerOrDefault(15),
+  maxRelatedDocs: positiveIntegerOrDefault(10),
+  // Empty is not the default here. action.yml defaults this input to
+  // README.md, and an explicit empty value disables priority docs.
+  // normalizeWorkspacePath("") yields ".", so it is stripped with empty entries
   priorityDocs: z.string().transform((value) => {
     return value
       .split(",")
@@ -169,8 +175,8 @@ const configSchema = z.object({
       .filter((segment) => segment !== "" && segment !== ".")
   }),
   diffExcludePaths: diffExcludePathsInput,
-  respectLinguistGenerated: z.boolean(),
-  costSummary: z.boolean(),
+  respectLinguistGenerated: booleanOrDefault(true),
+  costSummary: booleanOrDefault(true),
   prNumberOverride: optionalPositiveInteger,
 })
 
@@ -181,17 +187,17 @@ export type ActionConfig = z.infer<typeof configSchema>
  * getInput, except booleans, which arrive pre-parsed via getBooleanInput
  * (it enforces the YAML 1.2 core-schema list — true|True|TRUE and the
  * false equivalents — and throws on anything else, so string→boolean
- * parsing isn't reinvented here). Collected in main.ts so this module
- * stays pure and testable with plain objects; the remaining validation
- * and coercion happens in parseConfig.
+ * parsing isn't reinvented here) or undefined when the input was empty.
+ * Collected in main.ts so this module stays pure and testable with plain
+ * objects; the remaining validation and coercion happens in parseConfig.
  */
 export type RawInputs = Omit<
   Record<keyof ActionConfig, string>,
   "traceRelatedFiles" | "costSummary" | "respectLinguistGenerated"
 > & {
-  traceRelatedFiles: boolean
-  costSummary: boolean
-  respectLinguistGenerated: boolean
+  traceRelatedFiles: boolean | undefined
+  costSummary: boolean | undefined
+  respectLinguistGenerated: boolean | undefined
 }
 
 export const parseConfig = (rawInputs: RawInputs): ActionConfig => {

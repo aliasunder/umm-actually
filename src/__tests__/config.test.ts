@@ -1,5 +1,57 @@
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { parse as parseYaml } from "yaml"
+import { z } from "zod"
 import { DEFAULT_DIFF_EXCLUDE_PATTERNS, parseConfig, type RawInputs } from "../config.js"
+
+const actionManifestSchema = z.object({
+  inputs: z.record(z.string(), z.object({ default: z.string().optional() })),
+})
+
+/** Every input action.yml declares, with its default ("" when it has none). */
+const actionInputDefaults = (): Map<string, string> => {
+  const manifest = actionManifestSchema.parse(
+    parseYaml(readFileSync(new URL("../../action.yml", import.meta.url), "utf8")),
+  )
+  return new Map(
+    Object.entries(manifest.inputs).map(([inputName, input]) => [inputName, input.default ?? ""]),
+  )
+}
+
+/** Builds RawInputs the way main.ts collects them, reading each input by its
+ *  action.yml name. The two required tokens get fixed test values. */
+const rawInputsFrom = (valueOf: (inputName: string) => string): RawInputs => {
+  const booleanOf = (inputName: string): boolean | undefined => {
+    const value = valueOf(inputName)
+    return value ? value === "true" : undefined
+  }
+
+  return {
+    githubToken: "ghs_testtoken",
+    openrouterApiKey: "sk-or-testkey",
+    model: valueOf("model"),
+    fallbackModel: valueOf("fallback_model"),
+    requestTimeoutSeconds: valueOf("request_timeout_seconds"),
+    reviewTimeoutSeconds: valueOf("review_timeout_seconds"),
+    maxFindings: valueOf("max_findings"),
+    severityThreshold: valueOf("severity_threshold"),
+    conventionsFile: valueOf("conventions_file"),
+    conventionsBudgetTokens: valueOf("conventions_budget_tokens"),
+    phases: valueOf("phases"),
+    contextBudgetTokens: valueOf("context_budget_tokens"),
+    traceRelatedFiles: booleanOf("trace_related_files"),
+    maxScanFiles: valueOf("max_scan_files"),
+    maxScanBytes: valueOf("max_scan_bytes"),
+    maxRelatedFiles: valueOf("max_related_files"),
+    maxRelatedDocs: valueOf("max_related_docs"),
+    priorityDocs: valueOf("priority_docs"),
+    excludePaths: valueOf("exclude_paths"),
+    diffExcludePaths: valueOf("diff_exclude_paths"),
+    respectLinguistGenerated: booleanOf("respect_linguist_generated"),
+    costSummary: booleanOf("cost_summary"),
+    prNumberOverride: valueOf("pr_number"),
+  }
+}
 
 const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
   githubToken: "ghs_testtoken",
@@ -29,6 +81,35 @@ const makeRawInputs = (overrides: Partial<RawInputs> = {}): RawInputs => ({
 })
 
 describe("parseConfig", () => {
+  it("reads every input action.yml declares when building the default comparison", () => {
+    const readInputNames = new Set<string>(["github_token", "openrouter_api_key"])
+
+    rawInputsFrom((inputName) => {
+      readInputNames.add(inputName)
+      return ""
+    })
+
+    expect([...readInputNames].toSorted()).toEqual([...actionInputDefaults().keys()].toSorted())
+  })
+
+  it("treats every empty optional input as its action.yml default, except priority_docs", () => {
+    const defaults = actionInputDefaults()
+
+    const defaultOf = (inputName: string): string => {
+      const defaultValue = defaults.get(inputName)
+
+      if (defaultValue === undefined) throw new Error(`action.yml declares no input ${inputName}`)
+      return defaultValue
+    }
+
+    const fromActionDefaults = parseConfig(rawInputsFrom(defaultOf))
+    const fromEmptyInputs = parseConfig(rawInputsFrom(() => ""))
+
+    // An empty priority_docs disables priority docs instead of selecting README.md
+    expect(fromEmptyInputs).toEqual({ ...fromActionDefaults, priorityDocs: [] })
+    expect(fromActionDefaults.priorityDocs).toEqual(["README.md"])
+  })
+
   it("parses a full set of valid inputs into typed config", () => {
     const config = parseConfig(makeRawInputs())
 
@@ -168,12 +249,6 @@ describe("parseConfig", () => {
     )
   })
 
-  it("rejects an empty context_budget_tokens", () => {
-    expect(() => parseConfig(makeRawInputs({ contextBudgetTokens: "" }))).toThrow(
-      'contextBudgetTokens: "" is not a positive integer',
-    )
-  })
-
   it("passes a false trace_related_files through unchanged", () => {
     const config = parseConfig(makeRawInputs({ traceRelatedFiles: false }))
 
@@ -192,12 +267,6 @@ describe("parseConfig", () => {
     const config = parseConfig(makeRawInputs({ severityThreshold: "extreme" }))
 
     expect(config.severityThreshold).toBe("extreme")
-  })
-
-  it("rejects an empty severity_threshold", () => {
-    expect(() => parseConfig(makeRawInputs({ severityThreshold: "" }))).toThrow(
-      "severityThreshold: severity_threshold must not be empty",
-    )
   })
 
   it("parses a provided pr_number override into a number", () => {
