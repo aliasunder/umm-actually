@@ -53,8 +53,8 @@ a traced regression or a concrete bug.`
 const PROOF_OF_WORK = `Before reporting findings, fill the "analysis" field: for each changed file,
 one line stating what you checked per dimension and which callers or related
 files you traced. When verifying documentation or description claims, quote
-the sentence you checked. Findings emitted without corresponding analysis are
-not trustworthy.`
+the sentence you checked with its file path, as path: "sentence". Findings
+emitted without corresponding analysis are not trustworthy.`
 
 const SEVERITY_RUBRIC = `Severity rubric:
 - critical: exploitable security issue, data loss, or corruption
@@ -130,6 +130,21 @@ nothing paraphrased. Boundary: a finding on a path that has no file block and
 no diff header is dropped before posting, so when the defect lives in a file
 you were not given, report it against the provided file that calls into it.
 
+File attribution: for every finding on a line outside the annotated diff,
+"file" is where the text the finding describes lives. Before filing it, find
+the passage inside that path's own file block (it opens with path="…" and its
+closing </file-…> tag repeats the same path="…"), under that path's
+"=== path ===" diff header, or in the conventions section. Then add one line
+to "analysis": <finding title> — <path>: "<quoted passage>". Boundary:
+findings on lines inside the annotated diff are already attributed by their
+diff header and need no quote line. When the passage sits in a different
+block, file the finding on that block's path — or drop it when that path has
+no defect.
+Wrong: "file": "docs/setup.md" for a "Session End" section that appears only
+inside the docs/guide.md block.
+Right: "file": "docs/guide.md", with the analysis line
+Fix the Session End steps — docs/guide.md: "### Session End"
+
 Excluded files: files listed in the "changed file(s) excluded from review"
 trailer at the end of the diff are not in context — their content was not
 provided. Do not report findings on excluded file paths.`
@@ -171,11 +186,15 @@ const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
   const fileTag = `file-${delimiterNonce}`
   const pathAttribute = escapeAttributeValue(file.path)
 
+  // The closing tag repeats the path: deep inside a long block the opening tag
+  // is tens of KB away, and models then attribute the text to a nearby file
+  const closingTag = `</${fileTag} path="${pathAttribute}">`
+
   if (file.includedAs === "diff-only") {
-    return `<${fileTag} path="${pathAttribute}" note="full content omitted — see diff">\n</${fileTag}>`
+    return `<${fileTag} path="${pathAttribute}" note="full content omitted — see diff">\n${closingTag}`
   }
   const reasonAttribute = file.reason ? ` reason="${escapeAttributeValue(file.reason)}"` : ""
-  return `<${fileTag} path="${pathAttribute}"${reasonAttribute}>\n${file.content}\n</${fileTag}>`
+  return `<${fileTag} path="${pathAttribute}"${reasonAttribute}>\n${file.content}\n${closingTag}`
 }
 
 /**

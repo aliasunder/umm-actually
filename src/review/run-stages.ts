@@ -78,6 +78,10 @@ const runStage = async (
           attemptCount: result.attempts.length,
           findingsCount: result.review.findings.length,
         })
+        logger.debug("review phase analysis", {
+          phase: phase.id,
+          analysis: result.review.analysis,
+        })
         return { phase, status: "completed", result }
       } catch (error) {
         logger.warn("review phase failed", {
