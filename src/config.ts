@@ -20,7 +20,7 @@ const optionalPositiveInteger = z.string().transform((value, ctx) => {
   return value ? parsePositiveInteger(value, ctx) : undefined
 })
 
-// An empty string means "not provided": a workflow wiring an unset repo
+// An empty string means "not provided". A workflow wiring an unset repo
 // variable passes "", and that must select the action.yml default rather than
 // fail. Each default below mirrors action.yml, and a config.test.ts test
 // fails when they drift apart
@@ -30,14 +30,6 @@ const positiveIntegerOrDefault = (defaultValue: number) => {
     return value ? parsePositiveInteger(value, ctx) : defaultValue
   })
 }
-
-const stringOrDefault = (defaultValue: string) => {
-  return z.string().transform((value) => value || defaultValue)
-}
-
-/** Booleans arrive from getBooleanInput already parsed, or undefined when the
- *  input was empty (getBooleanInput itself throws on an empty value). */
-const booleanOrDefault = (defaultValue: boolean) => z.boolean().default(defaultValue)
 
 /** Ceiling that keeps seconds × 1000 within the 2^31−1 ms timer cap.
  *  Beyond it, setTimeout clamps the delay to 1 ms and every request
@@ -140,21 +132,21 @@ const diffExcludePathsInput = z.string().transform((value, ctx) => {
 const configSchema = z.object({
   githubToken: z.string().min(1, "github_token is required"),
   openrouterApiKey: z.string().min(1, "openrouter_api_key is required"),
-  model: stringOrDefault("anthropic/claude-sonnet-4-6"),
+  model: z.string().transform((value) => value || "anthropic/claude-sonnet-4-6"),
   fallbackModel: z.string(),
   requestTimeoutSeconds: timerSafeSeconds(900),
   reviewTimeoutSeconds: timerSafeSeconds(1500),
   maxFindings: optionalPositiveInteger,
   // Checked for shape only; review/finding.ts resolveSeverityThreshold
   // validates the value at startup
-  severityThreshold: stringOrDefault("low"),
-  conventionsFile: stringOrDefault("AGENTS.md"),
+  severityThreshold: z.string().transform((value) => value || "low"),
+  conventionsFile: z.string().transform((value) => value || "AGENTS.md"),
   conventionsBudgetTokens: positiveIntegerOrDefault(8_000),
   // Checked for shape only; review/phases.ts resolveStages validates the
   // value at startup
-  phases: stringOrDefault("combined"),
+  phases: z.string().transform((value) => value || "combined"),
   contextBudgetTokens: positiveIntegerOrDefault(300_000),
-  traceRelatedFiles: booleanOrDefault(true),
+  traceRelatedFiles: z.boolean().default(true),
   // The scans are bounded because missing a related file on a pathological
   // repo costs less than an unbounded walk
   maxScanFiles: positiveIntegerOrDefault(5_000),
@@ -177,8 +169,8 @@ const configSchema = z.object({
       .filter((segment) => segment !== "" && segment !== ".")
   }),
   diffExcludePaths: diffExcludePathsInput,
-  respectLinguistGenerated: booleanOrDefault(true),
-  costSummary: booleanOrDefault(true),
+  respectLinguistGenerated: z.boolean().default(true),
+  costSummary: z.boolean().default(true),
   prNumberOverride: optionalPositiveInteger,
 })
 

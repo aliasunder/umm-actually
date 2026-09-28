@@ -52,18 +52,15 @@ const exitOnCancellationSignal = (signalName: NodeJS.Signals): void => {
 process.on("SIGINT", exitOnCancellationSignal)
 process.on("SIGTERM", exitOnCancellationSignal)
 
-/** getBooleanInput throws on an empty value, so an empty input is passed on
- *  as undefined and parseConfig applies the default. */
-const booleanInputOrUndefined = (name: string): boolean | undefined => {
-  return core.getInput(name) ? core.getBooleanInput(name) : undefined
-}
-
 /**
- * Collects raw inputs at the SDK boundary. Strings come from getInput;
- * booleans come pre-parsed from getBooleanInput, which enforces the strict
- * YAML 1.2 core-schema list (true|True|TRUE / false|False|FALSE) and throws
- * on anything else. The runner fills in the action.yml default for an
- * omitted input; parseConfig applies it for an explicitly empty one.
+ * Collects raw inputs at the SDK boundary.
+ * - Strings come from getInput.
+ * - Booleans come pre-parsed from getBooleanInput, which accepts only the YAML
+ *   1.2 core-schema values (true|True|TRUE / false|False|FALSE) and throws on
+ *   anything else, an empty value included. An empty boolean input therefore
+ *   skips it and passes undefined.
+ * - The runner fills in the action.yml default for an omitted input;
+ *   parseConfig applies it for an explicitly empty one.
  */
 const collectRawInputs = (): RawInputs => ({
   githubToken: core.getInput("github_token", { required: true }),
@@ -78,7 +75,9 @@ const collectRawInputs = (): RawInputs => ({
   conventionsBudgetTokens: core.getInput("conventions_budget_tokens"),
   phases: core.getInput("phases"),
   contextBudgetTokens: core.getInput("context_budget_tokens"),
-  traceRelatedFiles: booleanInputOrUndefined("trace_related_files"),
+  traceRelatedFiles: core.getInput("trace_related_files")
+    ? core.getBooleanInput("trace_related_files")
+    : undefined,
   maxScanFiles: core.getInput("max_scan_files"),
   maxScanBytes: core.getInput("max_scan_bytes"),
   maxRelatedFiles: core.getInput("max_related_files"),
@@ -86,8 +85,10 @@ const collectRawInputs = (): RawInputs => ({
   priorityDocs: core.getInput("priority_docs"),
   excludePaths: core.getInput("exclude_paths"),
   diffExcludePaths: core.getInput("diff_exclude_paths"),
-  respectLinguistGenerated: booleanInputOrUndefined("respect_linguist_generated"),
-  costSummary: booleanInputOrUndefined("cost_summary"),
+  respectLinguistGenerated: core.getInput("respect_linguist_generated")
+    ? core.getBooleanInput("respect_linguist_generated")
+    : undefined,
+  costSummary: core.getInput("cost_summary") ? core.getBooleanInput("cost_summary") : undefined,
   prNumberOverride: core.getInput("pr_number"),
 })
 

@@ -148,8 +148,8 @@ jobs:
           # import-traced code files only; max_related_docs caps
           # mention-matched docs only and NEVER counts priority_docs
           # (those are excluded from its bucket)
-          max_related_files: ${{ vars.UMM_MAX_RELATED_FILES || '8' }}
-          max_related_docs: ${{ vars.UMM_MAX_RELATED_DOCS || '4' }}
+          max_related_files: ${{ vars.UMM_MAX_RELATED_FILES || '15' }}
+          max_related_docs: ${{ vars.UMM_MAX_RELATED_DOCS || '10' }}
           # Comma-separated folder paths from the repo root, excluded from the
           # repo scans — invisible to import-tracing and doc-mention matching.
           # Full-path match: `fixtures` does not exclude `src/fixtures`.
