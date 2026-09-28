@@ -72,12 +72,6 @@ const SCANNABLE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".js
 /** Dependency, VCS, and build-output trees — never review context. */
 const PRUNED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", "out", "coverage"])
 
-/** Scan bounds: a related-files miss on a pathological repo beats an unbounded walk. */
-export const DEFAULT_MAX_SCAN_FILES = 5_000
-export const DEFAULT_MAX_SCAN_BYTES = 262_144
-export const DEFAULT_RELATED_FILES_MAX = 8
-export const DEFAULT_RELATED_DOCS_MAX = 4
-
 export type ContextReaderConfig = {
   workspaceRoot: string
   maxScanFiles: number

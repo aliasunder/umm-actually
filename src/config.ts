@@ -17,7 +17,7 @@ const parsePositiveInteger = (value: string, ctx: z.RefinementCtx): number => {
 
 /** Empty string means "not provided"; anything else must parse as a positive integer. */
 const optionalPositiveInteger = z.string().transform((value, ctx) => {
-  return value === "" ? undefined : parsePositiveInteger(value, ctx)
+  return value ? parsePositiveInteger(value, ctx) : undefined
 })
 
 // An empty string means "not provided": a workflow wiring an unset repo
@@ -27,7 +27,7 @@ const optionalPositiveInteger = z.string().transform((value, ctx) => {
 
 const positiveIntegerOrDefault = (defaultValue: number) => {
   return z.string().transform((value, ctx) => {
-    return value === "" ? defaultValue : parsePositiveInteger(value, ctx)
+    return value ? parsePositiveInteger(value, ctx) : defaultValue
   })
 }
 
@@ -155,6 +155,8 @@ const configSchema = z.object({
   phases: stringOrDefault("combined"),
   contextBudgetTokens: positiveIntegerOrDefault(300_000),
   traceRelatedFiles: booleanOrDefault(true),
+  // The scans are bounded because missing a related file on a pathological
+  // repo costs less than an unbounded walk
   maxScanFiles: positiveIntegerOrDefault(5_000),
   maxScanBytes: positiveIntegerOrDefault(524_288),
   maxRelatedFiles: positiveIntegerOrDefault(15),
