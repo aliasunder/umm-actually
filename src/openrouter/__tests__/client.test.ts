@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
-import { createTestLogger } from "../../__tests__/test-logger.js"
+import { createTestLogger, type CapturedLog, type TestLogger } from "../../__tests__/test-logger.js"
 import { reviewResponseJsonSchema } from "../../review/finding.js"
 import {
   createOpenRouterClient,
@@ -145,6 +145,12 @@ const sentCeilings = (stub: {
 }
 
 const CEILING_RETRY_LOG = "retrying with an output ceiling that fits the endpoint's context window"
+
+/** Every captured entry with this message, in order — asserted whole so a
+ *  duplicate or missing emission fails, while other operations' logs don't. */
+const logsWithMessage = (logger: TestLogger, message: string): CapturedLog[] => {
+  return logger.messages.filter((entry) => entry.message === message)
+}
 
 /** The rejection of a request expected to fail, so its fields can be asserted. */
 const captureRejection = async (request: Promise<unknown>): Promise<unknown> => {
@@ -647,16 +653,18 @@ describe("requestReview", () => {
       costUsd: null,
       errorSummary: "Request timed out",
     })
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "review attempt failed",
-      data: {
-        model: "openai/gpt-5-mini",
-        attemptNumber: 1,
-        outcome: "api_error",
-        errorSummary: "Request timed out",
+    expect(logsWithMessage(logger, "review attempt failed")).toEqual([
+      {
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          model: "openai/gpt-5-mini",
+          attemptNumber: 1,
+          outcome: "api_error",
+          errorSummary: "Request timed out",
+        },
       },
-    })
+    ])
   })
 
   it("passes a live (non-aborted) AbortSignal to the SDK call", async () => {
@@ -719,7 +727,9 @@ describe("requestReview", () => {
         "review request failed after 2 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); openai/gpt-5-mini: timeout (no response within 45s)",
       )
       expect(stub.sendCalls[0]?.options?.signal?.aborted).toBe(true)
-      expect(logger.messages).toContainEqual({
+
+      // One orphan settlement per timed-out attempt
+      const abortedSettlement = {
         level: "warn",
         message: "deadline-elapsed request settled",
         data: {
@@ -730,7 +740,11 @@ describe("requestReview", () => {
           settledWith: "abort_error",
           error: "Request aborted by client",
         },
-      })
+      }
+      expect(logsWithMessage(logger, "deadline-elapsed request settled")).toEqual([
+        abortedSettlement,
+        abortedSettlement,
+      ])
     } finally {
       vi.useRealTimers()
     }
@@ -782,33 +796,41 @@ describe("requestReview", () => {
           errorSummary: null,
         },
       ])
-      expect(logger.messages).toContainEqual({
-        level: "info",
-        message: "advancing to fallback model without same-model retry",
-        data: {
-          from: "openai/gpt-5-mini",
-          to: "anthropic/claude-haiku-4.5",
+      expect(
+        logsWithMessage(logger, "advancing to fallback model without same-model retry"),
+      ).toEqual([
+        {
+          level: "info",
+          message: "advancing to fallback model without same-model retry",
+          data: {
+            from: "openai/gpt-5-mini",
+            to: "anthropic/claude-haiku-4.5",
+          },
         },
-      })
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "request deadline elapsed",
-        data: {
-          operation: "chat request",
-          model: "openai/gpt-5-mini",
-          timeoutMs: 45_000,
+      ])
+      expect(logsWithMessage(logger, "request deadline elapsed")).toEqual([
+        {
+          level: "warn",
+          message: "request deadline elapsed",
+          data: {
+            operation: "chat request",
+            model: "openai/gpt-5-mini",
+            timeoutMs: 45_000,
+          },
         },
-      })
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "review attempt failed",
-        data: {
-          model: "openai/gpt-5-mini",
-          attemptNumber: 1,
-          outcome: "timeout",
-          errorSummary: "no response within 45s",
+      ])
+      expect(logsWithMessage(logger, "review attempt failed")).toEqual([
+        {
+          level: "warn",
+          message: "review attempt failed",
+          data: {
+            model: "openai/gpt-5-mini",
+            attemptNumber: 1,
+            outcome: "timeout",
+            errorSummary: "no response within 45s",
+          },
         },
-      })
+      ])
     } finally {
       vi.useRealTimers()
     }
@@ -846,17 +868,19 @@ describe("requestReview", () => {
 
       await vi.advanceTimersByTimeAsync(75_000)
 
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "deadline-elapsed request settled",
-        data: {
-          operation: "chat request",
-          model: "openai/gpt-5-mini",
-          elapsedMs: 120_000,
-          timeoutMs: 45_000,
-          settledWith: "response",
+      expect(logsWithMessage(logger, "deadline-elapsed request settled")).toEqual([
+        {
+          level: "warn",
+          message: "deadline-elapsed request settled",
+          data: {
+            operation: "chat request",
+            model: "openai/gpt-5-mini",
+            elapsedMs: 120_000,
+            timeoutMs: 45_000,
+            settledWith: "response",
+          },
         },
-      })
+      ])
     } finally {
       vi.useRealTimers()
     }
@@ -893,18 +917,20 @@ describe("requestReview", () => {
       ])
       await vi.advanceTimersByTimeAsync(75_000)
 
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "deadline-elapsed request settled",
-        data: {
-          operation: "chat request",
-          model: "openai/gpt-5-mini",
-          elapsedMs: 120_000,
-          timeoutMs: 45_000,
-          settledWith: "error",
-          error: "socket hang up",
+      expect(logsWithMessage(logger, "deadline-elapsed request settled")).toEqual([
+        {
+          level: "warn",
+          message: "deadline-elapsed request settled",
+          data: {
+            operation: "chat request",
+            model: "openai/gpt-5-mini",
+            elapsedMs: 120_000,
+            timeoutMs: 45_000,
+            settledWith: "error",
+            error: "socket hang up",
+          },
         },
-      })
+      ])
     } finally {
       vi.useRealTimers()
     }
@@ -1110,20 +1136,24 @@ describe("requestReview", () => {
       const result = await reviewPromise
 
       expect(result.attempts[0]?.costUsd).toBeNull()
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "request deadline elapsed",
-        data: {
-          operation: "generation cost lookup",
-          generationId: "gen-no-cost",
-          timeoutMs: 45_000,
+      expect(logsWithMessage(logger, "request deadline elapsed")).toEqual([
+        {
+          level: "warn",
+          message: "request deadline elapsed",
+          data: {
+            operation: "generation cost lookup",
+            generationId: "gen-no-cost",
+            timeoutMs: 45_000,
+          },
         },
-      })
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "generation cost lookup failed",
-        data: { error: "no response within 45s" },
-      })
+      ])
+      expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
+        {
+          level: "warn",
+          message: "generation cost lookup failed",
+          data: { error: "no response within 45s" },
+        },
+      ])
     } finally {
       vi.useRealTimers()
     }
@@ -1267,7 +1297,7 @@ describe("requestReview", () => {
         },
       ],
     })
-    expect(logger.messages.filter((entry) => entry.message === CEILING_RETRY_LOG)).toEqual([
+    expect(logsWithMessage(logger, CEILING_RETRY_LOG)).toEqual([
       {
         level: "info",
         message: CEILING_RETRY_LOG,
@@ -1365,7 +1395,7 @@ describe("requestReview", () => {
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
       { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
     ])
-    expect(logger.messages.filter((entry) => entry.message === CEILING_RETRY_LOG)).toEqual([])
+    expect(logsWithMessage(logger, CEILING_RETRY_LOG)).toEqual([])
   })
 
   it("does not lower the ceiling when the context-overflow 400 was the model's last attempt", async () => {
@@ -1385,7 +1415,7 @@ describe("requestReview", () => {
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
       { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
     ])
-    expect(logger.messages.filter((entry) => entry.message === CEILING_RETRY_LOG)).toEqual([])
+    expect(logsWithMessage(logger, CEILING_RETRY_LOG)).toEqual([])
   })
 
   it("keeps the full ceiling when a non-400 error carries context-overflow wording", async () => {
@@ -1571,11 +1601,13 @@ describe("requestReview", () => {
     const result = await client.requestReview(requestParams)
 
     expect(result.attempts[0]?.costUsd).toBeNull()
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "generation cost lookup failed",
-      data: { error: "HTTP 500" },
-    })
+    expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
+      {
+        level: "warn",
+        message: "generation cost lookup failed",
+        data: { error: "HTTP 500" },
+      },
+    ])
   })
 
   it("degrades to a null cost with a warning when the generation lookup throws synchronously", async () => {
@@ -1592,11 +1624,13 @@ describe("requestReview", () => {
     const result = await client.requestReview(requestParams)
 
     expect(result.attempts[0]?.costUsd).toBeNull()
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "generation cost lookup failed",
-      data: { error: "lookup threw before returning a promise" },
-    })
+    expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
+      {
+        level: "warn",
+        message: "generation cost lookup failed",
+        data: { error: "lookup threw before returning a promise" },
+      },
+    ])
   })
 
   it("degrades to a null cost with a warning when the generation response has an unexpected shape", async () => {
@@ -1609,11 +1643,13 @@ describe("requestReview", () => {
     const result = await client.requestReview(requestParams)
 
     expect(result.attempts[0]?.costUsd).toBeNull()
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "unexpected generation response shape",
-      data: {},
-    })
+    expect(logsWithMessage(logger, "unexpected generation response shape")).toEqual([
+      {
+        level: "warn",
+        message: "unexpected generation response shape",
+        data: {},
+      },
+    ])
   })
 
   it("records null token counts when the response omits the usage block", async () => {
