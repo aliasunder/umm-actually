@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
-import { createTestLogger, type CapturedLog, type TestLogger } from "../../__tests__/test-logger.js"
+import { createTestLogger, logsWithMessage } from "../../__tests__/test-logger.js"
 import { reviewResponseJsonSchema } from "../../review/finding.js"
 import {
   createOpenRouterClient,
@@ -145,12 +145,6 @@ const sentCeilings = (stub: {
 }
 
 const CEILING_RETRY_LOG = "retrying with an output ceiling that fits the endpoint's context window"
-
-/** Every captured entry with this message, in order — asserted whole so a
- *  duplicate or missing emission fails, while other operations' logs don't. */
-const logsWithMessage = (logger: TestLogger, message: string): CapturedLog[] => {
-  return logger.messages.filter((entry) => entry.message === message)
-}
 
 /** The rejection of a request expected to fail, so its fields can be asserted. */
 const captureRejection = async (request: Promise<unknown>): Promise<unknown> => {
@@ -981,13 +975,9 @@ describe("requestReview", () => {
           errorSummary: null,
         },
       ])
-      // The partial matcher is deliberate — the negative must reject the
-      // advance log with any payload; an exact object would pass on a mismatch
-      expect(logger.messages).not.toContainEqual(
-        expect.objectContaining({
-          message: "advancing to fallback model without same-model retry",
-        }),
-      )
+      expect(
+        logsWithMessage(logger, "advancing to fallback model without same-model retry"),
+      ).toEqual([])
     } finally {
       vi.useRealTimers()
     }

@@ -43,7 +43,7 @@ import {
   type ReviewContext,
 } from "../orchestrate.js"
 import { makeFinding } from "../review/__tests__/make-finding.js"
-import { createTestLogger } from "./test-logger.js"
+import { createTestLogger, logsWithMessage } from "./test-logger.js"
 
 const sampleDiff = readFileSync(new URL("../../fixtures/sample.diff", import.meta.url), "utf8")
 
@@ -529,8 +529,7 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(stubs.fetchPullRequestCalls).toHaveLength(1)
-      expect(stubs.fetchPullRequestCalls[0]).toEqual({ prNumber: 42 })
+      expect(stubs.fetchPullRequestCalls).toEqual([{ prNumber: 42 }])
     })
   })
 
@@ -823,16 +822,18 @@ describe("orchestrate", () => {
 
       expect(result.findingsCount).toBe(0)
       expect(stubs.postFindingsReviewCalls).toHaveLength(0)
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "dropping finding: file not in prompt context",
-        data: {
-          phase: "combined",
-          file: "assets/logo.png",
-          line: 1,
-          category: excludedFileFinding.category,
+      expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([
+        {
+          level: "warn",
+          message: "dropping finding: file not in prompt context",
+          data: {
+            phase: "combined",
+            file: "assets/logo.png",
+            line: 1,
+            category: excludedFileFinding.category,
+          },
         },
-      })
+      ])
     })
 
     it("excludes files the repo marks linguist-generated", async () => {
@@ -1937,10 +1938,6 @@ describe("orchestrate", () => {
         "Conventions file `AGENTS.md` was truncated to its first 32000 of 32001 characters, and no full copy reached the model — raise `conventions_budget_tokens`; the file is listed in `priority_docs` but did not fit or was excluded."
       const crossingNote =
         "Conventions file `AGENTS.md` exceeds `conventions_budget_tokens` (32001 characters against a 32000-character cap) — this PR carried the full text, but later PRs that change neither it nor a file it imports will see only the first 32000 characters."
-
-      const truncationWarnings = (logger: ReturnType<typeof createTestLogger>) => {
-        return logger.messages.filter((entry) => entry.message === truncationWarning)
-      }
       const conventionsLine = (reviewSummaryMarkdown: string | null): string | undefined => {
         return reviewSummaryMarkdown?.split("\n")[4]
       }
@@ -1959,7 +1956,7 @@ describe("orchestrate", () => {
         const result = await orchestrate(stubs.deps, logger)
 
         expect(first(stubs.generateFindingsCalls).conventions).toBe(overCapConventions)
-        expect(truncationWarnings(logger)).toEqual([
+        expect(logsWithMessage(logger, truncationWarning)).toEqual([
           {
             level: "warn",
             message: truncationWarning,
@@ -2008,7 +2005,7 @@ describe("orchestrate", () => {
         expect(first(stubs.generateFindingsCalls).conventions).toBe(
           "(conventions file included in full as priority documentation below — ground convention findings in that copy)",
         )
-        expect(truncationWarnings(logger)).toEqual([])
+        expect(logsWithMessage(logger, truncationWarning)).toEqual([])
         expect(stubs.upsertSummaryCommentCalls).toEqual([
           expectedStatus({
             isFirstRun: true,
@@ -2036,7 +2033,7 @@ describe("orchestrate", () => {
         const result = await orchestrate(stubs.deps, logger)
 
         expect(first(stubs.generateFindingsCalls).conventions).toBe(overCapConventions)
-        expect(truncationWarnings(logger)).toEqual([
+        expect(logsWithMessage(logger, truncationWarning)).toEqual([
           {
             level: "warn",
             message: truncationWarning,
@@ -2080,7 +2077,7 @@ describe("orchestrate", () => {
         const result = await orchestrate(stubs.deps, logger)
 
         expect(first(stubs.generateFindingsCalls).conventions).toBe(overCapConventions)
-        expect(truncationWarnings(logger)).toEqual([])
+        expect(logsWithMessage(logger, truncationWarning)).toEqual([])
         expect(stubs.upsertSummaryCommentCalls).toEqual([
           expectedStatus({
             isFirstRun: true,
@@ -2116,7 +2113,7 @@ describe("orchestrate", () => {
 
         const result = await orchestrate(stubs.deps, logger)
 
-        expect(truncationWarnings(logger)).toEqual([])
+        expect(logsWithMessage(logger, truncationWarning)).toEqual([])
         expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
           "**Conventions:** AGENTS.md (truncated to 32000 of 32001 characters; full copy in related files)",
         )
@@ -2148,7 +2145,7 @@ describe("orchestrate", () => {
 
         const result = await orchestrate(stubs.deps, logger)
 
-        expect(truncationWarnings(logger)).toEqual([])
+        expect(logsWithMessage(logger, truncationWarning)).toEqual([])
         expect(conventionsLine(result.reviewSummaryMarkdown)).toBe(
           "**Conventions:** ./AGENTS.md (truncated to 32000 of 32001 characters; full copy in the diff of the added file)",
         )
@@ -2182,7 +2179,7 @@ describe("orchestrate", () => {
 
         const result = await orchestrate(stubs.deps, logger)
 
-        expect(truncationWarnings(logger)).toEqual([
+        expect(logsWithMessage(logger, truncationWarning)).toEqual([
           {
             level: "warn",
             message: truncationWarning,
@@ -2209,7 +2206,7 @@ describe("orchestrate", () => {
 
         const result = await orchestrate(stubs.deps, logger)
 
-        expect(truncationWarnings(logger)).toEqual([
+        expect(logsWithMessage(logger, truncationWarning)).toEqual([
           {
             level: "warn",
             message: truncationWarning,
@@ -2258,7 +2255,7 @@ describe("orchestrate", () => {
 
         const suppressionMessage =
           "conventions file read in full by priority-doc channel — suppressing truncated conventions section to avoid duplication"
-        expect(logger.messages.filter((entry) => entry.message === suppressionMessage)).toEqual([
+        expect(logsWithMessage(logger, suppressionMessage)).toEqual([
           {
             level: "info",
             message: suppressionMessage,
@@ -2274,9 +2271,9 @@ describe("orchestrate", () => {
 
     describe("context log conventions entry", () => {
       const loggedConventionsEntries = (logger: ReturnType<typeof createTestLogger>): unknown[] => {
-        return logger.messages
-          .filter((entry) => entry.message === "context sent to model")
-          .map((entry) => entry.data.conventionsFile)
+        return logsWithMessage(logger, "context sent to model").map(
+          (entry) => entry.data.conventionsFile,
+        )
       }
 
       it("names the configured file when the conventions section is sent", async () => {
@@ -2630,11 +2627,18 @@ describe("orchestrate", () => {
           totalCount: expectedMapped.standaloneFindings.length,
         }),
       ])
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "failed to post findings review — findings will re-report next run",
-        data: { error: "[Error]: boom" },
-      })
+      expect(
+        logsWithMessage(
+          logger,
+          "failed to post findings review — findings will re-report next run",
+        ),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "failed to post findings review — findings will re-report next run",
+          data: { error: "[Error]: boom" },
+        },
+      ])
     })
 
     it("continues when a beyond-diff comment post fails", async () => {
@@ -2678,15 +2682,19 @@ describe("orchestrate", () => {
           totalCount: 0,
         }),
       ])
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "failed to post beyond-diff finding — it will re-report next run",
-        data: {
-          error: "[Error]: boom",
-          file: "src/untouched.ts",
-          line: 400,
+      expect(
+        logsWithMessage(logger, "failed to post beyond-diff finding — it will re-report next run"),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "failed to post beyond-diff finding — it will re-report next run",
+          data: {
+            error: "[Error]: boom",
+            file: "src/untouched.ts",
+            line: 400,
+          },
         },
-      })
+      ])
     })
 
     it("uses complete PrContext from pull_request event without fetching", async () => {
@@ -2754,17 +2762,19 @@ describe("orchestrate", () => {
         },
       ])
 
-      expect(logger.messages).toContainEqual({
-        level: "info",
-        message: "non-finding filter applied to model output",
-        data: {
-          totalFromModel: 2,
-          kept: 1,
-          droppedAsNonFinding: 1,
-          droppedAsUnknownFile: 0,
-          duplicatesAcrossPhases: 0,
+      expect(logsWithMessage(logger, "non-finding filter applied to model output")).toEqual([
+        {
+          level: "info",
+          message: "non-finding filter applied to model output",
+          data: {
+            totalFromModel: 2,
+            kept: 1,
+            droppedAsNonFinding: 1,
+            droppedAsUnknownFile: 0,
+            duplicatesAcrossPhases: 0,
+          },
         },
-      })
+      ])
     })
 
     it("posts a beyond-diff finding on a related file as a standalone comment", async () => {
@@ -2864,27 +2874,31 @@ describe("orchestrate", () => {
           comments: realMapped.comments,
         },
       ])
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "dropping finding: file not in prompt context",
-        data: {
-          phase: "combined",
-          file: "deploy/railway/README.md and the same issues...",
-          line: 493,
-          category: "subtle_bugs",
+      expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([
+        {
+          level: "warn",
+          message: "dropping finding: file not in prompt context",
+          data: {
+            phase: "combined",
+            file: "deploy/railway/README.md and the same issues...",
+            line: 493,
+            category: "subtle_bugs",
+          },
         },
-      })
-      expect(logger.messages).toContainEqual({
-        level: "info",
-        message: "non-finding filter applied to model output",
-        data: {
-          totalFromModel: 2,
-          kept: 1,
-          droppedAsNonFinding: 0,
-          droppedAsUnknownFile: 1,
-          duplicatesAcrossPhases: 0,
+      ])
+      expect(logsWithMessage(logger, "non-finding filter applied to model output")).toEqual([
+        {
+          level: "info",
+          message: "non-finding filter applied to model output",
+          data: {
+            totalFromModel: 2,
+            kept: 1,
+            droppedAsNonFinding: 0,
+            droppedAsUnknownFile: 1,
+            duplicatesAcrossPhases: 0,
+          },
         },
-      })
+      ])
     })
 
     it("treats rename-from and deleted diff paths as known files", async () => {
@@ -2948,16 +2962,20 @@ describe("orchestrate", () => {
       ])
       expect(missingResult.findingsCount).toBe(0)
       expect(missingStubs.postIssueCommentCalls).toEqual([])
-      expect(missingLogger.messages).toContainEqual({
-        level: "warn",
-        message: "dropping finding: file not in prompt context",
-        data: {
-          phase: "combined",
-          file: "AGENTS.md",
-          line: 1,
-          category: "correctness",
+      expect(
+        logsWithMessage(missingLogger, "dropping finding: file not in prompt context"),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "dropping finding: file not in prompt context",
+          data: {
+            phase: "combined",
+            file: "AGENTS.md",
+            line: 1,
+            category: "correctness",
+          },
         },
-      })
+      ])
     })
   })
 
@@ -3253,30 +3271,34 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(findings.length - 1)
-      expect(logger.messages).toContainEqual({
-        level: "info",
-        message: "content-tier dedup suppressed finding",
-        data: {
-          file: targetFinding.file,
-          line: targetFinding.line,
-          category: targetFinding.category,
-          title: targetFinding.title,
+      expect(logsWithMessage(logger, "content-tier dedup suppressed finding")).toEqual([
+        {
+          level: "info",
+          message: "content-tier dedup suppressed finding",
+          data: {
+            file: targetFinding.file,
+            line: targetFinding.line,
+            category: targetFinding.category,
+            title: targetFinding.title,
+          },
         },
-      })
-      expect(logger.messages).toContainEqual({
-        level: "info",
-        message: "cross-run dedup against prior bot comments",
-        data: {
-          statusCommentFound: false,
-          existingAnchorCount: 1,
-          priorBotCommentCount: 1,
-          findingsAfterFilter: findings.length,
-          findingsSurvivedDedup: findings.length - 1,
-          droppedByPositional: 0,
-          droppedByContent: 1,
-          droppedByTitle: 0,
+      ])
+      expect(logsWithMessage(logger, "cross-run dedup against prior bot comments")).toEqual([
+        {
+          level: "info",
+          message: "cross-run dedup against prior bot comments",
+          data: {
+            statusCommentFound: false,
+            existingAnchorCount: 1,
+            priorBotCommentCount: 1,
+            findingsAfterFilter: findings.length,
+            findingsSurvivedDedup: findings.length - 1,
+            droppedByPositional: 0,
+            droppedByContent: 1,
+            droppedByTitle: 0,
+          },
         },
-      })
+      ])
     })
 
     it("legacy title-hash anchors don't dedup", async () => {
@@ -3372,11 +3394,15 @@ describe("orchestrate", () => {
       expect(stubs.postFindingsReviewCalls).toEqual([
         expectedFindingsReview(expectedSelection.selected),
       ])
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "failed to fetch inline comments — treating their findings as new",
-        data: { error: "[Error]: network error" },
-      })
+      expect(
+        logsWithMessage(logger, "failed to fetch inline comments — treating their findings as new"),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "failed to fetch inline comments — treating their findings as new",
+          data: { error: "[Error]: network error" },
+        },
+      ])
     })
 
     it("treats an issue-comment fetch failure as a first run", async () => {
@@ -3399,11 +3425,15 @@ describe("orchestrate", () => {
           totalCount: expectedSelection.selected.length,
         }),
       ])
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "failed to fetch issue comments — treating as a first run",
-        data: { error: "[Error]: network error" },
-      })
+      expect(
+        logsWithMessage(logger, "failed to fetch issue comments — treating as a first run"),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "failed to fetch issue comments — treating as a first run",
+          data: { error: "[Error]: network error" },
+        },
+      ])
     })
 
     it("continues without throwing when the status comment upsert fails", async () => {
@@ -3420,11 +3450,13 @@ describe("orchestrate", () => {
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
       expect(result.reviewUrl).toBe("https://github.com/test/review/1")
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "failed to upsert status comment",
-        data: { error: "[Error]: API rate limit" },
-      })
+      expect(logsWithMessage(logger, "failed to upsert status comment")).toEqual([
+        {
+          level: "warn",
+          message: "failed to upsert status comment",
+          data: { error: "[Error]: API rate limit" },
+        },
+      ])
     })
 
     const priorBotCommentsFrom = (stubs: RecordingStubs): string[] => {
@@ -3774,11 +3806,15 @@ describe("orchestrate", () => {
         expectedFindingsReview(expectedSelection.selected),
       ])
       expect(stubs.updateCheckRunCalls).toEqual([])
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "failed to create check run — review continues without one",
-        data: { error: "[Error]: HTTP 403" },
-      })
+      expect(
+        logsWithMessage(logger, "failed to create check run — review continues without one"),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "failed to create check run — review continues without one",
+          data: { error: "[Error]: HTTP 403" },
+        },
+      ])
     })
 
     it("returns the review result even when completing the check run fails", async () => {
@@ -3794,11 +3830,15 @@ describe("orchestrate", () => {
       const result = await orchestrate(stubs.deps, logger)
 
       expect(result.findingsCount).toBe(expectedSelection.selected.length)
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "failed to complete check run — it will linger in progress",
-        data: { checkRunId: 555, error: "[Error]: HTTP 500" },
-      })
+      expect(
+        logsWithMessage(logger, "failed to complete check run — it will linger in progress"),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "failed to complete check run — it will linger in progress",
+          data: { checkRunId: 555, error: "[Error]: HTTP 500" },
+        },
+      ])
     })
   })
 })
@@ -4503,13 +4543,11 @@ describe("createPromptedGenerateFindings", () => {
       priorBotComments: [],
     })
 
-    expect(requestReviewCalls).toHaveLength(1)
-    expect(requestReviewCalls[0]).toEqual(
-      expect.objectContaining({
-        model: "test/primary",
-        fallbackModel: "test/fallback",
-      }),
-    )
+    // The prompts carry a random delimiter nonce, so each call is mapped to
+    // the ladder models under test
+    expect(
+      requestReviewCalls.map(({ model, fallbackModel }) => ({ model, fallbackModel })),
+    ).toEqual([{ model: "test/primary", fallbackModel: "test/fallback" }])
   })
 
   it("includes annotated diff in the user prompt", async () => {
