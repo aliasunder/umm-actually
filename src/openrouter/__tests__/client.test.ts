@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
-import { createTestLogger } from "../../__tests__/test-logger.js"
+import { createTestLogger, type CapturedLog, type TestLogger } from "../../__tests__/test-logger.js"
 import { reviewResponseJsonSchema } from "../../review/finding.js"
 import {
   createOpenRouterClient,
@@ -117,8 +117,40 @@ const makeClient = (stub: { sdk: OpenRouterLike }) => {
   return { client, logger }
 }
 
-const makeStatusError = (statusCode: number): Error =>
-  Object.assign(new Error(`HTTP ${statusCode}`), { statusCode })
+const makeStatusError = (statusCode: number): Error => {
+  return Object.assign(new Error(`HTTP ${statusCode}`), { statusCode })
+}
+
+/** OpenRouter's 400 when the prompt plus the requested output ceiling exceeds
+ *  the routed endpoint's context window, worded as the live API words it. */
+const makeContextOverflowError = ({
+  contextLength,
+  inputTokens,
+}: {
+  contextLength: number
+  inputTokens: number
+}): Error => {
+  const message = `This endpoint's maximum context length is ${contextLength} tokens. However, you requested about ${inputTokens + 128_000} tokens (${inputTokens} of text input, 128000 in the output). Please reduce the length of either one, or use the context-compression plugin to compress your prompt automatically.`
+  return Object.assign(new Error(message), { statusCode: 400 })
+}
+
+/** The model and output ceiling of every chat request sent, in order. */
+const sentCeilings = (stub: {
+  sendCalls: { chatRequest: ChatRequestSubset }[]
+}): { model: string; maxCompletionTokens: number }[] => {
+  return stub.sendCalls.map(({ chatRequest }) => ({
+    model: chatRequest.model,
+    maxCompletionTokens: chatRequest.maxCompletionTokens,
+  }))
+}
+
+const CEILING_RETRY_LOG = "retrying with an output ceiling that fits the endpoint's context window"
+
+/** Every captured entry with this message, in order — asserted whole so a
+ *  duplicate or missing emission fails, while other operations' logs don't. */
+const logsWithMessage = (logger: TestLogger, message: string): CapturedLog[] => {
+  return logger.messages.filter((entry) => entry.message === message)
+}
 
 /** The rejection of a request expected to fail, so its fields can be asserted. */
 const captureRejection = async (request: Promise<unknown>): Promise<unknown> => {
@@ -490,7 +522,24 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams)
 
-    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["empty_content", "accepted"])
+    expect(result.attempts).toEqual([
+      {
+        model: "openai/gpt-5-mini",
+        outcome: "empty_content",
+        promptTokens: 10,
+        completionTokens: 0,
+        costUsd: null,
+        errorSummary: "response had no text content",
+      },
+      {
+        model: "openai/gpt-5-mini",
+        outcome: "accepted",
+        promptTokens: 12000,
+        completionTokens: 800,
+        costUsd: 0.0421,
+        errorSummary: null,
+      },
+    ])
   })
 
   it("advances to the fallback model after two schema mismatches", async () => {
@@ -510,10 +559,27 @@ describe("requestReview", () => {
       "openai/gpt-5-mini",
       "anthropic/claude-haiku-4.5",
     ])
-    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual([
-      "schema_mismatch",
-      "schema_mismatch",
-      "accepted",
+
+    const schemaMismatchAttempt = {
+      model: "openai/gpt-5-mini",
+      outcome: "schema_mismatch",
+      promptTokens: 11900,
+      completionTokens: 12,
+      costUsd: 0.001,
+      errorSummary:
+        "schema mismatch at analysis: Invalid input: expected string, received undefined",
+    }
+    expect(result.attempts).toEqual([
+      schemaMismatchAttempt,
+      schemaMismatchAttempt,
+      {
+        model: "anthropic/claude-haiku-4.5",
+        outcome: "accepted",
+        promptTokens: 12000,
+        completionTokens: 800,
+        costUsd: 0.0421,
+        errorSummary: null,
+      },
     ])
   })
 
@@ -587,16 +653,18 @@ describe("requestReview", () => {
       costUsd: null,
       errorSummary: "Request timed out",
     })
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "review attempt failed",
-      data: {
-        model: "openai/gpt-5-mini",
-        attemptNumber: 1,
-        outcome: "api_error",
-        errorSummary: "Request timed out",
+    expect(logsWithMessage(logger, "review attempt failed")).toEqual([
+      {
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          model: "openai/gpt-5-mini",
+          attemptNumber: 1,
+          outcome: "api_error",
+          errorSummary: "Request timed out",
+        },
       },
-    })
+    ])
   })
 
   it("passes a live (non-aborted) AbortSignal to the SDK call", async () => {
@@ -659,7 +727,9 @@ describe("requestReview", () => {
         "review request failed after 2 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); openai/gpt-5-mini: timeout (no response within 45s)",
       )
       expect(stub.sendCalls[0]?.options?.signal?.aborted).toBe(true)
-      expect(logger.messages).toContainEqual({
+
+      // One orphan settlement per timed-out attempt
+      const abortedSettlement = {
         level: "warn",
         message: "deadline-elapsed request settled",
         data: {
@@ -670,7 +740,11 @@ describe("requestReview", () => {
           settledWith: "abort_error",
           error: "Request aborted by client",
         },
-      })
+      }
+      expect(logsWithMessage(logger, "deadline-elapsed request settled")).toEqual([
+        abortedSettlement,
+        abortedSettlement,
+      ])
     } finally {
       vi.useRealTimers()
     }
@@ -722,33 +796,41 @@ describe("requestReview", () => {
           errorSummary: null,
         },
       ])
-      expect(logger.messages).toContainEqual({
-        level: "info",
-        message: "advancing to fallback model without same-model retry",
-        data: {
-          from: "openai/gpt-5-mini",
-          to: "anthropic/claude-haiku-4.5",
+      expect(
+        logsWithMessage(logger, "advancing to fallback model without same-model retry"),
+      ).toEqual([
+        {
+          level: "info",
+          message: "advancing to fallback model without same-model retry",
+          data: {
+            from: "openai/gpt-5-mini",
+            to: "anthropic/claude-haiku-4.5",
+          },
         },
-      })
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "request deadline elapsed",
-        data: {
-          operation: "chat request",
-          model: "openai/gpt-5-mini",
-          timeoutMs: 45_000,
+      ])
+      expect(logsWithMessage(logger, "request deadline elapsed")).toEqual([
+        {
+          level: "warn",
+          message: "request deadline elapsed",
+          data: {
+            operation: "chat request",
+            model: "openai/gpt-5-mini",
+            timeoutMs: 45_000,
+          },
         },
-      })
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "review attempt failed",
-        data: {
-          model: "openai/gpt-5-mini",
-          attemptNumber: 1,
-          outcome: "timeout",
-          errorSummary: "no response within 45s",
+      ])
+      expect(logsWithMessage(logger, "review attempt failed")).toEqual([
+        {
+          level: "warn",
+          message: "review attempt failed",
+          data: {
+            model: "openai/gpt-5-mini",
+            attemptNumber: 1,
+            outcome: "timeout",
+            errorSummary: "no response within 45s",
+          },
         },
-      })
+      ])
     } finally {
       vi.useRealTimers()
     }
@@ -786,17 +868,19 @@ describe("requestReview", () => {
 
       await vi.advanceTimersByTimeAsync(75_000)
 
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "deadline-elapsed request settled",
-        data: {
-          operation: "chat request",
-          model: "openai/gpt-5-mini",
-          elapsedMs: 120_000,
-          timeoutMs: 45_000,
-          settledWith: "response",
+      expect(logsWithMessage(logger, "deadline-elapsed request settled")).toEqual([
+        {
+          level: "warn",
+          message: "deadline-elapsed request settled",
+          data: {
+            operation: "chat request",
+            model: "openai/gpt-5-mini",
+            elapsedMs: 120_000,
+            timeoutMs: 45_000,
+            settledWith: "response",
+          },
         },
-      })
+      ])
     } finally {
       vi.useRealTimers()
     }
@@ -833,18 +917,20 @@ describe("requestReview", () => {
       ])
       await vi.advanceTimersByTimeAsync(75_000)
 
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "deadline-elapsed request settled",
-        data: {
-          operation: "chat request",
-          model: "openai/gpt-5-mini",
-          elapsedMs: 120_000,
-          timeoutMs: 45_000,
-          settledWith: "error",
-          error: "socket hang up",
+      expect(logsWithMessage(logger, "deadline-elapsed request settled")).toEqual([
+        {
+          level: "warn",
+          message: "deadline-elapsed request settled",
+          data: {
+            operation: "chat request",
+            model: "openai/gpt-5-mini",
+            elapsedMs: 120_000,
+            timeoutMs: 45_000,
+            settledWith: "error",
+            error: "socket hang up",
+          },
         },
-      })
+      ])
     } finally {
       vi.useRealTimers()
     }
@@ -984,6 +1070,49 @@ describe("requestReview", () => {
     }
   })
 
+  it("reports the review deadline as the cost lookup's failure when that deadline cuts the lookup short", async () => {
+    vi.useFakeTimers()
+    try {
+      const stub = makeSdkStub({
+        sendResponses: [{ value: makeNoCostChatResult() }],
+        generationResponses: [{ pending: () => new Promise(() => undefined) }],
+      })
+      const logger = createTestLogger()
+      const deadline = performance.now() + 100
+      const client = createOpenRouterClient(
+        {
+          sdk: stub.sdk,
+          requestTimeoutMs: 45_000,
+          remainingReviewMs: () => deadline - performance.now(),
+        },
+        logger,
+      )
+
+      const reviewPromise = client.requestReview(requestParams)
+      await vi.advanceTimersByTimeAsync(100)
+      await reviewPromise
+
+      expect(logger.messages.filter((entry) => entry.level === "warn")).toEqual([
+        {
+          level: "warn",
+          message: "request deadline elapsed",
+          data: {
+            operation: "generation cost lookup",
+            generationId: "gen-no-cost",
+            timeoutMs: 100,
+          },
+        },
+        {
+          level: "warn",
+          message: "generation cost lookup failed",
+          data: { error: "review deadline exceeded" },
+        },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("degrades to a null cost with both warnings when the generation lookup exceeds the deadline", async () => {
     vi.useFakeTimers()
     try {
@@ -1007,20 +1136,24 @@ describe("requestReview", () => {
       const result = await reviewPromise
 
       expect(result.attempts[0]?.costUsd).toBeNull()
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "request deadline elapsed",
-        data: {
-          operation: "generation cost lookup",
-          generationId: "gen-no-cost",
-          timeoutMs: 45_000,
+      expect(logsWithMessage(logger, "request deadline elapsed")).toEqual([
+        {
+          level: "warn",
+          message: "request deadline elapsed",
+          data: {
+            operation: "generation cost lookup",
+            generationId: "gen-no-cost",
+            timeoutMs: 45_000,
+          },
         },
-      })
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "generation cost lookup failed",
-        data: { error: "no response within 45s" },
-      })
+      ])
+      expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
+        {
+          level: "warn",
+          message: "generation cost lookup failed",
+          data: { error: "no response within 45s" },
+        },
+      ])
     } finally {
       vi.useRealTimers()
     }
@@ -1105,7 +1238,216 @@ describe("requestReview", () => {
       "openai/gpt-5-mini",
       "anthropic/claude-haiku-4.5",
     ])
-    expect(result.attempts.map((attempt) => attempt.outcome)).toEqual(["api_error", "accepted"])
+    expect(result.attempts).toEqual([
+      {
+        model: "openai/gpt-5-mini",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: "HTTP 404: HTTP 404",
+      },
+      {
+        model: "anthropic/claude-haiku-4.5",
+        outcome: "accepted",
+        promptTokens: 12000,
+        completionTokens: 800,
+        costUsd: 0.0421,
+        errorSummary: null,
+      },
+    ])
+  })
+
+  it("retries the same model with an output ceiling that fits after a context-overflow 400", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 135_762 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams)
+
+    // 262,144 window − 135,762 input − 8,192 margin
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 118_190 },
+    ])
+    expect(result).toEqual({
+      review: acceptedReview,
+      modelUsed: "openai/gpt-5-mini",
+      attempts: [
+        {
+          model: "openai/gpt-5-mini",
+          outcome: "api_error",
+          promptTokens: null,
+          completionTokens: null,
+          costUsd: null,
+          errorSummary:
+            "HTTP 400: This endpoint's maximum context length is 262144 tokens. However, you requested about 263762 tokens (135762 of text input, 128000 in the output). Please reduce the length of either one, or use the con…",
+        },
+        {
+          model: "openai/gpt-5-mini",
+          outcome: "accepted",
+          promptTokens: 12000,
+          completionTokens: 800,
+          costUsd: 0.0421,
+          errorSummary: null,
+        },
+      ],
+    })
+    expect(logsWithMessage(logger, CEILING_RETRY_LOG)).toEqual([
+      {
+        level: "info",
+        message: CEILING_RETRY_LOG,
+        data: { model: "openai/gpt-5-mini", maxCompletionTokens: 118_190 },
+      },
+    ])
+  })
+
+  it("starts the fallback model at the full output ceiling after the primary lowered it", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 135_762 }) },
+        { error: makeStatusError(500) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 118_190 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
+  })
+
+  it("advances to the fallback without a retry when a context-overflow 400 leaves no room for output", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 258_000 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
+  })
+
+  it("advances to the fallback without a retry when the fitted output ceiling is too small for a review", async () => {
+    // 262,144 window − 240,000 input − 8,192 margin = 13,952, under the 32,768 floor
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 240_000 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
+  })
+
+  it("retries at a fitted output ceiling exactly at the 32,768-token floor", async () => {
+    // 262,144 window − 221,184 input − 8,192 margin = 32,768, the floor itself
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 221_184 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 32_768 },
+    ])
+  })
+
+  it("advances to the fallback without a retry when the rejected ceiling already fit the endpoint's window", async () => {
+    // 262,144 window − 125,952 input − 8,192 margin = 128,000, the rejected
+    // ceiling itself, so lowering it cannot fix the 400
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 125_952 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
+    expect(logsWithMessage(logger, CEILING_RETRY_LOG)).toEqual([])
+  })
+
+  it("does not lower the ceiling when the context-overflow 400 was the model's last attempt", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [
+        { error: makeStatusError(500) },
+        { error: makeContextOverflowError({ contextLength: 262_144, inputTokens: 135_762 }) },
+        { value: acceptedChatResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
+    expect(logsWithMessage(logger, CEILING_RETRY_LOG)).toEqual([])
+  })
+
+  it("keeps the full ceiling when a non-400 error carries context-overflow wording", async () => {
+    const overflowWordedGatewayError = Object.assign(
+      makeContextOverflowError({ contextLength: 262_144, inputTokens: 135_762 }),
+      { statusCode: 502 },
+    )
+    const stub = makeSdkStub({
+      sendResponses: [{ error: overflowWordedGatewayError }, { value: acceptedChatResult }],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+    ])
+  })
+
+  it("advances to the fallback without a retry on a 400 that is not a context overflow", async () => {
+    const stub = makeSdkStub({
+      sendResponses: [{ error: makeStatusError(400) }, { value: acceptedChatResult }],
+    })
+    const { client } = makeClient(stub)
+
+    await client.requestReview(requestParams)
+
+    expect(sentCeilings(stub)).toEqual([
+      { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
+      { model: "anthropic/claude-haiku-4.5", maxCompletionTokens: 128_000 },
+    ])
   })
 
   it.each([401, 402, 403])(
@@ -1259,11 +1601,36 @@ describe("requestReview", () => {
     const result = await client.requestReview(requestParams)
 
     expect(result.attempts[0]?.costUsd).toBeNull()
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "generation cost lookup failed",
-      data: { error: "HTTP 500" },
-    })
+    expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
+      {
+        level: "warn",
+        message: "generation cost lookup failed",
+        data: { error: "HTTP 500" },
+      },
+    ])
+  })
+
+  it("degrades to a null cost with a warning when the generation lookup throws synchronously", async () => {
+    const sdkWithThrowingLookup: OpenRouterLike = {
+      chat: { send: async () => makeNoCostChatResult() },
+      generations: {
+        getGeneration: () => {
+          throw new Error("lookup threw before returning a promise")
+        },
+      },
+    }
+    const { client, logger } = makeClient({ sdk: sdkWithThrowingLookup })
+
+    const result = await client.requestReview(requestParams)
+
+    expect(result.attempts[0]?.costUsd).toBeNull()
+    expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
+      {
+        level: "warn",
+        message: "generation cost lookup failed",
+        data: { error: "lookup threw before returning a promise" },
+      },
+    ])
   })
 
   it("degrades to a null cost with a warning when the generation response has an unexpected shape", async () => {
@@ -1276,11 +1643,13 @@ describe("requestReview", () => {
     const result = await client.requestReview(requestParams)
 
     expect(result.attempts[0]?.costUsd).toBeNull()
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "unexpected generation response shape",
-      data: {},
-    })
+    expect(logsWithMessage(logger, "unexpected generation response shape")).toEqual([
+      {
+        level: "warn",
+        message: "unexpected generation response shape",
+        data: {},
+      },
+    ])
   })
 
   it("records null token counts when the response omits the usage block", async () => {
