@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import type { getOctokit } from "@actions/github"
 import { describe, expect, expectTypeOf, it } from "vitest"
-import { createTestLogger } from "../../__tests__/test-logger.js"
+import { createTestLogger, logsWithMessage } from "../../__tests__/test-logger.js"
 import type { ReviewComment } from "../../review/comment-mapping.js"
 import { createGithubClient, type OctokitLike } from "../client.js"
 
@@ -231,11 +231,13 @@ describe("fetchDiff", () => {
     const result = await client.fetchDiff({ prNumber: 7 })
 
     expect(result).toEqual({ kind: "too_large" })
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "diff exceeds GitHub's diff API limits",
-      data: { prNumber: 7 },
-    })
+    expect(logsWithMessage(logger, "diff exceeds GitHub's diff API limits")).toEqual([
+      {
+        level: "warn",
+        message: "diff exceeds GitHub's diff API limits",
+        data: { prNumber: 7 },
+      },
+    ])
   })
 
   it("rethrows a non-406 error", async () => {
@@ -373,11 +375,13 @@ describe("postFindingsReview", () => {
 
     expect(result).toEqual({ kind: "rejected" })
     expect(stub.createReviewCalls).toHaveLength(1)
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "inline comment anchors rejected (422)",
-      data: { prNumber: 7, rejectedCommentCount: 1 },
-    })
+    expect(logsWithMessage(logger, "inline comment anchors rejected (422)")).toEqual([
+      {
+        level: "warn",
+        message: "inline comment anchors rejected (422)",
+        data: { prNumber: 7, rejectedCommentCount: 1 },
+      },
+    ])
   })
 
   it("propagates non-422 errors", async () => {
@@ -652,11 +656,13 @@ describe("fetchBotReviewComments", () => {
     expect(comments).toHaveLength(1000)
     expect(stub.listReviewCommentsCalls).toHaveLength(10)
     expect(stub.listReviewCommentsCalls[9]).toMatchObject({ page: 10 })
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "review comments page cap reached",
-      data: { prNumber: 7, totalFetched: 1000 },
-    })
+    expect(logsWithMessage(logger, "review comments page cap reached")).toEqual([
+      {
+        level: "warn",
+        message: "review comments page cap reached",
+        data: { prNumber: 7, totalFetched: 1000 },
+      },
+    ])
   })
 
   it("maps absent line fields to null", async () => {
@@ -874,11 +880,13 @@ describe("fetchBotIssueComments", () => {
         page: index + 1,
       })),
     )
-    expect(logger.messages).toContainEqual({
-      level: "warn",
-      message: "issue comments page cap reached",
-      data: { prNumber: 7 },
-    })
+    expect(logsWithMessage(logger, "issue comments page cap reached")).toEqual([
+      {
+        level: "warn",
+        message: "issue comments page cap reached",
+        data: { prNumber: 7 },
+      },
+    ])
   })
 
   it("throws on a malformed response", async () => {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it, vi } from "vitest"
-import { createTestLogger } from "../../__tests__/test-logger.js"
+import { createTestLogger, logsWithMessage } from "../../__tests__/test-logger.js"
 import { estimateTokens } from "../../review/prompt.js"
 import {
   createContextReader,
@@ -211,11 +211,18 @@ describe("readGitAttributes", () => {
       const content = await contextReader.readGitAttributes()
 
       expect(content).toBeNull()
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "failed reading .gitattributes — linguist-generated rules unavailable",
-        data: { error: expect.stringContaining("EISDIR") },
-      })
+      expect(
+        logsWithMessage(
+          logger,
+          "failed reading .gitattributes — linguist-generated rules unavailable",
+        ),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "failed reading .gitattributes — linguist-generated rules unavailable",
+          data: { error: expect.stringContaining("EISDIR") },
+        },
+      ])
     } finally {
       await cleanup()
     }
@@ -233,11 +240,19 @@ describe("readGitAttributes", () => {
       const content = await contextReader.readGitAttributes()
 
       expect(content).toBeNull()
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: ".gitattributes exceeds the scan size cap — linguist-generated rules unavailable",
-        data: { bytes: oversizedContent.length, maxScanBytes: 16 },
-      })
+      expect(
+        logsWithMessage(
+          logger,
+          ".gitattributes exceeds the scan size cap — linguist-generated rules unavailable",
+        ),
+      ).toEqual([
+        {
+          level: "warn",
+          message:
+            ".gitattributes exceeds the scan size cap — linguist-generated rules unavailable",
+          data: { bytes: oversizedContent.length, maxScanBytes: 16 },
+        },
+      ])
     } finally {
       await cleanup()
     }
@@ -362,11 +377,18 @@ describe("readChangedFiles", () => {
       ],
       remainingTokens: 10_000 - estimateTokens(greeterContent),
     })
-    expect(logger.messages).toContainEqual({
-      level: "info",
-      message: "changed file already rendered in full elsewhere — including diff-only",
-      data: { path: "AGENTS.md" },
-    })
+    expect(
+      logsWithMessage(
+        logger,
+        "changed file already rendered in full elsewhere — including diff-only",
+      ),
+    ).toEqual([
+      {
+        level: "info",
+        message: "changed file already rendered in full elsewhere — including diff-only",
+        data: { path: "AGENTS.md" },
+      },
+    ])
   })
 
   it("normalizes diffOnlyPaths before matching changed paths", async () => {
@@ -453,11 +475,15 @@ describe("readChangedFiles", () => {
     })
 
     expect(result.files).toEqual([{ path: "src/missing.ts", content: "", includedAs: "diff-only" }])
-    expect(logger.messages).toContainEqual({
-      level: "info",
-      message: "changed file missing from checkout — including as diff-only",
-      data: { path: "src/missing.ts" },
-    })
+    expect(
+      logsWithMessage(logger, "changed file missing from checkout — including as diff-only"),
+    ).toEqual([
+      {
+        level: "info",
+        message: "changed file missing from checkout — including as diff-only",
+        data: { path: "src/missing.ts" },
+      },
+    ])
     expect(logger.messages.filter((message) => message.level === "warn")).toEqual([])
   })
 
@@ -479,14 +505,16 @@ describe("readChangedFiles", () => {
       expect(result.files).toEqual([
         { path: "src/locked.ts", content: "", includedAs: "diff-only" },
       ])
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "changed file unreadable — including as diff-only",
-        data: {
-          path: "src/locked.ts",
-          error: expect.stringContaining("EACCES"),
+      expect(logsWithMessage(logger, "changed file unreadable — including as diff-only")).toEqual([
+        {
+          level: "warn",
+          message: "changed file unreadable — including as diff-only",
+          data: {
+            path: "src/locked.ts",
+            error: expect.stringContaining("EACCES"),
+          },
         },
-      })
+      ])
     } finally {
       await cleanup()
     }
@@ -537,11 +565,19 @@ describe("readChangedFiles", () => {
       })
 
       expect(result.files).toEqual([{ path: "src/leak.ts", content: "", includedAs: "diff-only" }])
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "changed file resolves outside the reviewable workspace — including as diff-only",
-        data: { path: "src/leak.ts" },
-      })
+      expect(
+        logsWithMessage(
+          logger,
+          "changed file resolves outside the reviewable workspace — including as diff-only",
+        ),
+      ).toEqual([
+        {
+          level: "warn",
+          message:
+            "changed file resolves outside the reviewable workspace — including as diff-only",
+          data: { path: "src/leak.ts" },
+        },
+      ])
     } finally {
       await cleanup()
       await rm(outsideRoot, { recursive: true, force: true })
@@ -564,11 +600,19 @@ describe("readChangedFiles", () => {
       })
 
       expect(result.files).toEqual([{ path: "leak.ts", content: "", includedAs: "diff-only" }])
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "changed file resolves outside the reviewable workspace — including as diff-only",
-        data: { path: "leak.ts" },
-      })
+      expect(
+        logsWithMessage(
+          logger,
+          "changed file resolves outside the reviewable workspace — including as diff-only",
+        ),
+      ).toEqual([
+        {
+          level: "warn",
+          message:
+            "changed file resolves outside the reviewable workspace — including as diff-only",
+          data: { path: "leak.ts" },
+        },
+      ])
     } finally {
       await cleanup()
     }
@@ -789,14 +833,16 @@ describe("findRelatedFiles", () => {
 
       // readable.ts still arriving proves the scan carried on past the failure
       expect(relatedFiles.files.map((relatedFile) => relatedFile.path)).toEqual(["readable.ts"])
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "scanned file unreadable — excluding from context",
-        data: {
-          path: "locked.ts",
-          error: expect.stringContaining("EACCES"),
+      expect(logsWithMessage(logger, "scanned file unreadable — excluding from context")).toEqual([
+        {
+          level: "warn",
+          message: "scanned file unreadable — excluding from context",
+          data: {
+            path: "locked.ts",
+            error: expect.stringContaining("EACCES"),
+          },
         },
-      })
+      ])
     } finally {
       await cleanup()
     }
@@ -842,11 +888,18 @@ describe("findRelatedFiles", () => {
         excludePaths: [],
       })
 
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "workspace scan capped — related-file and doc detection may be incomplete",
-        data: { maxScanFiles: DEFAULT_MAX_SCAN_FILES },
-      })
+      expect(
+        logsWithMessage(
+          logger,
+          "workspace scan capped — related-file and doc detection may be incomplete",
+        ),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "workspace scan capped — related-file and doc detection may be incomplete",
+          data: { maxScanFiles: DEFAULT_MAX_SCAN_FILES },
+        },
+      ])
     } finally {
       await cleanup()
     }
@@ -1361,11 +1414,15 @@ describe("readPriorityDocs", () => {
         files: [],
         remainingTokens: estimateTokens(multibyteContent),
       })
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "priority doc exceeds remaining context budget — skipping",
-        data: { path: "README.md" },
-      })
+      expect(
+        logsWithMessage(logger, "priority doc exceeds remaining context budget — skipping"),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "priority doc exceeds remaining context budget — skipping",
+          data: { path: "README.md" },
+        },
+      ])
     } finally {
       await cleanup()
     }
@@ -1386,11 +1443,13 @@ describe("readPriorityDocs", () => {
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })
-      expect(logger.messages).toContainEqual({
-        level: "info",
-        message: "priority doc not found — skipping",
-        data: { path: "README.md" },
-      })
+      expect(logsWithMessage(logger, "priority doc not found — skipping")).toEqual([
+        {
+          level: "info",
+          message: "priority doc not found — skipping",
+          data: { path: "README.md" },
+        },
+      ])
     } finally {
       await cleanup()
     }
@@ -1411,11 +1470,13 @@ describe("readPriorityDocs", () => {
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "priority doc path escapes workspace — skipping",
-        data: { path: "../../etc/passwd" },
-      })
+      expect(logsWithMessage(logger, "priority doc path escapes workspace — skipping")).toEqual([
+        {
+          level: "warn",
+          message: "priority doc path escapes workspace — skipping",
+          data: { path: "../../etc/passwd" },
+        },
+      ])
     } finally {
       await cleanup()
     }
@@ -1437,11 +1498,13 @@ describe("readPriorityDocs", () => {
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "priority doc unreadable — skipping",
-        data: { path: "README.md", error: expect.stringContaining("EACCES") },
-      })
+      expect(logsWithMessage(logger, "priority doc unreadable — skipping")).toEqual([
+        {
+          level: "warn",
+          message: "priority doc unreadable — skipping",
+          data: { path: "README.md", error: expect.stringContaining("EACCES") },
+        },
+      ])
     } finally {
       await chmod(path.join(root, "README.md"), 0o644)
       await cleanup()
@@ -1466,11 +1529,18 @@ describe("readPriorityDocs", () => {
       })
 
       expect(result).toEqual({ files: [], remainingTokens: 100_000 })
-      expect(logger.messages).toContainEqual({
-        level: "warn",
-        message: "priority doc resolves outside the reviewable workspace — skipping",
-        data: { path: "README.md" },
-      })
+      expect(
+        logsWithMessage(
+          logger,
+          "priority doc resolves outside the reviewable workspace — skipping",
+        ),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "priority doc resolves outside the reviewable workspace — skipping",
+          data: { path: "README.md" },
+        },
+      ])
     } finally {
       await cleanup()
       await rm(outsideRoot, { recursive: true, force: true })
@@ -1545,11 +1615,15 @@ describe("readPriorityDocs", () => {
         ],
         remainingTokens: 100_000 - estimateTokens(guideContent),
       })
-      expect(logger.messages).toContainEqual({
-        level: "info",
-        message: "priority doc already in context — skipping re-read",
-        data: { path: "README.md" },
-      })
+      expect(logsWithMessage(logger, "priority doc already in context — skipping re-read")).toEqual(
+        [
+          {
+            level: "info",
+            message: "priority doc already in context — skipping re-read",
+            data: { path: "README.md" },
+          },
+        ],
+      )
     } finally {
       await cleanup()
     }
@@ -1589,11 +1663,15 @@ describe("readPriorityDocs", () => {
         ],
         remainingTokens: 100_000 - estimateTokens(readmeContent) - estimateTokens(guideContent),
       })
-      expect(logger.messages).toContainEqual({
-        level: "info",
-        message: "priority doc listed more than once — skipping duplicate",
-        data: { path: "./README.md" },
-      })
+      expect(
+        logsWithMessage(logger, "priority doc listed more than once — skipping duplicate"),
+      ).toEqual([
+        {
+          level: "info",
+          message: "priority doc listed more than once — skipping duplicate",
+          data: { path: "./README.md" },
+        },
+      ])
     } finally {
       await cleanup()
     }

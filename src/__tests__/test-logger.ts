@@ -19,6 +19,12 @@ const resolveProps = (props: Record<string, unknown>): Record<string, unknown> =
     ]),
   )
 
+/** Every captured entry with this message, in order — asserted whole so a
+ *  duplicate or missing emission fails, while other operations' logs don't. */
+export const logsWithMessage = (logger: TestLogger, message: string): CapturedLog[] => {
+  return logger.messages.filter((entry) => entry.message === message)
+}
+
 /** Logger stub that records every call (child props included) for assertion. */
 export const createTestLogger = (): TestLogger => {
   const messages: CapturedLog[] = []
