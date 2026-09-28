@@ -70,8 +70,9 @@ describe("buildSystemPrompt", () => {
         "callers or related files you traced. When verifying documentation or",
         'description claims, quote the sentence you checked as path: "sentence" — the',
         "file path it came from, or PR description for a claim in the PR description.",
-        "Report a finding only when an analysis line supports it; without one, the",
-        "finding is unverified, so trace it first or leave it out.",
+        "When the quote backs a finding, lead the line with the finding's title (see",
+        "File attribution below). Report a finding only when an analysis line supports",
+        "it; without one, the finding is unverified, so trace it first or leave it out.",
       ].join("\n"),
     )
     expect(systemPrompt).toContain("Severity rubric:")
