@@ -940,6 +940,17 @@ describe("orchestrate", () => {
       expect(reviewContext.prContext).toEqual(fixturePrContext)
     })
 
+    it("passes the configured conventions file path to generateFindings", async () => {
+      const stubs = makeOrchestrateDeps({ config: { conventionsFile: "docs/CONVENTIONS.md" } })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.generateFindingsCalls.map((context) => context.conventionsFile)).toEqual([
+        "docs/CONVENTIONS.md",
+      ])
+    })
+
     it("includes annotated diff in review context", async () => {
       const stubs = makeOrchestrateDeps()
       const logger = createTestLogger()
@@ -4528,6 +4539,44 @@ describe("createPromptedGenerateFindings", () => {
 
     const call = first(requestReviewCalls)
     expect(call.userPrompt).toContain("src/greeter.ts")
+  })
+
+  it("labels the user prompt's conventions section with the review context's conventions file", async () => {
+    const userPrompts: string[] = []
+    const stubClient: OpenRouterClient = {
+      requestReview: async (params) => {
+        userPrompts.push(params.userPrompt)
+        return { review: { analysis: "", findings: [] }, modelUsed: "m", attempts: [] }
+      },
+    }
+
+    const generate = createPromptedGenerateFindings(
+      { openrouterClient: stubClient, model: "m", fallbackModel: null },
+      createTestLogger(),
+    )
+
+    const { annotateDiff } = await import("../diff/annotate-diff.js")
+
+    await generate({
+      prContext: fixturePrContext,
+      phase: COMBINED_PHASE,
+      conventions: "test conventions",
+      conventionsFile: "docs/CONVENTIONS.md",
+      conventionsBudgetTokens: 8_000,
+      changedFiles: [],
+      relatedFiles: [],
+      relatedDocs: [],
+      annotatedDiff: annotateDiff(parseDiff(sampleDiff)),
+      priorFindings: [],
+      priorBotComments: [],
+    })
+
+    // The nonce is random per call; the backreference pins both tags to the same one
+    expect(userPrompts).toEqual([
+      expect.stringMatching(
+        /<conventions-([a-f0-9]{12}) path="docs\/CONVENTIONS\.md">\ntest conventions\n<\/conventions-\1 path="docs\/CONVENTIONS\.md">/,
+      ),
+    ])
   })
 
   it("generates a unique nonce per call", async () => {
