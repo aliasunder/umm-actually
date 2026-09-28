@@ -145,6 +145,7 @@ const sentCeilings = (stub: {
 }
 
 const CEILING_RETRY_LOG = "retrying with an output ceiling that fits the endpoint's context window"
+
 /** The rejection of a request expected to fail, so its fields can be asserted. */
 const captureRejection = async (request: Promise<unknown>): Promise<unknown> => {
   try {
@@ -974,13 +975,9 @@ describe("requestReview", () => {
           errorSummary: null,
         },
       ])
-      // The partial matcher is deliberate — the negative must reject the
-      // advance log with any payload; an exact object would pass on a mismatch
-      expect(logger.messages).not.toContainEqual(
-        expect.objectContaining({
-          message: "advancing to fallback model without same-model retry",
-        }),
-      )
+      expect(
+        logsWithMessage(logger, "advancing to fallback model without same-model retry"),
+      ).toEqual([])
     } finally {
       vi.useRealTimers()
     }

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -220,7 +220,7 @@ describe("readGitAttributes", () => {
         {
           level: "warn",
           message: "failed reading .gitattributes — linguist-generated rules unavailable",
-          data: { error: expect.stringContaining("EISDIR") },
+          data: { error: "[Error]: EISDIR: illegal operation on a directory, read" },
         },
       ])
     } finally {
@@ -484,7 +484,7 @@ describe("readChangedFiles", () => {
         data: { path: "src/missing.ts" },
       },
     ])
-    expect(logger.messages.filter((message) => message.level === "warn")).toEqual([])
+    expect(logger.messages.filter((entry) => entry.level === "warn")).toEqual([])
   })
 
   it("includes an unreadable file as diff-only with a warning", async () => {
@@ -511,7 +511,8 @@ describe("readChangedFiles", () => {
           message: "changed file unreadable — including as diff-only",
           data: {
             path: "src/locked.ts",
-            error: expect.stringContaining("EACCES"),
+            // The read goes through the realpath, so the error names the resolved temp path
+            error: `Error: EACCES: permission denied, open '${path.join(await realpath(root), "src/locked.ts")}'`,
           },
         },
       ])
@@ -530,7 +531,7 @@ describe("readChangedFiles", () => {
     })
 
     expect(result.files).toEqual([{ path: "src/data.bin", content: "", includedAs: "diff-only" }])
-    expect(logger.messages.filter((message) => message.level === "warn")).toEqual([])
+    expect(logger.messages.filter((entry) => entry.level === "warn")).toEqual([])
   })
 
   it("throws when a changed path escapes the workspace", async () => {
@@ -839,7 +840,8 @@ describe("findRelatedFiles", () => {
           message: "scanned file unreadable — excluding from context",
           data: {
             path: "locked.ts",
-            error: expect.stringContaining("EACCES"),
+            // Scanned reads skip the realpath, so the error names the temp path as created
+            error: `Error: EACCES: permission denied, open '${path.join(root, "locked.ts")}'`,
           },
         },
       ])
@@ -1502,7 +1504,11 @@ describe("readPriorityDocs", () => {
         {
           level: "warn",
           message: "priority doc unreadable — skipping",
-          data: { path: "README.md", error: expect.stringContaining("EACCES") },
+          data: {
+            path: "README.md",
+            // The read goes through the realpath, so the error names the resolved temp path
+            error: `Error: EACCES: permission denied, open '${path.join(await realpath(root), "README.md")}'`,
+          },
         },
       ])
     } finally {

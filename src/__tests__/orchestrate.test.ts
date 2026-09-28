@@ -2272,9 +2272,9 @@ describe("orchestrate", () => {
 
     describe("context log conventions entry", () => {
       const loggedConventionsEntries = (logger: ReturnType<typeof createTestLogger>): unknown[] => {
-        return logger.messages
-          .filter((entry) => entry.message === "context sent to model")
-          .map((entry) => entry.data.conventionsFile)
+        return logsWithMessage(logger, "context sent to model").map(
+          (entry) => entry.data.conventionsFile,
+        )
       }
 
       it("names the configured file when the conventions section is sent", async () => {
