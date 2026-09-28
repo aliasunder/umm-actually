@@ -28,7 +28,7 @@ const requiredPositiveInteger = z.string().transform(parsePositiveInteger)
 const maxTimeoutSeconds = Math.floor((2 ** 31 - 1) / 1000)
 
 /** Mirrors the action.yml default — keep the two in sync. */
-const defaultRequestTimeoutSeconds = 600
+const defaultRequestTimeoutSeconds = 900
 const defaultReviewTimeoutSeconds = 1500
 
 const timerSafeSeconds = (defaultSeconds: number) => {
