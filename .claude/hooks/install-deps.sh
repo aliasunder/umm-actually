@@ -28,21 +28,22 @@ checkout="$(git -C "${payload_cwd:-${CLAUDE_PROJECT_DIR:-.}}" rev-parse --show-t
   exit 0
 }
 
-# The marker, stamp, and lock all live in .claude/. A worktree entered from a
-# commit that predates this hook has no .claude/, and every mkdir lock attempt
-# would fail there as if another session held the lock.
-mkdir -p "${checkout}/.claude"
+# The marker, stamp, and lock live in the checkout's git directory, which is
+# per-worktree and never tracked. A .claude/ location would surface them as
+# untracked files in any checkout whose .gitignore predates this hook.
+state_dir="$(git -C "${checkout}" rev-parse --absolute-git-dir)"
 
 # The marker survives an interrupted npm ci (a hook-timeout kill included), so
-# a partial node_modules is retried instead of trusted. It lives outside
-# node_modules because npm ci deletes that directory before installing.
-marker="${checkout}/.claude/.install-deps-incomplete"
+# a partial node_modules is retried instead of trusted. It holds the hash of
+# the package-lock.json that install used, so recovery never stamps a tree
+# built from an older lockfile.
+marker="${state_dir}/install-deps-incomplete"
 
 # The stamp records which package-lock.json the hook's own last install used,
 # so a stamped checkout reinstalls after a pull changes the lockfile. An
 # unstamped checkout (node_modules installed by the developer, not the hook)
 # is trusted as-is — the hook must never wipe an install it does not own.
-stamp="${checkout}/.claude/.install-deps-lockhash"
+stamp="${state_dir}/install-deps-lockhash"
 lockfile_hash="$(git -C "${checkout}" hash-object package-lock.json 2>/dev/null || true)"
 
 if [[ -d "${checkout}/node_modules" && ! -f "${marker}" ]]; then
@@ -60,7 +61,7 @@ fi
 #   for it rather than race npm ci.
 # - A dead owner (hook killed mid-install) is taken over immediately, so the
 #   marker's retry is never blocked behind an orphaned lock.
-lock="${checkout}/.claude/.install-deps.lock"
+lock="${state_dir}/install-deps.lock"
 if mkdir "${lock}" 2>/dev/null; then
   echo "$$" > "${lock}/pid"
 else
@@ -169,10 +170,15 @@ trap cleanup EXIT
 
 # A hook killed by timeout can leave the marker even though its orphaned npm ci
 # finished the install. A tree that passes npm ls is complete, so this clears
-# the marker and stamps the tree instead of rebuilding it. The check runs only
-# while holding the lock, because an orphaned npm ci that is still writing
-# holds the lock, and its half-written tree can pass npm ls.
-if [[ -d "${checkout}/node_modules" && -f "${marker}" ]]; then
+# the marker and stamps the tree instead of rebuilding it.
+# - The check runs only while holding the lock, because an orphaned npm ci
+#   that is still writing holds the lock, and its half-written tree can pass
+#   npm ls.
+# - The marker's lockfile hash must match the current one. A tree built from
+#   an older lockfile passes npm ls whenever package.json ranges still hold,
+#   and stamping it would hide the lockfile change forever.
+marker_lockfile_hash="$(cat "${marker}" 2>/dev/null || true)"
+if [[ -d "${checkout}/node_modules" && -f "${marker}" && "${marker_lockfile_hash}" == "${lockfile_hash}" ]]; then
   if npm --prefix "${checkout}" ls --depth=0 >/dev/null 2>&1; then
     rm -f "${marker}"
 
@@ -188,7 +194,7 @@ if [[ -d "${checkout}/node_modules" && -f "${marker}" ]]; then
 fi
 
 cd "${checkout}"
-touch "${marker}"
+printf '%s\n' "${lockfile_hash}" > "${marker}"
 
 # Honor the checkout's .nvmrc when that Node is already installed; otherwise
 # stay on the default alias — a hook must never download a Node version.
