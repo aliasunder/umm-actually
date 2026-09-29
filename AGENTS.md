@@ -14,6 +14,10 @@ its callers, and pre-existing bugs in traced code are valid findings.
 ## Structure
 
 ```text
+.claude/                   # committed Claude Code session hooks (the rest of .claude/ is gitignored)
+  settings.json            # SessionStart + PostToolUse(EnterWorktree) → install-deps.sh
+  hooks/
+    install-deps.sh        # loads nvm, runs npm ci when a fresh clone or worktree has no node_modules
 action.yml                 # action metadata — inputs/outputs, runs.using: docker
 Dockerfile                 # multi-stage: build (tsc) → slim runtime
 fixtures/                  # test fixtures (event payloads, sample diff, LLM responses)
