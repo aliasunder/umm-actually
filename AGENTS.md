@@ -1,6 +1,6 @@
 # AGENTS.md
 
-<!-- distilled from vault Reference/code-standards-* on 2026-08-24; refresh: run the sync-code-standards skill -->
+<!-- distilled from vault Reference/code-standards-* on 2026-09-28; refresh (merges, keeps hand edits): run the sync-code-standards skill -->
 
 Project conventions for AI-assisted development on umm-actually.
 
@@ -63,15 +63,33 @@ files. Prefer SDK-provided types over redefining shapes.
   `!== undefined` comparisons — use `if (value)` not `if (value !== undefined)`
   unless distinguishing `undefined` from other falsy values (`null`, `0`, `""`,
   `false`) actually matters for correctness.
+- Model states in the type system. A result with modes is a discriminated
+  union with `never` exhaustiveness, not optional fields documented as
+  "present only in mode X". One discriminant per fact, so a new case becomes
+  a union member, never a second result shape with a converter. A param read
+  only for truthiness is typed `boolean`.
 - Immutable by default; avoid `let`. A `reduce` must return a new accumulator
   each step — never mutate-and-return. When mutation is genuinely needed,
-  add a comment justifying it.
+  add a comment justifying it. Prefer the non-mutating array methods
+  (`toSorted`, `toSpliced`, `with`, `at(-1)`, `findLast`). A helper never
+  mutates its inputs; it returns the new value and types collection params as
+  readonly views (`ReadonlyArray`, `ReadonlySet`). Readability gates any
+  refactor toward a more functional shape.
 - Explicit names over abbreviations, everywhere — params, callbacks, locals.
+  Value-returning functions name what they return (`getX`, not `ensureX`);
+  side-effect functions say what they do. A generic destructured key keeps
+  its source (`const { on: modifiedOn } = filters.modified`).
+- Wire names stay at the boundary. Action inputs are `snake_case` and
+  `ActionConfig` is `camelCase`; map once in `main.ts`/`config.ts`.
 - Early returns over nested `if/else`. When a function has a primary path and
   a secondary path (e.g. first-run vs re-run), return early from the simpler
   branch so the remaining code flows linearly without nesting. Extract
   multi-clause conditionals into named booleans. Name booleans for the
   affirmative state.
+- Never a chained ternary (a second `?` inside a ternary) or a `let`
+  assigned through if/else branches — use one `if … return` per branch in a
+  small helper, or one named const per decision step. `while (condition)`
+  over `for (;;)` + `break` when the exit condition fits the loop head.
 - Blank lines separate logical steps inside a function — each
   declaration-plus-comment block, guard, or step gets one, and a comment never
   sits directly under the previous statement. ESLint enforces the
@@ -99,14 +117,24 @@ files. Prefer SDK-provided types over redefining shapes.
   pick the format the reader absorbs quickest (bullets, numbered steps),
   never multi-paragraph prose. Inline comments go directly above the
   relevant line — don't stuff implementation details into the docstring.
-  Regex constants get doc comments.
-- Scope constants to where they're used — module level overstates
-  visibility when only one function needs the value.
+  Regex constants get doc comments. A guard's comment states the scenario,
+  the mechanism, and what breaks without it. Comments carry durable rationale
+  only, never transition history or decision narrative. Every chosen number
+  in workflow or action YAML (caps, timeouts) gets its why directly above it.
+  Comment prose uses short complete sentences, with no colon-hinged labels
+  and no verbless fragments.
+- Named constants over bare magic literals, with the one-line why at the
+  definition. Scope constants to where they're used — module level
+  overstates visibility when only one function needs the value.
 - A boolean mode param means the function does two things — split into
   two single-responsibility functions; the caller owns the gating.
-- Decomposition must earn its seams. A function whose body is one
-  expression with one call site is misdirection — inline it; extract only
-  for a second call site or a decision worth naming. A parameter a
+- Decomposition must earn its seams, and DRY targets shared decisions, not
+  repeated text. Extract when code holds one decision that must change in
+  several places together, or to name a decision worth naming. A
+  one-expression wrapper over an SDK or Zod call stays inline even with
+  several call sites (`z.boolean().default(true)` at each input, not a
+  `booleanOrDefault(true)` helper), because each site carries its own value
+  and the reader wants the logic at the line. A parameter a
   function only forwards means the seam is wrong — compile configuration
   once into a factory/closure and pass the resulting collaborator, never
   thread config through layers that don't read it. One concern stays in
@@ -121,15 +149,35 @@ files. Prefer SDK-provided types over redefining shapes.
 - Per-operation try/catch — each catch encloses one operation with one
   failure meaning. Broad catch-alls are banned. Every catch logs or
   re-throws; a swallowed error is worse than an uncaught one.
+- Throw on an unreachable null instead of a `?? ""` sentinel that silently
+  degrades data.
 - Required inputs enforced at every entry point — fail fast at boot/load.
   Making an already-expected value mandatory is a bug fix, not a breaking
   change.
-- Parse structured strings with a declarative regex (named groups), not
-  index arithmetic.
+- The declared contract and the runtime say the same thing. `action.yml` and
+  the README never advertise a default or a rejection that `config.ts`
+  doesn't perform.
+- For an external limit that varies per endpoint (a model's context
+  window), parse the real limit from the rejection and retry to fit. A
+  documented, uniform limit can be a constant.
+- LLM-facing contracts (prompt sections, the finding schema) omit an
+  optional field whose absence is unambiguous — no always-present zero
+  placeholders. Keep the field when `0`/`[]` is a legitimate value or it
+  carries structural attribution.
+- Platform built-ins before hand-rolled parsing (`URL.parse`, `node:path`);
+  with none, exact-value comparison beats string surgery. Parse genuinely
+  varying structured strings with a declarative, doc-commented regex (named
+  groups), not index arithmetic.
 - `Boolean(x)` over `!!x`. TS ≥5.5 infers `.filter()` predicates from
   bare comparisons — omit explicit type-guard annotations on `.filter()`
   with a bare null/undefined check.
 - Relative imports use explicit `.js` extensions (ESM runtime requirement).
+- Vet a new dependency's maintainers, release history and downloads before
+  adopting it; at negligible adoption with a small core, prefer a local
+  implementation. Pin dependency overrides to exact versions.
+- Simple over clever: before settling, ask whether fewer moving parts do the
+  job. A dead-code claim is proven by enumerating every trigger, not by log
+  silence.
 
 ## Test conventions
 
@@ -146,12 +194,47 @@ files. Prefer SDK-provided types over redefining shapes.
   asserting the whole value catches drift in formatting, structure, and
   attribution that field-level checks miss.
 - Two-bar rule: a test must (1) fail when the behavior breaks and (2) pass
-  only because the intended behavior occurred. Four traps against bar 2:
+  only because the intended behavior occurred. Five traps against bar 2:
   **silent no-op** (assert the trigger happened, not just that state was
   retained), **wrong-error** (`rejects.toThrow()` with no argument matches
   ANY error — assert the specific message), **early-return** (assert a
   side effect only the intended path produces), **wrong-item** (assert the
-  specific expected item, not just "something came back").
+  specific expected item, not just "something came back"),
+  **coincidental equality** (when production and test read the same source,
+  both being `undefined` passes — set a predictable value and assert it
+  exactly; `expect.any(String)` still matches `""`).
+- Deterministic error messages get exact assertions, ordered results get a
+  positional `toEqual`, and objects are matched whole, not with
+  `objectContaining`. A looser neighboring test is never the standard; write
+  the new test to this bar and surface the older one as a fix candidate.
+- A drift-catching test owns its expected value. Define the expected prompt
+  text or default in the test file; importing the production constant makes
+  both sides drift together.
+- Assert stub interactions with `toHaveBeenCalledTimes(1)` +
+  `toHaveBeenCalledWith(exactArgs)`, not `mock.calls[i][j]` readback. Derive
+  an expected value test-side; never read it back out of the call log.
+- Register cleanup at creation (`onTestFinished`, `afterEach`), because
+  cleanup at the end of a test body is skipped when an assertion throws. Use
+  Vitest helpers (`vi.mocked`, `vi.restoreAllMocks`) over module-level `let`
+  plumbing.
+- `it.each` is only for identical assertion shapes, with labeled case
+  objects and `$label` in the title. Structurally different checks get
+  separate `it()` blocks.
+- Cover error paths and boundaries (zero, one, empty), not just the happy
+  path. For every guard, ask what unrelated change could silently undo it,
+  and write the test that catches that erosion.
+- Test helpers and stubs earn their place by removing real duplication. A
+  stub must not allow a condition production can't produce, and must keep
+  the dimension under test (order, timing, size) varied.
+- For retry and deadline logic, prefer a controllable seam (an injected
+  timeout, stubbed client outcomes) over fake timers. When timing is the
+  contract, assert outcomes after advancing the clock, never the tick-by-tick
+  schedule.
+- Production code never carries test-serving structure (extra branches or
+  cache keys that exist only to isolate tests); tests own isolation through
+  factories. Production type rules apply in tests: no `!`.
+- Test a workflow shell snippet under `bash -e` before committing — Actions
+  runs `run:` steps with errexit, so use `if/then/fi` over `[ test ] && cmd`.
 - When unsure a test can fail for the right reason, mutate the production
   code and watch it fail — for that specific reason.
 - Never decompose: `toHaveLength(1)` + index-based checks is weaker than
@@ -172,15 +255,24 @@ files. Prefer SDK-provided types over redefining shapes.
 - Thread the caller's logger into domain functions so deep events inherit
   request context.
 - Levels: **error** (failed, needs attention), **warn** (degraded but
-  handled), **info** (state changes an operator cares about), **debug**
-  (diagnostic detail, off by default). Per-item loops log debug; their
-  summary logs info.
+  handled — state the fallback taken), **info** (state changes an operator
+  cares about), **debug** (diagnostic detail, off by default). Per-item loops
+  log debug; their summary logs info.
 - Never log PII, credentials, tokens, or secrets — log identifiers, not
   identity payloads. Redact via destructuring, not `delete` on copies.
 - Every catch logs the error AND enough context (path, operation) to
-  diagnose from the log alone.
-- Internal functions describe what went wrong in their own domain — never
-  name API surfaces or prescribe caller-level remediation.
+  diagnose from the log alone. Errors log as one self-contained
+  `[ErrorName]: message` string; property names are spelled out (`message`,
+  not `msg`).
+- Code that posts to GitHub logs its decision trail: the inputs it
+  considered, what it posted (findings, anchors), and a stated reason
+  whenever it skips. A bare count or "skipping" line can't be debugged.
+- Internal functions describe what went wrong in their own domain, using the
+  module's own names — never name API surfaces or prescribe caller-level
+  remediation. Input names (`max_related_files`) belong at the config
+  boundary.
+- Reject explicitly instead of normalizing silently when the normalized
+  value would post or write the wrong thing.
 
 ## Docs
 
@@ -193,6 +285,25 @@ files. Prefer SDK-provided types over redefining shapes.
   for lookups, bullets for parallel items, numbered steps for sequences);
   narrative goes in the PR description, not committed files. More than 3
   sentences of prose → wrong format. Match sibling sections in length.
+- Setting references (the README input table, `action.yml` descriptions,
+  workflow comments) state the knob, its effect, and its limits. Put the
+  valid values and the default on their own labelled lines (`Valid values:`
+  / `Default:`), never mid-sentence and never as the implementation's step
+  order.
+- Factual claims match the implementation. Mechanism words ("retries",
+  "caches", "falls back") appear only when the code implements that
+  mechanism, and conditional capabilities are stated conditionally.
+- Describe what a feature does, not why someone would use it. Use plain
+  words, gloss a jargon term once, and name the concrete referent where the
+  reader is (the input's name, not "the setting above").
+- A correction states the current design directly, with no walk-back
+  parenthetical. Before cutting "redundant" reviewed copy, check why it
+  exists; a behavior change replaces only the clause it made stale.
+- After editing a section, re-read the whole document, not just the diff. A
+  clarity pass keeps the README's value-proposition copy engaging: cut empty
+  intensifiers and keep vivid lines that are literally true.
+- A feature section that describes intrusive behavior states its opt-out
+  inline, not only in the inputs table.
 - No internal references in any public artifact — issue/PR numbers,
   task-board IDs, incident dates, deployment names, and investigation
   chronology never enter committed files, PR descriptions, or comments.
