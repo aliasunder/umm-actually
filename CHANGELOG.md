@@ -8,6 +8,37 @@
 
 
 
+
+## [0.4.9] — 2026-09-29
+
+### Features
+
+- Treat an empty input as its default and match defaults to what workflows run (#114)
+- Report conventions-file truncation on the PR (#108)
+
+### Bug Fixes
+
+- **openrouter:** Retry a context-overflow 400 with an output ceiling that fits (#110)
+- Tie each beyond-diff finding to its source file block (#109)
+
+### Documentation
+
+- Correct and clarify the input and output descriptions (#112)
+- Update CHANGELOG.md for v0.4.8
+
+### Maintenance
+
+- **lint:** Enforce declaration-guard spacing and set Prettier to 100 columns (#107)
+- **deps:** Bump docker/setup-buildx-action from 4.3.0 to 4.4.1 (#104)
+- **deps:** Bump docker/build-push-action from 7.3.0 to 7.4.0 (#103)
+- **deps:** Bump node from `2fe369e` to `0e0ff40` (#102)
+- **deps:** Bump @openrouter/sdk in the production group (#105)
+- **deps-dev:** Bump the development group with 4 updates (#106)
+
+### Other Changes
+
+- Assert each log message's full entry list instead of containment (#111)
+
 ## [0.4.8] — 2026-09-24
 
 ### Bug Fixes
