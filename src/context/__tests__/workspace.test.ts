@@ -6,26 +6,27 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it, vi } from "vitest"
 import { createTestLogger, logsWithMessage } from "../../__tests__/test-logger.js"
 import { estimateTokens } from "../../review/prompt.js"
-import {
-  createContextReader,
-  DEFAULT_MAX_SCAN_FILES,
-  DEFAULT_MAX_SCAN_BYTES,
-  DEFAULT_RELATED_FILES_MAX,
-  DEFAULT_RELATED_DOCS_MAX,
-  type ContextReaderConfig,
-} from "../workspace.js"
+import { createContextReader, type ContextReaderConfig } from "../workspace.js"
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>()
   return { ...actual, readFile: vi.fn(actual.readFile) }
 })
 
+// Test-owned limits the fixtures below are sized against (e.g. nine importers
+// against a related-files cap of eight); the action's own defaults live in
+// config.ts and are independent of these
+const MAX_SCAN_FILES = 5_000
+const MAX_SCAN_BYTES = 262_144
+const RELATED_FILES_MAX = 8
+const RELATED_DOCS_MAX = 4
+
 const defaultConfig = (workspaceRoot: string): ContextReaderConfig => ({
   workspaceRoot,
-  maxScanFiles: DEFAULT_MAX_SCAN_FILES,
-  maxScanBytes: DEFAULT_MAX_SCAN_BYTES,
-  relatedFilesMax: DEFAULT_RELATED_FILES_MAX,
-  relatedDocsMax: DEFAULT_RELATED_DOCS_MAX,
+  maxScanFiles: MAX_SCAN_FILES,
+  maxScanBytes: MAX_SCAN_BYTES,
+  relatedFilesMax: RELATED_FILES_MAX,
+  relatedDocsMax: RELATED_DOCS_MAX,
   excludePaths: [],
   remainingReviewMs: () => Infinity,
 })
@@ -874,7 +875,7 @@ describe("findRelatedFiles", () => {
 
   it("stops scanning at the file cap and warns that detection may be incomplete", async () => {
     const fillerFiles = Object.fromEntries(
-      Array.from({ length: DEFAULT_MAX_SCAN_FILES + 1 }, (_, fillerIndex) => [
+      Array.from({ length: MAX_SCAN_FILES + 1 }, (_, fillerIndex) => [
         `filler-${String(fillerIndex).padStart(5, "0")}.ts`,
         "export {}\n",
       ]),
@@ -899,7 +900,7 @@ describe("findRelatedFiles", () => {
         {
           level: "warn",
           message: "workspace scan capped — related-file and doc detection may be incomplete",
-          data: { maxScanFiles: DEFAULT_MAX_SCAN_FILES },
+          data: { maxScanFiles: MAX_SCAN_FILES },
         },
       ])
     } finally {
@@ -1160,9 +1161,9 @@ describe("findRelatedDocs", () => {
     expect(relatedDocs.files).toEqual([])
   })
 
-  it("caps results at DEFAULT_RELATED_DOCS_MAX, keeping alphabetically first docs", async () => {
+  it("caps results at the related-docs limit, keeping alphabetically first docs", async () => {
     const docFiles: Record<string, string> = {}
-    for (let fileIndex = 0; fileIndex < DEFAULT_RELATED_DOCS_MAX + 2; fileIndex++) {
+    for (let fileIndex = 0; fileIndex < RELATED_DOCS_MAX + 2; fileIndex++) {
       docFiles[`docs/doc-${fileIndex}.md`] = `# Doc ${fileIndex}\n\nSee src/target.ts for details.`
     }
     docFiles["src/target.ts"] = "export const target = true"
