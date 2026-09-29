@@ -41,11 +41,11 @@ inputs:
     required: false
     default: AGENTS.md
   conventions_budget_tokens:
-    description: Approximate token budget for the conventions file section of the prompt. A file over the budget is truncated to its beginning, with a notice in the prompt. To send the whole file, also list it in priority_docs, which reads it in full when the context budget allows. The job summary reports every truncation. The status comment and the check run's details page also report it when the whole file never reached the model, or when it reached the model only because this PR changes the file (or, for a JavaScript/TypeScript conventions file, a file it imports) and the file is not listed in priority_docs, since later PRs will see just the truncated beginning. A listed file that stops fitting is reported on the PR where it does not fit. Empty = the 8000 default, so workflows can wire an unset repo variable directly
+    description: Approximate token budget for the conventions file section of the prompt. A file over the budget is truncated to its beginning, with a notice in the prompt. To send the whole file, also list it in priority_docs, which reads it in full when the context budget allows. The job summary reports every truncation. The status comment and the check run's details page also report it when the whole file never reached the model, or when it reached the model only because this PR changes the file (or, for a JavaScript/TypeScript conventions file, a file it imports) and the file is not listed in priority_docs, since later PRs will see just the truncated beginning. A listed file that stops fitting is reported on the PR where it does not fit. Empty = the 8000 default
     required: false
     default: "8000"
   phases:
-    description: "How the review dimensions are split across model calls: `combined` (one call carrying every dimension), `parallel` (three focused calls at once — each reads deeper, wall-clock time is the slowest call, and prompt tokens roughly triple), or `sequential` (the same three calls in order, each seeing the earlier calls' findings). When two calls report findings on overlapping lines of the same file, only the higher-severity finding is kept. Empty = `combined`, so workflows can wire an unset repo variable directly"
+    description: "How the review dimensions are split across model calls: `combined` (one call carrying every dimension), `parallel` (three focused calls at once — each reads deeper, wall-clock time is the slowest call, and prompt tokens roughly triple), or `sequential` (the same three calls in order, each seeing the earlier calls' findings). When two calls report findings on overlapping lines of the same file, only the higher-severity finding is kept. Empty = `combined`"
     required: false
     default: combined
   context_budget_tokens:
@@ -78,15 +78,15 @@ inputs:
   max_scan_bytes:
     description: Maximum byte size of a single file in the repo scans; larger files are skipped. It also caps the root `.gitattributes`; a larger one is ignored, so none of its `linguist-generated` rules apply
     required: false
-    default: "262144"
+    default: "524288"
   max_related_files:
     description: Maximum import-traced related files to include in review context
     required: false
-    default: "8"
+    default: "15"
   max_related_docs:
     description: Maximum mention-matched documentation files to include in review context. `priority_docs` entries are never mention-matched and don't count toward this cap
     required: false
-    default: "4"
+    default: "10"
   exclude_paths:
     description: >-
       Comma-separated folder paths, relative to the repo root, excluded from
@@ -112,8 +112,7 @@ inputs:
       list (linguist-generated exclusions are governed separately by
       respect_linguist_generated) and "none, evals/**" replaces the list
       outright. Empty = the default
-      list (unlike exclude_paths, where empty means no exclusions), so
-      workflows can wire an unset repo variable directly. Patterns with
+      list (unlike exclude_paths, where empty means no exclusions). Patterns with
       more than 2 "*" in one path segment are rejected ("**" segments are
       exempt) — glob matching backtracks exponentially on such shapes.
       Example: none, **/__snapshots__/**
