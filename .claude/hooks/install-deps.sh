@@ -54,23 +54,6 @@ if [[ -d "${checkout}/node_modules" && ! -f "${marker}" ]]; then
   log "package-lock.json changed since the hook's last install in ${checkout} — reinstalling"
 fi
 
-# A hook killed by timeout can leave the marker even though its orphaned npm ci
-# finished the install. A tree that passes npm ls is complete — clear the
-# marker and stamp it instead of rebuilding it.
-if [[ -d "${checkout}/node_modules" && -f "${marker}" ]]; then
-  if npm --prefix "${checkout}" ls --depth=0 >/dev/null 2>&1; then
-    rm -f "${marker}"
-    # The orphaned install was still the hook's own, so it is stamped like the
-    # normal success path. Leaving it unstamped would disable the
-    # lockfile-change guard for this checkout forever.
-    if [[ -n "${lockfile_hash}" ]]; then
-      printf '%s\n' "${lockfile_hash}" > "${stamp}"
-    fi
-    log "marker left by an interrupted hook but the dependency tree in ${checkout} is complete — clearing"
-    exit 0
-  fi
-fi
-
 # mkdir is the portable atomic lock (flock is Linux-only). The lock records its
 # owner's pid.
 # - A live owner means a concurrent install is running, so this session waits
@@ -82,6 +65,16 @@ if mkdir "${lock}" 2>/dev/null; then
   echo "$$" > "${lock}/pid"
 else
   owner="$(cat "${lock}/pid" 2>/dev/null || true)"
+
+  # A live session writes its pid right after its mkdir. An empty pid file
+  # means that write is still in flight, or its writer died between the two
+  # steps. Without this re-read, two sessions starting together would treat
+  # the in-flight lock as abandoned and both run npm ci.
+  if [[ -z "${owner}" ]]; then
+    sleep 1
+    owner="$(cat "${lock}/pid" 2>/dev/null || true)"
+  fi
+
   if [[ -n "${owner}" ]] && kill -0 "${owner}" 2>/dev/null; then
     # Waiting for the live install lets this session start with dependencies
     # instead of racing a tree npm ci is actively rewriting. The 480s bound
@@ -101,15 +94,6 @@ else
       exit 0
     fi
     log "concurrent installer (pid ${owner}) died without finishing in ${checkout}"
-  fi
-
-  # Another session may have taken over the lock while this one waited.
-  # Without this re-read, a completed takeover (claim already removed) is
-  # invisible, this session's claim succeeds, and two installs run at once.
-  owner="$(cat "${lock}/pid" 2>/dev/null || true)"
-  if [[ -n "${owner}" ]] && kill -0 "${owner}" 2>/dev/null; then
-    log "another session (pid ${owner}) took over the install in ${checkout} — skipping"
-    exit 0
   fi
 
   # The claim token makes the takeover exclusive, because rm-then-mkdir alone
@@ -142,6 +126,18 @@ else
     fi
   fi
   echo "$$" > "${claim}/pid"
+
+  # Holding the claim excludes every other taker, so the lock's owner is
+  # re-read only now. A session that finished its own takeover after this one
+  # first read the lock has released its claim and installs under a live pid.
+  # Removing that lock would start a second npm ci in the same node_modules.
+  owner="$(cat "${lock}/pid" 2>/dev/null || true)"
+  if [[ -n "${owner}" ]] && kill -0 "${owner}" 2>/dev/null; then
+    rm -rf "${claim}"
+    log "another session (pid ${owner}) took over the install in ${checkout} — skipping"
+    exit 0
+  fi
+
   log "install lock owner (pid ${owner:-unknown}) is gone — taking over"
   rm -rf "${lock}"
   if ! mkdir "${lock}" 2>/dev/null; then
@@ -170,6 +166,26 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+# A hook killed by timeout can leave the marker even though its orphaned npm ci
+# finished the install. A tree that passes npm ls is complete, so this clears
+# the marker and stamps the tree instead of rebuilding it. The check runs only
+# while holding the lock, because an orphaned npm ci that is still writing
+# holds the lock, and its half-written tree can pass npm ls.
+if [[ -d "${checkout}/node_modules" && -f "${marker}" ]]; then
+  if npm --prefix "${checkout}" ls --depth=0 >/dev/null 2>&1; then
+    rm -f "${marker}"
+
+    # The orphaned install was still the hook's own, so it is stamped like the
+    # normal success path. Leaving it unstamped would disable the
+    # lockfile-change guard for this checkout forever.
+    if [[ -n "${lockfile_hash}" ]]; then
+      printf '%s\n' "${lockfile_hash}" > "${stamp}"
+    fi
+    log "marker left by an interrupted hook but the dependency tree in ${checkout} is complete — clearing"
+    exit 0
+  fi
+fi
 
 cd "${checkout}"
 touch "${marker}"
