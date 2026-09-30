@@ -3378,6 +3378,54 @@ describe("orchestrate", () => {
       expect(stubs.postFindingsReviewCalls).toEqual([expectedFindingsReview(findings.slice(1))])
     })
 
+    it("dedups a finding filed on an escaped path against a prior anchor on the decoded path", async () => {
+      const escapedFinding = makeFinding({ file: "docs/a&quot;b.md", line: 3 })
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [escapedFinding] },
+        },
+        contextReader: {
+          findRelatedDocs: async () => ({
+            files: [
+              {
+                path: 'docs/a"b.md',
+                content: "# Greeter\n\nCall greet() with a name.",
+                includedAs: "full",
+                reason: "mentions src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
+        githubClient: {
+          fetchBotIssueComments: async () => [issueFinding('docs/a"b.md:correctness:3')],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(0)
+      expect(stubs.postIssueCommentCalls).toEqual([])
+      expect(stubs.postFindingsReviewCalls).toEqual([])
+      expect(logsWithMessage(logger, "cross-run dedup against prior bot comments")).toEqual([
+        {
+          level: "info",
+          message: "cross-run dedup against prior bot comments",
+          data: {
+            statusCommentFound: false,
+            existingAnchorCount: 1,
+            priorBotCommentCount: 1,
+            findingsAfterFilter: 1,
+            findingsSurvivedDedup: 0,
+            droppedByPositional: 1,
+            droppedByContent: 0,
+            droppedByTitle: 0,
+          },
+        },
+      ])
+    })
+
     it("dedups a finding whose reported line drifted within the window", async () => {
       const findings = fixtureReviewResponse.findings
       const driftedFinding = findings[0]

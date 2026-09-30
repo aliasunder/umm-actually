@@ -145,7 +145,7 @@ A finding's `file` (the path it is filed on) must name a file the model was give
 - changed files, import-traced related files, mention-matched docs, and priority docs
 - the conventions file
 
-Other than the conventions file, files removed by `diff_exclude_paths` or linguist rules were never sent, so findings on them are dropped too. The filter compares paths and reports drops as follows:
+Files removed by `diff_exclude_paths` or linguist rules are listed by path at the end of the diff, but their content is withheld, so findings on them are dropped too. The conventions file is the exception: it is sent even when excluded. The filter compares paths and reports drops as follows:
 
 - Paths are normalized before comparison: surrounding whitespace, `.` segments, `..` segments that stay inside the repository, repeated slashes, and a leading or trailing `/` don't affect the match (`./src/x.ts`, `/src/x.ts`, and `src/x.ts` match). Matching is case-sensitive, and only whole paths match: a bare filename or a directory prefix does not.
 - A path containing `"` reaches the model with each `"` written as `&quot;` in the tags that wrap each file's content and the conventions file. A diff header prints the path as the diff spells it, and the filter matches that spelling as written. A model that copies the path from a tag writes `&quot;` into `file`, so a `file` that matches no given path as written, but matches once each `&quot;` becomes `"`, is kept and posts under that decoded path. Each such rewrite is logged at debug level (`resolved escaped finding file to a prompt path`) with the model's spelling and the decoded path.

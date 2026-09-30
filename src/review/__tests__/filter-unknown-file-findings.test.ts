@@ -6,13 +6,18 @@ import { makeFinding } from "./make-finding.js"
 describe("filterUnknownFileFindings", () => {
   it("keeps a finding whose file is a known path", () => {
     const finding = makeFinding()
+    const unknownFinding = makeFinding({ file: "src/greeter.tsx" })
 
     expect(
       filterUnknownFileFindings({
-        findings: [finding],
+        findings: [finding, unknownFinding],
         knownPaths: ["src/greeter.ts"],
       }),
-    ).toEqual({ findings: [finding], droppedAsUnknownFile: [], unescapedFileRewrites: [] })
+    ).toEqual({
+      findings: [finding],
+      droppedAsUnknownFile: [unknownFinding],
+      unescapedFileRewrites: [],
+    })
   })
 
   it("drops a finding whose file is a known path with prose appended", () => {
@@ -96,6 +101,47 @@ describe("filterUnknownFileFindings", () => {
     })
   })
 
+  it.each([
+    {
+      label: "a leading / on the finding file",
+      findingFile: "/src/greeter.ts",
+      knownPath: "src/greeter.ts",
+      unknownFile: "/lib/greeter.ts",
+    },
+    {
+      label: "a trailing / on the finding file",
+      findingFile: "src/greeter.ts/",
+      knownPath: "src/greeter.ts",
+      unknownFile: "lib/greeter.ts/",
+    },
+    {
+      label: "a leading / on the known path",
+      findingFile: "src/greeter.ts",
+      knownPath: "/src/greeter.ts",
+      unknownFile: "lib/greeter.ts",
+    },
+    {
+      label: "a trailing / on the known path",
+      findingFile: "src/greeter.ts",
+      knownPath: "src/greeter.ts/",
+      unknownFile: "lib/greeter.ts",
+    },
+  ])("ignores $label when matching", ({ findingFile, knownPath, unknownFile }) => {
+    const finding = makeFinding({ file: findingFile })
+    const unknownFinding = makeFinding({ file: unknownFile })
+
+    expect(
+      filterUnknownFileFindings({
+        findings: [finding, unknownFinding],
+        knownPaths: [knownPath],
+      }),
+    ).toEqual({
+      findings: [finding],
+      droppedAsUnknownFile: [unknownFinding],
+      unescapedFileRewrites: [],
+    })
+  })
+
   it("normalizes redundant segments before comparing", () => {
     const finding = makeFinding({ file: "src/../src//greeter.ts" })
     const unknownFinding = makeFinding({ file: "src/../lib//greeter.ts" })
@@ -165,29 +211,35 @@ describe("filterUnknownFileFindings", () => {
 
   it("decodes only &quot; and keeps the rest of the written spelling", () => {
     const escapedFinding = makeFinding({ file: "./docs/a&amp;&quot;b.md" })
+    const unknownFinding = makeFinding({ file: "./docs/a&amp;&quot;c.md", line: 40 })
     const resolvedFinding = { ...escapedFinding, file: './docs/a&amp;"b.md' }
 
     expect(
       filterUnknownFileFindings({
-        findings: [escapedFinding],
+        findings: [escapedFinding, unknownFinding],
         knownPaths: ['docs/a&amp;"b.md'],
       }),
     ).toEqual({
       findings: [resolvedFinding],
-      droppedAsUnknownFile: [],
+      droppedAsUnknownFile: [unknownFinding],
       unescapedFileRewrites: [{ writtenFile: "./docs/a&amp;&quot;b.md", finding: resolvedFinding }],
     })
   })
 
   it("keeps a known path containing a literal &quot; as written when its decoded spelling is also known", () => {
     const finding = makeFinding({ file: "docs/a&quot;b.md" })
+    const unknownFinding = makeFinding({ file: "docs/a&quot;c.md", line: 40 })
 
     expect(
       filterUnknownFileFindings({
-        findings: [finding],
+        findings: [finding, unknownFinding],
         knownPaths: ['docs/a"b.md', "docs/a&quot;b.md"],
       }),
-    ).toEqual({ findings: [finding], droppedAsUnknownFile: [], unescapedFileRewrites: [] })
+    ).toEqual({
+      findings: [finding],
+      droppedAsUnknownFile: [unknownFinding],
+      unescapedFileRewrites: [],
+    })
   })
 
   it("drops a finding whose file matches no known path before or after decoding &quot;", () => {
@@ -244,16 +296,17 @@ describe("filterUnknownFileFindings", () => {
     if (!writtenFile) throw new Error("the prompt has no file block path attribute")
 
     const finding = makeFinding({ file: writtenFile, line: 1 })
+    const unknownFinding = makeFinding({ file: "docs/a&b&quot;d.md", line: 2 })
     const resolvedFinding = { ...finding, file: 'docs/a&b"c.md' }
 
     expect(
       filterUnknownFileFindings({
-        findings: [finding],
+        findings: [finding, unknownFinding],
         knownPaths: [relatedDoc.path],
       }),
     ).toEqual({
       findings: [resolvedFinding],
-      droppedAsUnknownFile: [],
+      droppedAsUnknownFile: [unknownFinding],
       unescapedFileRewrites: [{ writtenFile, finding: resolvedFinding }],
     })
   })
