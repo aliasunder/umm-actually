@@ -308,7 +308,7 @@ describe("buildUserPrompt", () => {
 
     expect(userPrompt).toContain(
       [
-        "Documentation provided as context — priority documentation is included whether or not the diff touches it, and every other doc mentions a changed file; each block's reason attribute says which (flag any claims that have become stale):",
+        'Documentation provided as context — flag any claims that have become stale. A block whose reason is "priority documentation" is included whether or not the diff touches it; every other block\'s reason names changed files it mentions:',
         '<file-abc123def456 path="README.md" reason="priority documentation">\n# Greeter\n</file-abc123def456 path="README.md">',
         '<file-abc123def456 path="docs/api.md" reason="mentions src/greeter.ts">\n# API\n</file-abc123def456 path="docs/api.md">',
       ].join("\n\n"),

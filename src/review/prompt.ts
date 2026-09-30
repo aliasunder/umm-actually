@@ -320,14 +320,14 @@ export const buildUserPrompt = ({
     .map((relatedFile) => renderFileBlock(relatedFile, delimiterNonce))
     .join("\n\n")
 
-  // The header's two inclusion reasons are the reason strings the context
-  // reader sets (context/workspace.ts). readPriorityDocs sets "priority
-  // documentation", and findRelatedDocs sets "mentions <changed paths>".
+  // The header quotes the reason string that readPriorityDocs sets
+  // (context/workspace.ts), so a change to that string must change the header
+  // too. findRelatedDocs sets "mentions <changed paths>" on every other doc.
   const relatedDocsSection =
     relatedDocs.length === 0
       ? ""
       : [
-          "Documentation provided as context — priority documentation is included whether or not the diff touches it, and every other doc mentions a changed file; each block's reason attribute says which (flag any claims that have become stale):",
+          'Documentation provided as context — flag any claims that have become stale. A block whose reason is "priority documentation" is included whether or not the diff touches it; every other block\'s reason names changed files it mentions:',
           ...relatedDocs.map((relatedDoc) => renderFileBlock(relatedDoc, delimiterNonce)),
         ].join("\n\n")
 
