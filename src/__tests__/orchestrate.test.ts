@@ -838,78 +838,6 @@ describe("orchestrate", () => {
       ])
     })
 
-    it("keeps a finding on an escaped related-doc path under the decoded path and drops one no spelling matches", async () => {
-      const escapedFinding = makeFinding({ file: "docs/a&quot;b.md", line: 3 })
-      const unknownFinding = makeFinding({ file: "docs/c&quot;d.md", line: 5 })
-      const stubs = makeOrchestrateDeps({
-        fixtureResult: {
-          review: { analysis: "checked", findings: [escapedFinding, unknownFinding] },
-        },
-        contextReader: {
-          findRelatedDocs: async () => ({
-            files: [
-              {
-                path: 'docs/a"b.md',
-                content: "# Greeter\n\nCall greet() with a name.",
-                includedAs: "full",
-                reason: "mentions src/greeter.ts",
-              },
-            ],
-            excludedByCapPaths: [],
-          }),
-        },
-      })
-      const logger = createTestLogger()
-
-      await orchestrate(stubs.deps, logger)
-
-      expect(stubs.postIssueCommentCalls).toEqual([
-        {
-          prNumber: 7,
-          body: renderBeyondDiffFinding(
-            withRoutedModel({ ...escapedFinding, file: 'docs/a"b.md' }, "test/model"),
-          ),
-        },
-      ])
-      expect(logsWithMessage(logger, "resolved escaped finding file to a prompt path")).toEqual([
-        {
-          level: "debug",
-          message: "resolved escaped finding file to a prompt path",
-          data: {
-            phase: "combined",
-            writtenFile: "docs/a&quot;b.md",
-            resolvedFile: 'docs/a"b.md',
-            line: 3,
-          },
-        },
-      ])
-      expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([
-        {
-          level: "warn",
-          message: "dropping finding: file not in prompt context",
-          data: {
-            phase: "combined",
-            file: "docs/c&quot;d.md",
-            line: 5,
-            category: unknownFinding.category,
-          },
-        },
-      ])
-      expect(logsWithMessage(logger, "non-finding filter applied to model output")).toEqual([
-        {
-          level: "info",
-          message: "non-finding filter applied to model output",
-          data: {
-            totalFromModel: 2,
-            kept: 1,
-            droppedAsNonFinding: 0,
-            droppedAsUnknownFile: 1,
-            duplicatesAcrossPhases: 0,
-          },
-        },
-      ])
-    })
-
     it("excludes files the repo marks linguist-generated", async () => {
       const stubs = makeOrchestrateDeps({
         contextReader: {
@@ -2718,6 +2646,78 @@ describe("orchestrate", () => {
         {
           prNumber: 7,
           body: renderReroutedFinding(withRoutedModel(inDiffFinding, "test/model")),
+        },
+      ])
+    })
+
+    it("keeps a finding on an escaped related-doc path under the decoded path and drops one no spelling matches", async () => {
+      const escapedFinding = makeFinding({ file: "docs/a&quot;b.md", line: 3 })
+      const unknownFinding = makeFinding({ file: "docs/c&quot;d.md", line: 5 })
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [escapedFinding, unknownFinding] },
+        },
+        contextReader: {
+          findRelatedDocs: async () => ({
+            files: [
+              {
+                path: 'docs/a"b.md',
+                content: "# Greeter\n\nCall greet() with a name.",
+                includedAs: "full",
+                reason: "mentions src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderBeyondDiffFinding(
+            withRoutedModel({ ...escapedFinding, file: 'docs/a"b.md' }, "test/model"),
+          ),
+        },
+      ])
+      expect(logsWithMessage(logger, "resolved escaped finding file to a prompt path")).toEqual([
+        {
+          level: "debug",
+          message: "resolved escaped finding file to a prompt path",
+          data: {
+            phase: "combined",
+            writtenFile: "docs/a&quot;b.md",
+            resolvedFile: 'docs/a"b.md',
+            line: 3,
+          },
+        },
+      ])
+      expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([
+        {
+          level: "warn",
+          message: "dropping finding: file not in prompt context",
+          data: {
+            phase: "combined",
+            file: "docs/c&quot;d.md",
+            line: 5,
+            category: unknownFinding.category,
+          },
+        },
+      ])
+      expect(logsWithMessage(logger, "non-finding filter applied to model output")).toEqual([
+        {
+          level: "info",
+          message: "non-finding filter applied to model output",
+          data: {
+            totalFromModel: 2,
+            kept: 1,
+            droppedAsNonFinding: 0,
+            droppedAsUnknownFile: 1,
+            duplicatesAcrossPhases: 0,
+          },
         },
       ])
     })
