@@ -29,7 +29,7 @@ export const conventionsCharacterCap = (conventionsBudgetTokens: number): number
 /** Whether the conventions section will carry the file's complete text rather
  *  than a truncated head. A conventions file that also changed in the PR gets
  *  a changed-file block too — the caller uses this to decide which of the two
- *  copies is the full one, so exactly one full copy is ever sent. */
+ *  copies is the full one, so no more than one full copy is ever sent. */
 export const conventionsRenderInFull = (
   conventions: string,
   conventionsBudgetTokens: number,
