@@ -50,6 +50,17 @@ describe("decodeQuotedPath", () => {
       path: String.raw`x\\303.md`,
       expected: "x\\303.md",
     },
+    {
+      // parse-diff drops the second backslash of a quoted path's final escaped backslash
+      label: "a lone trailing backslash as an escaped backslash",
+      path: "dir\\\\sub\\\\ends-with\\",
+      expected: "dir\\sub\\ends-with\\",
+    },
+    {
+      label: "an escaped backslash before a lone trailing backslash",
+      path: "two\\\\\\",
+      expected: "two\\\\",
+    },
   ])("decodes $label", ({ path, expected }) => {
     expect(decodeQuotedPath(path)).toEqual({ kind: "decoded", path: expected })
   })
@@ -63,12 +74,6 @@ describe("decodeQuotedPath", () => {
   })
 
   it.each([
-    {
-      // parse-diff drops the escaped backslash of a quoted path that ends in one
-      label: "a lone trailing backslash",
-      path: "ends-with\\",
-      reason: "unrecognized escape",
-    },
     {
       label: "an unknown escape character",
       path: String.raw`bad\x.md`,
@@ -137,6 +142,33 @@ rename to "docs/\341\213\265-new.md"`
 
     expect(decoded).toEqual([
       { chunks: [], additions: 0, deletions: 0, from: "docs/ድ.md", to: "docs/ድ-new.md" },
+    ])
+  })
+
+  it("decodes a path ending in a backslash from both diff header forms", () => {
+    const quotedPath = "dir\\\\sub\\\\"
+    const editedFileDiff = [
+      `diff --git "a/${quotedPath}" "b/${quotedPath}"`,
+      "index 1111111..2222222 100644",
+      `--- "a/${quotedPath}"`,
+      `+++ "b/${quotedPath}"`,
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+    ].join("\n")
+    const renamedFileDiff = [
+      `diff --git "a/${quotedPath}" "b/${quotedPath}x"`,
+      "similarity index 100%",
+    ].join("\n")
+
+    const decodedPaths = decodeQuotedFilePaths(
+      parseDiff(`${editedFileDiff}\n${renamedFileDiff}`),
+      createTestLogger(),
+    ).map(({ from, to }) => ({ from, to }))
+
+    expect(decodedPaths).toEqual([
+      { from: "dir\\sub\\", to: "dir\\sub\\" },
+      { from: "dir\\sub\\", to: "dir\\sub\\x" },
     ])
   })
 

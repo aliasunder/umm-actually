@@ -12,8 +12,8 @@ export type QuotedPathDecoding =
  * - octal: three octal digits for one byte. Git writes the first digit as 0-3.
  * - The unnamed last branch takes any other backslash and the character after
  *   it. A backslash at the end of the path matches alone. The s flag lets that
- *   character be a newline. CHARACTER_ESCAPE_BYTES decides whether the match
- *   is a valid escape.
+ *   character be a newline. CHARACTER_ESCAPE_BYTES decides whether a
+ *   two-character match is a valid escape.
  *
  * Every character starts one of the three branches, so matchAll consumes the
  * whole path and skips nothing.
@@ -44,6 +44,12 @@ const getTokenBytes = (match: RegExpExecArray): Buffer | null => {
 
   if (literal) return Buffer.from(literal, "utf8")
   if (octal) return Buffer.of(Number.parseInt(octal, 8))
+
+  // parse-diff's `---` and `+++` parsing strips a trailing `\"` as the closing
+  // quote, so a path ending in an escaped backslash arrives with only its first
+  // backslash. A lone backslash can only match at the end of the path, and it
+  // stands for that escaped backslash.
+  if (match[0] === "\\") return Buffer.of(0x5c)
 
   const escapeByte = CHARACTER_ESCAPE_BYTES.get(match[0])
 
