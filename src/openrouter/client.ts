@@ -72,9 +72,9 @@ export type OpenRouterLike = {
 }
 
 export type OpenRouterClient = {
-  /** Every line the request logs goes through `logger`, including a late
-   *  settlement logged after the call has returned, so props the caller binds
-   *  to it tag all of them. */
+  /** Every line the request logs goes through `logger`, so props the caller
+   *  binds to it tag all of them. A timed-out HTTP call can still settle
+   *  after requestReview returns, and the line that logs it uses `logger` too. */
   requestReview: (
     params: {
       systemPrompt: string
@@ -236,16 +236,15 @@ const describeLateSettlement = <T>(late: SettledResult<T>): LateSettlement => {
 /** Bounds an SDK call with an authoritative deadline:
  *  - Resolve the deadline before aborting so it wins deterministically.
  *  - Return at the deadline even when the SDK ignores the abort.
- *  - Observe the abandoned call and log how it eventually settles. */
+ *  - Observe the abandoned call and log how it eventually settles.
+ *  - Log only timing; the caller binds the operation's identifying props to `logger`. */
 const withDeadline = async <T>(
   {
     start,
     timeoutMs,
-    logContext,
   }: {
     start: (signal: AbortSignal) => Promise<T>
     timeoutMs: number
-    logContext: Record<string, unknown>
   },
   logger: Logger,
 ): Promise<BoundedResult<T>> => {
@@ -272,11 +271,10 @@ const withDeadline = async <T>(
 
   if (bounded.status !== "timed_out") return bounded
 
-  logger.warn("request deadline elapsed", { ...logContext, timeoutMs })
+  logger.warn("request deadline elapsed", { timeoutMs })
 
   const logLateSettlement = (late: SettledResult<T>): void => {
     logger.warn("deadline-elapsed request settled", {
-      ...logContext,
       elapsedMs: DateTime.now().diff(startedAt).toMillis(),
       timeoutMs,
       settledWith: describeLateSettlement(late),
@@ -388,6 +386,8 @@ const summarizeAttempts = (attempts: ModelAttempt[]): string => {
   return attempts.map(describeAttempt).join("; ")
 }
 
+/** The client holds no logger. Each requestReview call passes its own, so
+ *  concurrent callers can tag their requests' lines with their own props. */
 export const createOpenRouterClient = ({
   sdk,
   requestTimeoutMs,
@@ -408,6 +408,8 @@ export const createOpenRouterClient = ({
 }): OpenRouterClient => {
   const requestTimeoutSummary = `no response within ${Math.round(requestTimeoutMs / 1000)}s`
 
+  /** Sends one chat request under the per-attempt deadline. Its only log lines
+   *  are withDeadline's; requestReview logs each attempt's outcome. */
   const attemptOnce = async (
     chatRequest: ChatRequestSubset,
     logger: Logger,
@@ -425,9 +427,8 @@ export const createOpenRouterClient = ({
           return sdk.chat.send({ chatRequest }, { retries: { strategy: "none" }, signal })
         },
         timeoutMs: Math.min(requestTimeoutMs, remainingMs),
-        logContext: { operation: "chat request", model },
       },
-      logger,
+      logger.child({ operation: "chat request", model }),
     )
 
     // Retryable even when the review deadline caused the timeout, because
@@ -575,9 +576,8 @@ export const createOpenRouterClient = ({
           )
         },
         timeoutMs: Math.min(requestTimeoutMs, remainingMs),
-        logContext: { operation: "generation cost lookup", generationId },
       },
-      logger,
+      logger.child({ operation: "generation cost lookup", generationId }),
     )
 
     if (lookup.status === "timed_out") {
@@ -604,20 +604,10 @@ export const createOpenRouterClient = ({
     return parsed.data.data.totalCost
   }
 
-  const requestReview = async (
-    {
-      systemPrompt,
-      userPrompt,
-      model,
-      fallbackModel,
-    }: {
-      systemPrompt: string
-      userPrompt: string
-      model: string
-      fallbackModel: string | null
-    },
-    logger: Logger,
-  ): Promise<StructuredReviewResult> => {
+  const requestReview: OpenRouterClient["requestReview"] = async (
+    { systemPrompt, userPrompt, model, fallbackModel },
+    logger,
+  ) => {
     const modelLadder = fallbackModel === null ? [model] : [model, fallbackModel]
     const attempts: ModelAttempt[] = []
     const ensureReviewTimeRemaining = (): void => {

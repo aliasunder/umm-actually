@@ -127,6 +127,8 @@ try {
       ),
       generateFindings: createPromptedGenerateFindings(
         {
+          // createOpenRouterClient takes no logger because each review phase
+          // passes its own phase-tagged logger to requestReview
           openrouterClient: createOpenRouterClient({
             sdk: new OpenRouter({ apiKey: config.openrouterApiKey }),
             requestTimeoutMs: config.requestTimeoutSeconds * 1000,

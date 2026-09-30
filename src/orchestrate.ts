@@ -1290,9 +1290,9 @@ export const orchestrate = async (
   }
 }
 
-/** Prompted strategy — builds the prompt for one review phase and sends it
- *  to OpenRouter; the stage dispatcher calls it once per phase. V1.5/V2
- *  tool-loop strategies swap in behind the same GenerateFindings interface. */
+/** Builds one review phase's prompt and sends it to OpenRouter in a single
+ *  request with no tool calls. The stage dispatcher calls the returned
+ *  function once per phase. */
 export const createPromptedGenerateFindings = (
   {
     openrouterClient,
@@ -1305,8 +1305,6 @@ export const createPromptedGenerateFindings = (
   },
   logger: Logger,
 ): GenerateFindings => {
-  const log = logger.child({ module: "generateFindings" })
-
   return async (reviewContext) => {
     const delimiterNonce = generateDelimiterNonce()
     const systemPrompt = buildSystemPrompt({ phase: reviewContext.phase })
@@ -1315,16 +1313,16 @@ export const createPromptedGenerateFindings = (
       delimiterNonce,
     })
 
-    log.info("requesting review", {
-      phase: reviewContext.phase.id,
+    // Parallel phases call the same model at once, so the phase prop is what
+    // tells their log lines apart
+    const phaseLogger = logger.child({ phase: reviewContext.phase.id })
+
+    // Only this line gets the module tag. The client's lines record their own
+    // source file, and a generateFindings tag on them would misattribute them
+    phaseLogger.child({ module: "generateFindings" }).info("requesting review", {
       model,
       fallbackModel,
     })
-
-    // Parallel phases call the same model at once, so the phase is what tells
-    // their client log lines apart. The child comes from `logger`, not `log`,
-    // because those lines come from the client module, not this one
-    const phaseLogger = logger.child({ phase: reviewContext.phase.id })
 
     return openrouterClient.requestReview(
       { systemPrompt, userPrompt, model, fallbackModel },
