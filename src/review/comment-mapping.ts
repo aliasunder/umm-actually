@@ -383,14 +383,19 @@ export const REVIEW_MARKER = "<!-- umm-actually-review -->"
 /** Identifies the single updatable status comment. */
 export const STATUS_ANCHOR = "<!-- umm-actually-status -->"
 
-/** Renders a finding posted as its own issue comment. Beyond-diff findings
- *  post this way, and so do in-diff findings when GitHub rejects their inline
- *  review. A new comment is a visible event to PR watchers, unlike an in-place
- *  status update. It carries its dedup anchor like any inline comment. */
-export const renderStandaloneFinding = (finding: AttributedFinding): string => {
+/** Renders a finding posted as its own issue comment. A new comment is a
+ *  visible event to PR watchers, unlike an in-place status update. It carries
+ *  its dedup anchor like any inline comment. */
+const renderIssueCommentFinding = ({
+  finding,
+  locationNote,
+}: {
+  finding: AttributedFinding
+  locationNote: string
+}): string => {
   return `${findingHeader(finding)}
 
-\`${finding.file}:${finding.line}\` — beyond the diff's line ranges, in code the changes touch or depend on.
+\`${finding.file}:${finding.line}\` — ${locationNote}
 
 ${finding.description}
 
@@ -399,6 +404,23 @@ ${finding.description}
 ${attributionLine(finding.modelUsed)}
 
 <!-- umm-actually:${computeAnchorKey(finding)} -->`
+}
+
+export const renderBeyondDiffFinding = (finding: AttributedFinding): string => {
+  return renderIssueCommentFinding({
+    finding,
+    locationNote: "beyond the diff's line ranges, in code the changes touch or depend on.",
+  })
+}
+
+/** Renders an in-diff finding posted after GitHub rejected the inline review.
+ *  Its line is at or near a changed line, not beyond the diff. */
+export const renderReroutedFinding = (finding: AttributedFinding): string => {
+  return renderIssueCommentFinding({
+    finding,
+    locationNote:
+      "at or near a changed line, posted here because GitHub rejected the inline review.",
+  })
 }
 
 const buildFindingsLine = ({

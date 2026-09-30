@@ -21,7 +21,8 @@ import {
   buildStatusComment,
   computeAnchorKey,
   mapFindingsToReview,
-  renderStandaloneFinding,
+  renderBeyondDiffFinding,
+  renderReroutedFinding,
   REVIEW_MARKER,
   STATUS_ANCHOR,
   type ReviewComment,
@@ -928,7 +929,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedMapped.standaloneFindings.map((finding) => ({
           prNumber: fixturePrContext.prNumber,
-          body: renderStandaloneFinding(finding),
+          body: renderBeyondDiffFinding(finding),
         })),
       )
       expect(stubs.upsertSummaryCommentCalls).toEqual([
@@ -2604,9 +2605,49 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual(
         postedFindings.map((finding) => ({
           prNumber: 7,
-          body: renderStandaloneFinding(finding),
+          body: renderReroutedFinding(finding),
         })),
       )
+    })
+
+    it("keeps the beyond-diff note only on beyond-diff findings when GitHub rejects the inline review", async () => {
+      const beyondDiffFinding = makeFinding({ file: "src/untouched.ts", line: 400 })
+      const inDiffFinding = makeFinding()
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [beyondDiffFinding, inDiffFinding] },
+        },
+        contextReader: {
+          findRelatedFiles: async () => ({
+            files: [
+              {
+                path: "src/untouched.ts",
+                content: "import { greet } from './greeter.js'",
+                includedAs: "full",
+                reason: "imports src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
+        githubClient: {
+          postFindingsReview: async () => ({ kind: "rejected" as const }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderBeyondDiffFinding(withRoutedModel(beyondDiffFinding, "test/model")),
+        },
+        {
+          prNumber: 7,
+          body: renderReroutedFinding(withRoutedModel(inDiffFinding, "test/model")),
+        },
+      ])
     })
 
     it("continues when the findings review post throws", async () => {
@@ -2629,7 +2670,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedMapped.standaloneFindings.map((finding) => ({
           prNumber: 7,
-          body: renderStandaloneFinding(finding),
+          body: renderBeyondDiffFinding(finding),
         })),
       )
       expect(stubs.upsertSummaryCommentCalls).toEqual([
@@ -2726,7 +2767,7 @@ describe("orchestrate", () => {
         line: 420,
         title: "Caller ignores the empty-key throw",
       })
-      const failedBody = renderStandaloneFinding(withRoutedModel(failedFinding, "test/model"))
+      const failedBody = renderBeyondDiffFinding(withRoutedModel(failedFinding, "test/model"))
       const stubs = makeOrchestrateDeps({
         fixtureResult: {
           review: { analysis: "checked", findings: [failedFinding, postedFinding] },
@@ -2902,7 +2943,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(withRoutedModel(relatedFileFinding, "test/model")),
+          body: renderBeyondDiffFinding(withRoutedModel(relatedFileFinding, "test/model")),
         },
       ])
     })
@@ -3006,11 +3047,11 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(withRoutedModel(renamedFromFinding, "test/model")),
+          body: renderBeyondDiffFinding(withRoutedModel(renamedFromFinding, "test/model")),
         },
         {
           prNumber: 7,
-          body: renderStandaloneFinding(withRoutedModel(deletedFileFinding, "test/model")),
+          body: renderBeyondDiffFinding(withRoutedModel(deletedFileFinding, "test/model")),
         },
       ])
     })
@@ -3037,7 +3078,7 @@ describe("orchestrate", () => {
       expect(foundStubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(withRoutedModel(conventionsFinding, "test/model")),
+          body: renderBeyondDiffFinding(withRoutedModel(conventionsFinding, "test/model")),
         },
       ])
       expect(missingResult.findingsCount).toBe(0)

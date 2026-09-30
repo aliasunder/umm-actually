@@ -26,7 +26,8 @@ import {
   extractAnchors,
   classifyDuplicate,
   mapFindingsToReview,
-  renderStandaloneFinding,
+  renderBeyondDiffFinding,
+  renderReroutedFinding,
   REVIEW_MARKER,
   STATUS_ANCHOR,
   type AnchorEntry,
@@ -1072,19 +1073,20 @@ const runReviewPipeline = async (
   )
 
   // Beyond-diff findings, plus every in-diff finding when GitHub rejected the
-  // inline review, since one bad anchor fails the whole review
-  const issueCommentFindings = [...unanchoredFindings, ...inlineOutcome.rerouted]
+  // inline review, since one bad anchor fails the whole review. Each keeps a
+  // location note that matches where it sits.
+  const issueCommentPosts = [
+    ...unanchoredFindings.map((finding) => ({ finding, body: renderBeyondDiffFinding(finding) })),
+    ...inlineOutcome.rerouted.map((finding) => ({ finding, body: renderReroutedFinding(finding) })),
+  ]
 
   // Each finding posts as its own issue comment. A failed post is logged and
   // skipped without stopping the loop, so the list is appended in place and
   // holds only the posts that landed
   const postedAsIssueComments: AttributedFinding[] = []
-  for (const finding of issueCommentFindings) {
+  for (const { finding, body } of issueCommentPosts) {
     try {
-      await githubClient.postIssueComment({
-        prNumber: prContext.prNumber,
-        body: renderStandaloneFinding(finding),
-      })
+      await githubClient.postIssueComment({ prNumber: prContext.prNumber, body })
       postedAsIssueComments.push(finding)
     } catch (postError) {
       logger.warn("failed to post finding as an issue comment — it will re-report next run", {
