@@ -176,12 +176,12 @@ describe("requestReview", () => {
     expect({
       message: error.message,
       attempts: error.attempts,
-      aborted: error.aborted,
+      keyRejected: error.keyRejected,
       deadlineExceeded: error.deadlineExceeded,
     }).toEqual({
       message: "review deadline exceeded",
       attempts: [],
-      aborted: false,
+      keyRejected: false,
       deadlineExceeded: true,
     })
     expect(stub.sendCalls).toEqual([])
@@ -237,12 +237,12 @@ describe("requestReview", () => {
         expect({
           message: error.message,
           attempts: error.attempts,
-          aborted: error.aborted,
+          keyRejected: error.keyRejected,
           deadlineExceeded: error.deadlineExceeded,
         }).toEqual({
           message: "review deadline exceeded",
           attempts: expectedAttempts,
-          aborted: false,
+          keyRejected: false,
           deadlineExceeded: true,
         })
         expect(
@@ -358,6 +358,17 @@ describe("requestReview", () => {
       requestParams.model,
     ])
     expect(stub.generationCalls).toEqual([])
+    expect(logsWithMessage(logger, "generation cost lookup skipped")).toEqual([
+      {
+        level: "debug",
+        message: "generation cost lookup skipped",
+        data: {
+          operation: "generation cost lookup",
+          generationId: "gen-no-cost",
+          reason: "review deadline exceeded",
+        },
+      },
+    ])
   })
 
   it("retains an accepted review when cost lookup reaches the review deadline and ignores its late response", async () => {
@@ -649,7 +660,7 @@ describe("requestReview", () => {
         message: "review attempt failed",
         data: {
           model: "openai/gpt-5-mini",
-          attemptNumber: 1,
+          modelAttemptNumber: 1,
           outcome: "api_error",
           errorSummary: "Request timed out",
         },
@@ -812,7 +823,7 @@ describe("requestReview", () => {
           message: "review attempt failed",
           data: {
             model: "openai/gpt-5-mini",
-            attemptNumber: 1,
+            modelAttemptNumber: 1,
             outcome: "timeout",
             errorSummary: "no response within 45s",
           },
@@ -1191,7 +1202,6 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ value: acceptedChatResult }],
     })
-    delete stub.sdk.generations
     const { client, logger } = makeClient(stub)
 
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
@@ -1223,7 +1233,7 @@ describe("requestReview", () => {
       ).rejects.toThrow("review request failed")
 
       // retryDelayMs sleeps happen between retryable failures; the guard
-      // `attemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
+      // `modelAttemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
       // after the final attempt. Only one sleep (between attempts 1 and 2).
       const retrySleepCalls = setTimeoutSpy.mock.calls.filter((call) => call[1] === retryDelayMs)
       expect(retrySleepCalls).toHaveLength(1)
@@ -1517,7 +1527,7 @@ describe("requestReview", () => {
     if (!(failure instanceof ReviewRequestError)) {
       throw new Error("expected a ReviewRequestError")
     }
-    expect(failure.aborted).toBe(false)
+    expect(failure.keyRejected).toBe(false)
     expect(failure.attempts).toEqual([
       {
         model: "openai/gpt-5-mini",
@@ -1538,7 +1548,7 @@ describe("requestReview", () => {
     ])
   })
 
-  it("marks the error as aborted on an auth/credit failure", async () => {
+  it("marks the error as key-rejected on an auth/credit failure", async () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: makeStatusError(402) }],
     })
@@ -1549,7 +1559,7 @@ describe("requestReview", () => {
     if (!(failure instanceof ReviewRequestError)) {
       throw new Error("expected a ReviewRequestError")
     }
-    expect(failure.aborted).toBe(true)
+    expect(failure.keyRejected).toBe(true)
     expect(failure.attempts).toEqual([
       {
         model: "openai/gpt-5-mini",
@@ -1713,16 +1723,5 @@ describe("requestReview", () => {
         errorSummary: null,
       },
     ])
-  })
-
-  it("skips the cost lookup entirely when the sdk has no generations surface", async () => {
-    const sdkWithoutGenerations: OpenRouterLike = {
-      chat: { send: async () => makeNoCostChatResult() },
-    }
-    const { client, logger } = makeClient({ sdk: sdkWithoutGenerations })
-
-    const result = await client.requestReview(requestParams, logger)
-
-    expect(result.attempts[0]?.costUsd).toBeNull()
   })
 })

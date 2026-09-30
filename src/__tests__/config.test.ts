@@ -117,7 +117,7 @@ describe("parseConfig", () => {
       githubToken: "ghs_testtoken",
       openrouterApiKey: "sk-or-testkey",
       model: "anthropic/claude-sonnet-4-6",
-      fallbackModel: "",
+      fallbackModel: null,
       requestTimeoutSeconds: 600,
       reviewTimeoutSeconds: 1500,
       maxFindings: undefined,
@@ -158,6 +158,12 @@ describe("parseConfig", () => {
       costSummary: true,
       prNumberOverride: undefined,
     })
+  })
+
+  it("keeps a configured fallback model", () => {
+    const config = parseConfig(makeRawInputs({ fallbackModel: "z-ai/glm-5.3-flash:online" }))
+
+    expect(config.fallbackModel).toBe("z-ai/glm-5.3-flash:online")
   })
 
   it.each(["1", "2400", "2147483"])("accepts review_timeout_seconds %s", (value) => {

@@ -21,7 +21,8 @@ import {
   buildStatusComment,
   computeAnchorKey,
   mapFindingsToReview,
-  renderStandaloneFinding,
+  renderBeyondDiffFinding,
+  renderReroutedFinding,
   REVIEW_MARKER,
   STATUS_ANCHOR,
   type ReviewComment,
@@ -216,7 +217,7 @@ const baseConfig: ActionConfig = {
   githubToken: "ghp_test",
   openrouterApiKey: "sk-test",
   model: "test/model",
-  fallbackModel: "",
+  fallbackModel: null,
   requestTimeoutSeconds: 600,
   reviewTimeoutSeconds: 1500,
   maxFindings: undefined,
@@ -910,14 +911,25 @@ describe("orchestrate", () => {
         conventionsNote: null,
       })
 
+      const expectedReview = expectedFindingsReview(expectedSelection.selected)
+
       expect(stubs.submitReviewCalls).toHaveLength(0)
-      expect(stubs.postFindingsReviewCalls).toEqual([
-        expectedFindingsReview(expectedSelection.selected),
+      expect(stubs.postFindingsReviewCalls).toEqual([expectedReview])
+      expect(logsWithMessage(logger, "findings review posted")).toEqual([
+        {
+          level: "info",
+          message: "findings review posted",
+          data: {
+            reviewUrl: "https://github.com/test/review/1",
+            inlineCount: expectedReview.comments.length,
+            locations: expectedReview.comments.map((comment) => `${comment.path}:${comment.line}`),
+          },
+        },
       ])
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedMapped.standaloneFindings.map((finding) => ({
           prNumber: fixturePrContext.prNumber,
-          body: renderStandaloneFinding(finding),
+          body: renderBeyondDiffFinding(finding),
         })),
       )
       expect(stubs.upsertSummaryCommentCalls).toEqual([
@@ -1355,22 +1367,24 @@ describe("orchestrate", () => {
       expect(call.budgetTokens).toBe(expectedRemainingTokens)
     })
 
-    it("passes paths extracted from the diff to readChangedFiles", async () => {
+    it("passes readChangedFiles each new path plus a rename's old path, and no deleted path", async () => {
       const stubs = makeOrchestrateDeps()
       const logger = createTestLogger()
 
       await orchestrate(stubs.deps, logger)
 
-      expect(stubs.readChangedFilesCalls).toHaveLength(1)
-      const changedPaths = first(stubs.readChangedFilesCalls).changedPaths
-      // The fixture diff modifies src/greeter.ts, adds src/added-file.ts,
-      // renames to src/new-name.ts, modifies src/no-trailing-newline.ts, and
-      // deletes src/removed-file.ts (null newFilePath) + binary logo.png
-      expect(changedPaths).toContain("src/greeter.ts")
-      expect(changedPaths).toContain("src/added-file.ts")
-      expect(changedPaths).toContain("src/new-name.ts")
-      // Deleted file has no newFilePath — should NOT appear
-      expect(changedPaths).not.toContain("src/removed-file.ts")
+      // The fixture diff deletes src/removed-file.ts, so that path is absent.
+      // It renames src/old-name.ts to src/new-name.ts, so both paths appear
+      expect(stubs.readChangedFilesCalls.map((call) => call.changedPaths)).toEqual([
+        [
+          "src/greeter.ts",
+          "src/added-file.ts",
+          "src/new-name.ts",
+          "src/old-name.ts",
+          "assets/logo.png",
+          "src/no-trailing-newline.ts",
+        ],
+      ])
     })
 
     it("passes remaining budget after related files to findRelatedDocs", async () => {
@@ -2591,9 +2605,49 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual(
         postedFindings.map((finding) => ({
           prNumber: 7,
-          body: renderStandaloneFinding(finding),
+          body: renderReroutedFinding(finding),
         })),
       )
+    })
+
+    it("keeps the beyond-diff note only on beyond-diff findings when GitHub rejects the inline review", async () => {
+      const beyondDiffFinding = makeFinding({ file: "src/untouched.ts", line: 400 })
+      const inDiffFinding = makeFinding()
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [beyondDiffFinding, inDiffFinding] },
+        },
+        contextReader: {
+          findRelatedFiles: async () => ({
+            files: [
+              {
+                path: "src/untouched.ts",
+                content: "import { greet } from './greeter.js'",
+                includedAs: "full",
+                reason: "imports src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
+        githubClient: {
+          postFindingsReview: async () => ({ kind: "rejected" as const }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderBeyondDiffFinding(withRoutedModel(beyondDiffFinding, "test/model")),
+        },
+        {
+          prNumber: 7,
+          body: renderReroutedFinding(withRoutedModel(inDiffFinding, "test/model")),
+        },
+      ])
     })
 
     it("continues when the findings review post throws", async () => {
@@ -2616,7 +2670,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedMapped.standaloneFindings.map((finding) => ({
           prNumber: 7,
-          body: renderStandaloneFinding(finding),
+          body: renderBeyondDiffFinding(finding),
         })),
       )
       expect(stubs.upsertSummaryCommentCalls).toEqual([
@@ -2684,16 +2738,82 @@ describe("orchestrate", () => {
         }),
       ])
       expect(
-        logsWithMessage(logger, "failed to post beyond-diff finding — it will re-report next run"),
+        logsWithMessage(
+          logger,
+          "failed to post finding as an issue comment — it will re-report next run",
+        ),
       ).toEqual([
         {
           level: "warn",
-          message: "failed to post beyond-diff finding — it will re-report next run",
+          message: "failed to post finding as an issue comment — it will re-report next run",
           data: {
             error: "[Error]: boom",
             file: "src/untouched.ts",
             line: 400,
           },
+        },
+      ])
+      expect(logsWithMessage(logger, "findings posted as issue comments")).toEqual([])
+    })
+
+    it("logs the count of findings posted as issue comments, leaving out a failed post", async () => {
+      const failedFinding = makeFinding({
+        file: "src/untouched.ts",
+        line: 400,
+        title: "Unchecked greet result",
+      })
+      const postedFinding = makeFinding({
+        file: "src/untouched.ts",
+        line: 420,
+        title: "Caller ignores the empty-key throw",
+      })
+      const failedBody = renderBeyondDiffFinding(withRoutedModel(failedFinding, "test/model"))
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [failedFinding, postedFinding] },
+        },
+        contextReader: {
+          findRelatedFiles: async () => ({
+            files: [
+              {
+                path: "src/untouched.ts",
+                content: "import { greet } from './greeter.js'",
+                includedAs: "full",
+                reason: "imports src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
+        githubClient: {
+          postIssueComment: async ({ body }) => {
+            if (body === failedBody) throw new Error("boom")
+            return { url: "https://github.com/test/comment/2" }
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      // The failed post's warning proves both findings reached the posting loop
+      expect(
+        logsWithMessage(
+          logger,
+          "failed to post finding as an issue comment — it will re-report next run",
+        ),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "failed to post finding as an issue comment — it will re-report next run",
+          data: { error: "[Error]: boom", file: "src/untouched.ts", line: 400 },
+        },
+      ])
+      expect(logsWithMessage(logger, "findings posted as issue comments")).toEqual([
+        {
+          level: "info",
+          message: "findings posted as issue comments",
+          data: { count: 1, locations: ["src/untouched.ts:420"] },
         },
       ])
     })
@@ -2823,7 +2943,7 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(withRoutedModel(relatedFileFinding, "test/model")),
+          body: renderBeyondDiffFinding(withRoutedModel(relatedFileFinding, "test/model")),
         },
       ])
     })
@@ -2927,11 +3047,11 @@ describe("orchestrate", () => {
       expect(stubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(withRoutedModel(renamedFromFinding, "test/model")),
+          body: renderBeyondDiffFinding(withRoutedModel(renamedFromFinding, "test/model")),
         },
         {
           prNumber: 7,
-          body: renderStandaloneFinding(withRoutedModel(deletedFileFinding, "test/model")),
+          body: renderBeyondDiffFinding(withRoutedModel(deletedFileFinding, "test/model")),
         },
       ])
     })
@@ -2958,7 +3078,7 @@ describe("orchestrate", () => {
       expect(foundStubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderStandaloneFinding(withRoutedModel(conventionsFinding, "test/model")),
+          body: renderBeyondDiffFinding(withRoutedModel(conventionsFinding, "test/model")),
         },
       ])
       expect(missingResult.findingsCount).toBe(0)
@@ -4032,7 +4152,7 @@ describe("staged phases", () => {
         .mockResolvedValueOnce(response)
         .mockImplementation(() => lateResponse.promise)
       const client = createOpenRouterClient({
-        sdk: { chat: { send } },
+        sdk: { chat: { send }, generations: { getGeneration: vi.fn() } },
         requestTimeoutMs: 900_000,
         remainingReviewMs,
       })
@@ -4139,7 +4259,7 @@ describe("staged phases", () => {
       return response
     })
     const client = createOpenRouterClient({
-      sdk: { chat: { send } },
+      sdk: { chat: { send }, generations: { getGeneration: vi.fn() } },
       requestTimeoutMs: 900_000,
       remainingReviewMs: () => Infinity,
       retryDelayMs: 0,
@@ -4160,7 +4280,7 @@ describe("staged phases", () => {
     const acceptedByPhase = logsWithMessage(generateLogger, "review response accepted").toSorted(
       (left, right) => String(left.data.phase).localeCompare(String(right.data.phase)),
     )
-    const acceptedEntry = (phase: string, attemptCount: number) => ({
+    const acceptedEntry = (phase: string, totalAttemptCount: number) => ({
       level: "info",
       message: "review response accepted",
       data: {
@@ -4168,7 +4288,7 @@ describe("staged phases", () => {
         model: "test/model",
         routedModel: "test/model",
         generationId: "completed",
-        attemptCount,
+        totalAttemptCount,
       },
     })
 
@@ -4185,7 +4305,7 @@ describe("staged phases", () => {
         data: {
           phase: "correctness-security",
           model: "test/model",
-          attemptNumber: 1,
+          modelAttemptNumber: 1,
           outcome: "api_error",
           errorSummary: "HTTP 500: HTTP 500",
         },
@@ -4215,7 +4335,7 @@ describe("staged phases", () => {
           throw new ReviewRequestError({
             message: "review request failed after 1 attempt(s)",
             attempts: [timeoutAttempt],
-            aborted: false,
+            keyRejected: false,
           })
         }
         return {
@@ -4361,7 +4481,7 @@ describe("staged phases", () => {
         throw new ReviewRequestError({
           message: "OpenRouter auth/credit error — aborting without fallback",
           attempts: [billedAttempt],
-          aborted: true,
+          keyRejected: true,
         })
       },
     })
@@ -4402,7 +4522,7 @@ describe("staged phases", () => {
         throw new ReviewRequestError({
           message: "review request failed after 1 attempt(s)",
           attempts: [timeoutAttempt],
-          aborted: false,
+          keyRejected: false,
         })
       },
     })
@@ -4428,6 +4548,43 @@ describe("staged phases", () => {
     ])
   })
 
+  it("leaves the cost table out of the failure summary when cost_summary is off", async () => {
+    const timeoutAttempt: ModelAttempt = {
+      model: "test/model",
+      outcome: "timeout",
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      errorSummary: "no response within 900s",
+    }
+    const stubs = makeOrchestrateDeps({
+      config: { costSummary: false },
+      generateFindings: async () => {
+        throw new ReviewRequestError({
+          message: "review request failed after 1 attempt(s)",
+          attempts: [timeoutAttempt],
+          keyRejected: false,
+        })
+      },
+    })
+    const logger = createTestLogger()
+
+    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+      "every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+    )
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "failure",
+        output: {
+          title: "Error — review did not complete",
+          summary:
+            "[AllPhasesFailedError]: every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+        },
+      },
+    ])
+  })
+
   it("lists each attempted model once in the failure summary", async () => {
     const primaryTimeout: ModelAttempt = {
       model: "test/model",
@@ -4444,7 +4601,7 @@ describe("staged phases", () => {
         throw new ReviewRequestError({
           message: "review request failed after 3 attempt(s)",
           attempts,
-          aborted: false,
+          keyRejected: false,
         })
       },
     })

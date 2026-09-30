@@ -8,7 +8,8 @@ import {
   extractAnchors,
   isDuplicateFinding,
   mapFindingsToReview,
-  renderStandaloneFinding,
+  renderBeyondDiffFinding,
+  renderReroutedFinding,
   STATUS_ANCHOR,
   type AnchorSource,
 } from "../comment-mapping.js"
@@ -133,7 +134,7 @@ The guard rejects only the exact empty string.
     })
 
     expect(mapped).toEqual({ comments: [], standaloneFindings: [finding] })
-    expect(renderStandaloneFinding(finding)).toBe(`**Whitespace-only keys pass the empty-key guard**
+    expect(renderBeyondDiffFinding(finding)).toBe(`**Whitespace-only keys pass the empty-key guard**
 Medium severity · correctness · high confidence
 
 \`src/untouched.ts:30\` — beyond the diff's line ranges, in code the changes touch or depend on.
@@ -365,11 +366,11 @@ _Reported at line 149 (outside the diff); anchored at nearby changed line 147._
   })
 })
 
-describe("renderStandaloneFinding", () => {
+describe("renderBeyondDiffFinding", () => {
   it("renders the full finding block with location note and anchor", () => {
     const finding = makeFinding({ file: "src/untouched.ts", line: 30 })
 
-    const body = renderStandaloneFinding(finding)
+    const body = renderBeyondDiffFinding(finding)
 
     expect(body).toBe(`**Whitespace-only keys pass the empty-key guard**
 Medium severity · correctness · high confidence
@@ -393,7 +394,7 @@ The guard rejects only the exact empty string.
       category: "subtle_bugs",
     })
 
-    const body = renderStandaloneFinding(finding)
+    const body = renderBeyondDiffFinding(finding)
 
     expect(body).toContain("Medium severity · subtle bugs · high confidence")
     expect(body).toContain("<!-- umm-actually:src/untouched.ts:subtle_bugs:30 -->")
@@ -406,7 +407,7 @@ The guard rejects only the exact empty string.
       suggestion: "-old line\n+new line",
     })
 
-    const body = renderStandaloneFinding(finding)
+    const body = renderBeyondDiffFinding(finding)
 
     expect(body).toBe(`**Whitespace-only keys pass the empty-key guard**
 Medium severity · correctness · high confidence
@@ -431,6 +432,28 @@ The guard rejects only the exact empty string.
 *umm-actually · test/model*
 
 <!-- umm-actually:src/untouched.ts:correctness:30 -->`)
+  })
+})
+
+describe("renderReroutedFinding", () => {
+  it("places the finding at or near a changed line and says why it posted as its own comment", () => {
+    const finding = makeFinding({ file: "src/greeter.ts", line: 145 })
+
+    const body = renderReroutedFinding(finding)
+
+    expect(body).toBe(`**Whitespace-only keys pass the empty-key guard**
+Medium severity · correctness · high confidence
+
+\`src/greeter.ts:145\` — at or near a changed line, posted here because GitHub rejected the inline review.
+
+The guard rejects only the exact empty string.
+
+**Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
+
+---
+*umm-actually · test/model*
+
+<!-- umm-actually:src/greeter.ts:correctness:145 -->`)
   })
 })
 
@@ -723,7 +746,7 @@ describe("extractAnchors", () => {
   })
 
   it("still finds the anchor behind the model attribution on a rendered comment", () => {
-    const body = renderStandaloneFinding(makeFinding({ file: "src/untouched.ts", line: 30 }))
+    const body = renderBeyondDiffFinding(makeFinding({ file: "src/untouched.ts", line: 30 }))
 
     const anchors = extractAnchors([anchorSource(body)])
 

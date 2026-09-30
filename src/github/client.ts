@@ -390,8 +390,8 @@ export const createGithubClient = (
   }
 
   /** The bot's own issue comments on the PR — the status comment plus any
-   *  beyond-diff finding comments. One listing serves both the run signal
-   *  and the beyond-diff dedup anchors. Author-filtered for the same reason
+   *  finding issue comments. One listing serves both the run signal and the
+   *  dedup anchors of findings posted as issue comments. Author-filtered for the same reason
    *  as fetchBotReviewComments: anyone can paste an anchor marker. */
   const fetchBotIssueComments = async ({
     prNumber,

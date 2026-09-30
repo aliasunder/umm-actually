@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createTestLogger } from "../../__tests__/test-logger.js"
+import { createTestLogger, logsWithMessage } from "../../__tests__/test-logger.js"
 import type { StructuredReviewResult } from "../../openrouter/client.js"
 import type { Finding } from "../finding.js"
 import type { ReviewPhase } from "../phases.js"
@@ -237,7 +237,7 @@ describe("runStages", () => {
 
   it("skips later stages after an auth/credit abort and reports their phases as not attempted", async () => {
     const resultA = makeResult()
-    const abort = Object.assign(new Error("HTTP 401"), { aborted: true })
+    const abort = Object.assign(new Error("HTTP 401"), { keyRejected: true })
     const { runPhase, calls } = makeRunPhase({
       a: () => resultA,
       b: () => Promise.reject(abort),
@@ -261,17 +261,48 @@ describe("runStages", () => {
     ])
   })
 
-  it("does not skip later stages after an ordinary failure", async () => {
+  it("names the skipped phases in a warning after a key rejection", async () => {
+    const logger = createTestLogger()
+    const keyRejection = Object.assign(new Error("HTTP 402"), { keyRejected: true })
+    const { runPhase } = makeRunPhase({
+      a: () => Promise.reject(keyRejection),
+    })
+
+    await captureRejection(runStages({ stages: [[phaseA], [phaseB], [phaseC]], runPhase }, logger))
+
+    expect(
+      logsWithMessage(logger, "skipping remaining review stages after an auth/credit abort"),
+    ).toEqual([
+      {
+        level: "warn",
+        message: "skipping remaining review stages after an auth/credit abort",
+        data: { skippedPhases: ["b", "c"] },
+      },
+    ])
+  })
+
+  it.each([
+    { label: "an ordinary failure", failure: new Error("HTTP 500") },
+    // The client sets keyRejected on every error it throws, so only its value
+    // may decide the skip
+    {
+      label: "a failure with keyRejected: false",
+      failure: Object.assign(new Error("HTTP 500"), { keyRejected: false }),
+    },
+  ])("does not skip later stages after $label", async ({ failure }) => {
     const resultC = makeResult()
     const { runPhase, calls } = makeRunPhase({
-      a: () => Promise.reject(new Error("HTTP 500")),
+      a: () => Promise.reject(failure),
       c: () => resultC,
     })
 
     const outcomes = await runStages({ stages: [[phaseA], [phaseC]], runPhase }, createTestLogger())
 
     expect(calls.map((call) => call.phase)).toEqual(["a", "c"])
-    expect(outcomes.map((outcome) => outcome.status)).toEqual(["failed", "completed"])
+    expect(outcomes).toEqual([
+      { phase: phaseA, status: "failed", error: failure },
+      { phase: phaseC, status: "completed", result: resultC },
+    ])
   })
 
   it.each([
@@ -321,7 +352,7 @@ describe("runStages", () => {
         data: {
           phase: "a",
           modelUsed: "model/a",
-          attemptCount: 1,
+          totalAttemptCount: 1,
           findingsCount: 1,
         },
       },

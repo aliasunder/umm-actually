@@ -26,7 +26,8 @@ import {
   extractAnchors,
   classifyDuplicate,
   mapFindingsToReview,
-  renderStandaloneFinding,
+  renderBeyondDiffFinding,
+  renderReroutedFinding,
   REVIEW_MARKER,
   STATUS_ANCHOR,
   type AnchorEntry,
@@ -177,8 +178,8 @@ type IssueCommentState = {
 
 /** The bot's issue comments carry the rest of the cross-run state: the
  *  status comment's presence (the first-run signal) and dedup anchors from
- *  beyond-diff finding comments (anchor-line positions — issue comments
- *  aren't line-tracked). Fails open to a first run. */
+ *  finding issue comments (anchor-line positions — issue comments aren't
+ *  line-tracked). Fails open to a first run. */
 const fetchIssueCommentState = async (
   { githubClient, prNumber }: { githubClient: GithubClient; prNumber: number },
   logger: Logger,
@@ -216,7 +217,8 @@ const fetchIssueCommentState = async (
 
 type InlinePostOutcome = {
   url: string
-  /** Findings whose anchors GitHub rejected — re-routed to issue comments. */
+  /** Every inline finding when GitHub rejected the review, re-routed to issue
+   *  comments. One bad anchor fails the whole review. */
   rerouted: AttributedFinding[]
   /** Inline comments that actually landed — zero when the post failed. */
   postedCount: number
@@ -251,12 +253,14 @@ const postInlineFindings = async (
       comments,
     })
 
+    // githubClient already warns about the 422 with the rejected comment count
     if (result.kind === "rejected") {
       return { url: "", rerouted: inlineFindings, postedCount: 0 }
     }
     logger.info("findings review posted", {
       reviewUrl: result.url,
       inlineCount: comments.length,
+      locations: comments.map((comment) => `${comment.path}:${comment.line}`),
     })
     return { url: result.url, rerouted: [], postedCount: comments.length }
   } catch (postError) {
@@ -466,14 +470,14 @@ const filterPhaseFindings = (
  *  a cost table when every phase failed — the operator still pays. */
 const describePipelineFailure = ({
   pipelineError,
-  costSummary,
+  includeCostSummary,
 }: {
   pipelineError: unknown
-  costSummary: boolean
+  includeCostSummary: boolean
 }): string => {
   const description = describeError(pipelineError)
 
-  if (!costSummary || !(pipelineError instanceof AllPhasesFailedError)) {
+  if (!includeCostSummary || !(pipelineError instanceof AllPhasesFailedError)) {
     return description
   }
 
@@ -513,9 +517,8 @@ const incompletePhaseIds = (phases: PhaseStatus[]): string[] => {
   return phases.filter((phase) => phase.status === "failed").map((phase) => phase.phase)
 }
 
-/** Steps 4–14: diff fetch through status comment — everything downstream of
- *  PR-context resolution, extracted so orchestrate can bracket it with the
- *  check-run lifecycle. */
+/** Runs everything after PR-context resolution, from the diff fetch through
+ *  the status comment. orchestrate brackets it with the check-run lifecycle. */
 const runReviewPipeline = async (
   {
     deps,
@@ -549,7 +552,6 @@ const runReviewPipeline = async (
     return { ...SKIPPED_RESULT_BASE, reviewUrl: url, skippedReason: reason }
   }
 
-  // Step 4: diff fetch
   const diffResult = await githubClient.fetchDiff({
     prNumber: prContext.prNumber,
   })
@@ -558,16 +560,15 @@ const runReviewPipeline = async (
     return postSkipReview({ reason: "diff exceeds GitHub's diff API limits" })
   }
 
-  // Step 5: parse diff
   const files = parseDiff(diffResult.diff)
 
   if (files.length === 0) {
     return postSkipReview({ reason: "empty diff" })
   }
 
-  // Step 5.5: diff-level exclusion — generated files leave the review
-  // subject before the budget check so one oversized artifact cannot
-  // starve the reviewable rest of the PR
+  // Diff-excluded files, such as generated artifacts, leave the review before
+  // the budget check, so one oversized artifact cannot starve the reviewable
+  // rest of the PR
   const gitAttributesContent = config.respectLinguistGenerated
     ? await contextReader.readGitAttributes()
     : null
@@ -595,23 +596,24 @@ const runReviewPipeline = async (
     })
   }
 
-  // Step 6: annotate + token check. The excluded-files trailer sits inside
-  // the annotated diff string, so its (few) tokens debit the diff budget.
+  // The excluded-files trailer sits inside the annotated diff string, so its
+  // few tokens count against the diff budget
   const excludedFilesNote = renderExcludedFilesNote(excludedDiffFiles)
   const annotatedDiff = excludedFilesNote
     ? `${annotateDiff(reviewableFiles)}\n\n${excludedFilesNote}`
     : annotateDiff(reviewableFiles)
   const diffTokens = estimateTokens(annotatedDiff)
-  // The diff gets half the budget; the other half is for context files.
-  const budgetHalf = Math.floor(config.contextBudgetTokens / 2)
 
-  if (diffTokens > budgetHalf) {
+  // The diff may use at most half the context budget. Context files get
+  // whatever the diff leaves (fileBudgetTokens below)
+  const diffTokenLimit = Math.floor(config.contextBudgetTokens / 2)
+
+  if (diffTokens > diffTokenLimit) {
     return postSkipReview({
-      reason: `diff too large for context budget (${diffTokens} tokens, limit ${budgetHalf} of ${config.contextBudgetTokens})`,
+      reason: `diff too large for context budget (${diffTokens} tokens, limit ${diffTokenLimit} of ${config.contextBudgetTokens})`,
     })
   }
 
-  // Step 7: commentable lines
   const commentableByPath = computeCommentableLines(reviewableFiles)
 
   // Diff-excluded files must stay out of every context channel: the trailer
@@ -625,21 +627,23 @@ const runReviewPipeline = async (
     (docPath) => !diffExcludedPathSet.has(posix.normalize(docPath)),
   )
 
-  // Step 8: extract changed paths (includes old path for renames so the
-  // import scanner finds callers that still reference the pre-rename path)
-  const changedPaths = reviewableFiles
-    .flatMap((file) => {
-      const toPath = newFilePath(file)
-      const fromPath = file.from
-      // parse-diff: from can be undefined for a binary file and is "/dev/null"
-      // for an added file (binary or not) — neither is a pre-rename path worth tracing
-      const isRename =
-        toPath !== null && fromPath && fromPath !== "/dev/null" && fromPath !== file.to
-      return isRename ? [toPath, fromPath] : [toPath]
-    })
-    .filter((path) => path !== null)
+  // A rename contributes its old path too, so the import scanner finds
+  // callers that still reference the pre-rename path
+  const changedPaths = reviewableFiles.flatMap((file) => {
+    const toPath = newFilePath(file)
+    const fromPath = file.from
 
-  // Step 9: context reads
+    // A deleted file has no new path. Its old path joins the prompt's file
+    // paths through deletedPaths below
+    if (toPath === null) return []
+
+    // parse-diff: from can be undefined for a binary file and is "/dev/null"
+    // for an added file (binary or not) — neither is a pre-rename path worth tracing
+    if (!fromPath || fromPath === "/dev/null" || fromPath === toPath) return [toPath]
+
+    return [toPath, fromPath]
+  })
+
   const conventions = await contextReader.readConventions({
     conventionsFile: config.conventionsFile,
   })
@@ -740,10 +744,7 @@ const runReviewPipeline = async (
     : { files: [], excludedByCapPaths: [] }
 
   const relatedFiles = relatedFilesResult.files
-  const relatedFilesTokens = relatedFiles.reduce(
-    (sum, file) => sum + estimateTokens(file.content),
-    0,
-  )
+  const relatedFilesTokens = sumBy(relatedFiles, (file) => estimateTokens(file.content))
   const docBudgetTokens = Math.max(0, remainingTokens - relatedFilesTokens)
 
   // Every path whose full text a higher-priority channel already sent.
@@ -925,9 +926,8 @@ const runReviewPipeline = async (
     diffExcludedFiles: excludedDiffFiles,
   })
 
-  // Step 9.5: fetch prior bot comments — needed both for the prompt (the
-  // model sees what's already posted and self-suppresses conceptual dupes)
-  // and for positional dedup after generation.
+  // Prior bot comments go into the prompt, so the model sees what is already
+  // posted and skips conceptual duplicates. Positional dedup uses them too
   const inlineState = await fetchInlineCommentState(
     { githubClient, prNumber: prContext.prNumber },
     logger,
@@ -940,7 +940,7 @@ const runReviewPipeline = async (
     .map(stripAnchorComment)
     .slice(-PRIOR_COMMENT_CAP)
 
-  // Step 10–11: generate findings — one model call per phase, stages in order
+  // Each phase makes one model call, and the stages run in order
   const runPhase: RunPhase = ({ phase, priorFindings }) => {
     return generateFindings({
       prContext,
@@ -975,8 +975,8 @@ const runReviewPipeline = async (
     incomplete: incompletePhaseIds(phases),
   })
 
-  // Step 12: per phase, drop non-findings and findings on files the model
-  // never saw, then collapse cross-phase duplicates — all before selection so
+  // Each phase drops non-findings and findings on files the model never saw,
+  // then cross-phase duplicates collapse. All of it runs before selection so
   // cap slots aren't wasted
   const filteredPhases = completedPhases.map((outcome) => {
     return filterPhaseFindings({ outcome, knownPaths: promptFilePaths }, logger)
@@ -995,10 +995,10 @@ const runReviewPipeline = async (
     duplicatesAcrossPhases,
   })
 
-  // Step 12.5: cross-run dedup — every run walks the same path; a first run
-  // is just the case where no bot comments exist yet. Sources: the bot's
-  // inline comments (live positions) and its beyond-diff issue comments
-  // (anchor lines). Runs before the cap so duplicates don't consume slots.
+  // Cross-run dedup drops findings the bot already posted. A first run needs no
+  // special case because it simply finds no anchors. The anchors come from the
+  // bot's inline comments (live positions) and its finding issue comments
+  // (anchor lines). Dedup runs before the cap so duplicates don't consume slots.
   const existingAnchors = [...inlineState.anchors, ...issueState.anchors]
   const newFindings: AttributedFinding[] = []
   const dedupCounts = { positional: 0, content: 0, title: 0 }
@@ -1046,16 +1046,19 @@ const runReviewPipeline = async (
     droppedByCap: droppedByCap.length,
   })
 
-  // Step 13: post findings — anchorable ones batch into a single review
-  // (invisible marker body: one notification, a bare "reviewed" timeline
-  // event, no prose); the rest post as individual issue comments so every
-  // new finding is a visible event. All narration lives in the status
-  // comment. Unposted findings carry no anchor and re-report next run.
-  const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
+  // Findings post in two ways, and all narration lives in the status comment.
+  // - Anchorable findings batch into one review with an invisible marker body,
+  //   which makes one notification and a bare "reviewed" timeline event.
+  // - The rest post as individual issue comments, so every new finding is a
+  //   visible event.
+  // Unposted findings carry no anchor and re-report next run.
   const { comments, standaloneFindings: unanchoredFindings } = mapFindingsToReview({
     findings: selected,
     commentableByPath,
   })
+
+  // mapFindingsToReview returns the same finding objects it was given, so an
+  // identity check separates the anchored findings from the unanchored ones
   const inlineFindings = selected.filter((finding) => !unanchoredFindings.includes(finding))
 
   const inlineOutcome = await postInlineFindings(
@@ -1069,33 +1072,42 @@ const runReviewPipeline = async (
     logger,
   )
 
-  const standaloneFindings = [...unanchoredFindings, ...inlineOutcome.rerouted]
-  // Sequential posting with per-comment fallback is inherently stateful —
-  // each failure drops only its own finding from the posted tally.
-  let postedStandalone = 0
-  for (const finding of standaloneFindings) {
+  // Beyond-diff findings, plus every in-diff finding when GitHub rejected the
+  // inline review, since one bad anchor fails the whole review. Each keeps a
+  // location note that matches where it sits.
+  const issueCommentPosts = [
+    ...unanchoredFindings.map((finding) => ({ finding, body: renderBeyondDiffFinding(finding) })),
+    ...inlineOutcome.rerouted.map((finding) => ({ finding, body: renderReroutedFinding(finding) })),
+  ]
+
+  // Each finding posts as its own issue comment. A failed post is logged and
+  // skipped without stopping the loop, so the list is appended in place and
+  // holds only the posts that landed
+  const postedAsIssueComments: AttributedFinding[] = []
+  for (const { finding, body } of issueCommentPosts) {
     try {
-      await githubClient.postIssueComment({
-        prNumber: prContext.prNumber,
-        body: renderStandaloneFinding(finding),
-      })
-      postedStandalone += 1
+      await githubClient.postIssueComment({ prNumber: prContext.prNumber, body })
+      postedAsIssueComments.push(finding)
     } catch (postError) {
-      logger.warn("failed to post beyond-diff finding — it will re-report next run", {
+      logger.warn("failed to post finding as an issue comment — it will re-report next run", {
         error: describeError(postError),
         file: finding.file,
         line: finding.line,
       })
     }
   }
-  if (postedStandalone > 0) {
-    logger.info("beyond-diff findings posted", { count: postedStandalone })
+
+  if (postedAsIssueComments.length > 0) {
+    logger.info("findings posted as issue comments", {
+      count: postedAsIssueComments.length,
+      locations: postedAsIssueComments.map((finding) => `${finding.file}:${finding.line}`),
+    })
   }
 
-  // Step 14: status comment — the always-updated run receipt. Counts report
+  // The status comment is the always-updated run receipt. Counts report
   // what actually landed; unposted findings self-heal next run and the
   // comment says so rather than claiming they were posted.
-  const postedCount = inlineOutcome.postedCount + postedStandalone
+  const postedCount = inlineOutcome.postedCount + postedAsIssueComments.length
   const statusBody = buildStatusComment({
     sha: prContext.headSha,
     isFirstRun: !issueState.statusCommentExists,
@@ -1153,6 +1165,8 @@ const runReviewPipeline = async (
     posted: postedCount,
   })
 
+  const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
+
   return {
     findingsCount: postedCount,
     reviewUrl: inlineOutcome.url,
@@ -1176,13 +1190,13 @@ export const orchestrate = async (
 ): Promise<OrchestrateResult> => {
   const { config, githubClient } = deps
 
-  // Step 1: fail-fast validation — throws before any network call
+  // Invalid settings throw here, before any network call
   const severityThreshold = resolveSeverityThreshold(config.severityThreshold)
   const stages = resolveStages(config.phases)
 
   logger.info("review settings from action inputs", {
     model: config.model,
-    fallbackModel: config.fallbackModel || null,
+    fallbackModel: config.fallbackModel,
     phases: config.phases,
     reviewTimeoutSeconds: config.reviewTimeoutSeconds,
     severityThreshold: config.severityThreshold,
@@ -1201,7 +1215,6 @@ export const orchestrate = async (
     costSummary: config.costSummary,
   })
 
-  // Step 2: event resolution
   const resolvedEvent = resolvePullRequestEvent(
     {
       eventName: deps.eventName,
@@ -1220,7 +1233,6 @@ export const orchestrate = async (
     }
   }
 
-  // Step 3: PR context
   const prContext: PrContext =
     resolvedEvent.kind === "complete"
       ? resolvedEvent.context
@@ -1228,7 +1240,7 @@ export const orchestrate = async (
           prNumber: resolvedEvent.prNumber,
         })
 
-  // Step 3.5: open the branded check run now that the head SHA is known
+  // The branded check run opens once the head SHA is known
   const checkRun = await createCheckRunSafely({ githubClient, headSha: prContext.headSha }, logger)
 
   // A cancelled job stops the container before the completions below run,
@@ -1277,7 +1289,7 @@ export const orchestrate = async (
           title: "Error — review did not complete",
           summary: describePipelineFailure({
             pipelineError,
-            costSummary: config.costSummary,
+            includeCostSummary: config.costSummary,
           }),
         },
       },
