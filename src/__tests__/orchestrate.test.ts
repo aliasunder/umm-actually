@@ -778,6 +778,43 @@ describe("orchestrate", () => {
       expect(first(stubs.findRelatedDocsCalls).excludePaths).toEqual(["assets/logo.png"])
     })
 
+    it("normalizes a doubled-slash excluded diff path before matching priority docs and scan exclusions", async () => {
+      // Orchestrate compares excluded paths to priority docs as received, so
+      // this fails if partitioning ever stops normalizing them
+      const unnormalizedPathDiff = `diff --git a/assets//guide.md b/assets//guide.md
+index 1111111..2222222 100644
+--- a/assets//guide.md
++++ b/assets//guide.md
+@@ -1 +1 @@
+-old guide
++new guide
+diff --git a/src/app.ts b/src/app.ts
+index 3333333..4444444 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old line
++new line
+`
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: unnormalizedPathDiff }),
+        },
+        config: {
+          priorityDocs: ["assets/guide.md", "docs/guide.md"],
+          diffExcludePaths: {
+            defaultPatterns: [],
+            diffExcludePathPatterns: ["assets/**"],
+          },
+        },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(first(stubs.readPriorityDocsCalls).priorityDocs).toEqual(["docs/guide.md"])
+      expect(first(stubs.findRelatedFilesCalls).excludePaths).toEqual(["assets/guide.md"])
+    })
+
     it("passes the budget check when the oversized files are all excluded", async () => {
       // Budget 220 (half = 110) fails against the full fixture diff (341
       // tokens); with every src/ file excluded only the binary asset header

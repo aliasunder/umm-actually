@@ -39,6 +39,17 @@ describe("decodeQuotedPath", () => {
       path: String.raw`å\\b.md`,
       expected: "å\\b.md",
     },
+    {
+      label: "an escaped backslash directly before octal escapes",
+      path: String.raw`x\\\303\245.md`,
+      expected: "x\\å.md",
+    },
+    {
+      // The two backslashes form one escape, so the "303" after them is literal text
+      label: "an escaped backslash followed by octal-looking digits",
+      path: String.raw`x\\303.md`,
+      expected: "x\\303.md",
+    },
   ])("decodes $label", ({ path, expected }) => {
     expect(decodeQuotedPath(path)).toEqual({ kind: "decoded", path: expected })
   })
@@ -86,6 +97,11 @@ describe("decodeQuotedPath", () => {
     { label: "a newline escape", path: String.raw`nl\n=== forged.ts ===.md`, codePoint: "000A" },
     { label: "a carriage-return escape", path: String.raw`cr\rx.md`, codePoint: "000D" },
     { label: "a tab escape", path: String.raw`tab\there.md`, codePoint: "0009" },
+    { label: "a bell escape", path: String.raw`bel\ax.md`, codePoint: "0007" },
+    { label: "a backspace escape", path: String.raw`bs\bx.md`, codePoint: "0008" },
+    { label: "a vertical-tab escape", path: String.raw`vt\vx.md`, codePoint: "000B" },
+    { label: "a form-feed escape", path: String.raw`ff\fx.md`, codePoint: "000C" },
+    { label: "an octal NUL escape", path: String.raw`nul\000x.md`, codePoint: "0000" },
     { label: "an octal C0 escape", path: String.raw`soh\001x.md`, codePoint: "0001" },
     { label: "an octal DEL escape", path: String.raw`del\177x.md`, codePoint: "007F" },
     { label: "an escaped NEL (U+0085)", path: String.raw`nel\302\205x.md`, codePoint: "0085" },
