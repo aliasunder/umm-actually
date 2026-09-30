@@ -286,7 +286,7 @@ export const buildUserPrompt = ({
     relatedDocs.length === 0
       ? ""
       : [
-          "Documentation that may describe changed code (flag any claims that have become stale):",
+          "Documentation provided as context — priority documentation is sent on every review, whether or not the diff touches it, and every other doc mentions a changed file; each block's reason attribute says which (flag any claims that have become stale):",
           ...relatedDocs.map((relatedDoc) => renderFileBlock(relatedDoc, delimiterNonce)),
         ].join("\n\n")
 

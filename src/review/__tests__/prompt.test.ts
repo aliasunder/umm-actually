@@ -266,7 +266,7 @@ describe("buildUserPrompt", () => {
     const conventionsIndex = userPrompt.indexOf('<conventions-abc123def456 path="AGENTS.md">')
     const changedFileIndex = userPrompt.indexOf('<file-abc123def456 path="src/greeter.ts">')
     const relatedFileIndex = userPrompt.indexOf('<file-abc123def456 path="src/caller.ts"')
-    const relatedDocsIndex = userPrompt.indexOf("Documentation that may describe changed code")
+    const relatedDocsIndex = userPrompt.indexOf("Documentation provided as context")
     const docFileIndex = userPrompt.indexOf('<file-abc123def456 path="docs/api.md"')
     const diffIndex = userPrompt.indexOf("<diff-abc123def456")
 
@@ -282,13 +282,21 @@ describe("buildUserPrompt", () => {
   it("omits the related docs section when relatedDocs is empty", () => {
     const userPrompt = buildUserPrompt(makeUserPromptParts())
 
-    expect(userPrompt).not.toContain("Documentation that may describe changed code")
+    // Positive anchor first — an empty prompt would also pass the negative check
+    expect(userPrompt).toContain("<diff-abc123def456")
+    expect(userPrompt).not.toContain("Documentation provided as context")
   })
 
-  it("renders the staleness instruction header in the related docs section", () => {
+  it("introduces priority and mention-matched docs under one header that covers both inclusion reasons", () => {
     const userPrompt = buildUserPrompt({
       ...makeUserPromptParts(),
       relatedDocs: [
+        {
+          path: "README.md",
+          content: "# Greeter",
+          includedAs: "full" as const,
+          reason: "priority documentation",
+        },
         {
           path: "docs/api.md",
           content: "# API",
@@ -299,7 +307,11 @@ describe("buildUserPrompt", () => {
     })
 
     expect(userPrompt).toContain(
-      "Documentation that may describe changed code (flag any claims that have become stale):",
+      [
+        "Documentation provided as context — priority documentation is sent on every review, whether or not the diff touches it, and every other doc mentions a changed file; each block's reason attribute says which (flag any claims that have become stale):",
+        '<file-abc123def456 path="README.md" reason="priority documentation">\n# Greeter\n</file-abc123def456 path="README.md">',
+        '<file-abc123def456 path="docs/api.md" reason="mentions src/greeter.ts">\n# API\n</file-abc123def456 path="docs/api.md">',
+      ].join("\n\n"),
     )
   })
 
