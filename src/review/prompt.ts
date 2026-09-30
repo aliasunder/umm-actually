@@ -195,12 +195,13 @@ export const generateDelimiterNonce = (): string => randomBytes(6).toString("hex
 
 /** A double quote would terminate the surrounding attribute — nothing else is
  *  structural inside a quoted attribute value. Change it together with
- *  unescapeAttributeValue, which inverts it. */
+ *  unescapeAttributeValue, which decodes it. */
 const escapeAttributeValue = (value: string): string => value.replaceAll('"', "&quot;")
 
-/** Inverts escapeAttributeValue for a path the model copied out of a path
- *  attribute. It decodes only the one entity escapeAttributeValue writes, never
- *  general HTML entities. */
+/** Decodes the one entity escapeAttributeValue writes, never general HTML
+ *  entities. It is not a true inverse. The encoder leaves "&" alone, so a path
+ *  holding a literal "&quot;" decodes to a different path, and callers must try
+ *  the written spelling first. */
 export const unescapeAttributeValue = (value: string): string => value.replaceAll("&quot;", '"')
 
 const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
