@@ -31,8 +31,9 @@ export const conventionsCharacterCap = (conventionsBudgetTokens: number): number
  * Whether the conventions section will carry the file's complete text rather
  * than a truncated head. The orchestrator uses it to send one full copy of the
  * conventions file:
- * - true: the section is the full copy, so readPriorityDocs never receives
- *   the file and a changed conventions file's block is sent diff-only.
+ * - true: the section is the full copy. readPriorityDocs and the related-file
+ *   scan get the path as an exclusion and skip the file, and a changed
+ *   conventions file's block is sent diff-only.
  * - false: the section carries a truncated head, and a full copy can arrive
  *   another way. When a priority-doc block (reason "priority documentation")
  *   carries it, the orchestrator swaps the section's text for a placeholder
@@ -105,9 +106,10 @@ Every key is required on every finding. When there is nothing to report,
 "findings" must be the empty array [] — never omit the key. Output only the
 JSON object: no markdown fences, no text before or after it.`
 
-/** filterNonFindings (filter-non-findings.ts) drops findings whose fields
- *  start with the non-finding phrases quoted here, for when the model emits
- *  them anyway. A phrase added here needs a matching pattern there. */
+/** filterNonFindings (filter-non-findings.ts) is the backstop for when the
+ *  model emits a non-finding anyway. Its patterns cover most phrases quoted
+ *  here, but not "Verify X handles Y", because a real fix title can also start
+ *  with "Verify". When a quoted phrase changes, check its pattern there too. */
 const OUTPUT_DISCIPLINE = `OUTPUT DISCIPLINE — field constraints:
 - "title": imperative fix statement, under 80 characters (e.g. "Trim keys
   before inserting into the registry"). Do not start with "Issue:" or
