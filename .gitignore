@@ -11,3 +11,12 @@ dist/
 # Symlinks into the private Obsidian vault (local dev only)
 CLAUDE.local.md
 TASKS.md
+
+# .claude/ is local state except the committed session hooks. A trailing-slash
+# directory ignore would block the re-includes, because git never descends
+# into an ignored directory.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/hooks/*
+!.claude/hooks/install-deps.sh
