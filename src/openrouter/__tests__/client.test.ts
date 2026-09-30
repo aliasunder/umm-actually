@@ -9,8 +9,9 @@ import {
   type OpenRouterLike,
 } from "../client.js"
 
-const readJsonFixture = (name: string): unknown =>
-  JSON.parse(readFileSync(new URL(`../../../fixtures/${name}`, import.meta.url), "utf8"))
+const readJsonFixture = (name: string): unknown => {
+  return JSON.parse(readFileSync(new URL(`../../../fixtures/${name}`, import.meta.url), "utf8"))
+}
 
 const acceptedChatResult = readJsonFixture("openrouter.chat-result.json")
 const invalidJsonChatResult = readJsonFixture("openrouter.invalid-json.json")
@@ -67,7 +68,7 @@ const makeSdkStub = ({
   }): unknown => {
     const next = queue[callCount - 1]
 
-    if (next === undefined) {
+    if (!next) {
       throw new Error(`stub: unexpected ${operation} call #${callCount}`)
     }
     if ("error" in next) throw next.error
@@ -105,15 +106,12 @@ const makeSdkStub = ({
 
 const makeClient = (stub: { sdk: OpenRouterLike }) => {
   const logger = createTestLogger()
-  const client = createOpenRouterClient(
-    {
-      sdk: stub.sdk,
-      remainingReviewMs: () => Infinity,
-      requestTimeoutMs: 45_000,
-      retryDelayMs: 0,
-    },
-    logger,
-  )
+  const client = createOpenRouterClient({
+    sdk: stub.sdk,
+    remainingReviewMs: () => Infinity,
+    requestTimeoutMs: 45_000,
+    retryDelayMs: 0,
+  })
   return { client, logger }
 }
 
@@ -166,11 +164,13 @@ const requestParams = {
 describe("requestReview", () => {
   it("does not start an attempt when the review deadline has expired", async () => {
     const stub = makeSdkStub({ sendResponses: [] })
-    const client = createOpenRouterClient(
-      { sdk: stub.sdk, requestTimeoutMs: 45_000, remainingReviewMs: () => 0 },
-      createTestLogger(),
-    )
-    const error = await captureRejection(client.requestReview(requestParams))
+    const logger = createTestLogger()
+    const client = createOpenRouterClient({
+      sdk: stub.sdk,
+      requestTimeoutMs: 45_000,
+      remainingReviewMs: () => 0,
+    })
+    const error = await captureRejection(client.requestReview(requestParams, logger))
     expect(error).toBeInstanceOf(ReviewRequestError)
     if (!(error instanceof ReviewRequestError)) throw error
     expect({
@@ -201,15 +201,13 @@ describe("requestReview", () => {
           ],
         })
         const deadline = performance.now() + 100
-        const client = createOpenRouterClient(
-          {
-            sdk: stub.sdk,
-            requestTimeoutMs: 45_000,
-            remainingReviewMs: () => deadline - performance.now(),
-          },
-          createTestLogger(),
-        )
-        const rejection = captureRejection(client.requestReview(requestParams))
+        const logger = createTestLogger()
+        const client = createOpenRouterClient({
+          sdk: stub.sdk,
+          requestTimeoutMs: 45_000,
+          remainingReviewMs: () => deadline - performance.now(),
+        })
+        const rejection = captureRejection(client.requestReview(requestParams, logger))
         await vi.advanceTimersByTimeAsync(100)
         const error = await rejection
         expect(error).toBeInstanceOf(ReviewRequestError)
@@ -286,15 +284,13 @@ describe("requestReview", () => {
         ],
       })
       const deadline = performance.now() + 100
-      const client = createOpenRouterClient(
-        {
-          sdk: stub.sdk,
-          requestTimeoutMs: 45_000,
-          remainingReviewMs: () => deadline - performance.now(),
-        },
-        createTestLogger(),
-      )
-      const rejection = captureRejection(client.requestReview(requestParams))
+      const logger = createTestLogger()
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        requestTimeoutMs: 45_000,
+        remainingReviewMs: () => deadline - performance.now(),
+      })
+      const rejection = captureRejection(client.requestReview(requestParams, logger))
       await vi.advanceTimersByTimeAsync(100)
       const error = await rejection
       expect(error).toBeInstanceOf(ReviewRequestError)
@@ -338,11 +334,13 @@ describe("requestReview", () => {
         },
       ],
     })
-    const client = createOpenRouterClient(
-      { sdk: stub.sdk, requestTimeoutMs: 45_000, remainingReviewMs },
-      createTestLogger(),
-    )
-    expect(await client.requestReview(requestParams)).toEqual({
+    const logger = createTestLogger()
+    const client = createOpenRouterClient({
+      sdk: stub.sdk,
+      requestTimeoutMs: 45_000,
+      remainingReviewMs,
+    })
+    expect(await client.requestReview(requestParams, logger)).toEqual({
       review: acceptedReview,
       modelUsed: requestParams.model,
       attempts: [
@@ -371,15 +369,13 @@ describe("requestReview", () => {
         generationResponses: [{ pending: () => late.promise }],
       })
       const deadline = performance.now() + 100
-      const client = createOpenRouterClient(
-        {
-          sdk: stub.sdk,
-          requestTimeoutMs: 45_000,
-          remainingReviewMs: () => deadline - performance.now(),
-        },
-        createTestLogger(),
-      )
-      const request = client.requestReview(requestParams)
+      const logger = createTestLogger()
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        requestTimeoutMs: 45_000,
+        remainingReviewMs: () => deadline - performance.now(),
+      })
+      const request = client.requestReview(requestParams, logger)
       await vi.advanceTimersByTimeAsync(100)
       const result = await request
       const expected = {
@@ -417,9 +413,9 @@ describe("requestReview", () => {
 
   it("sends the strict json_schema response format with the review schema and per-attempt timeout", async () => {
     const stub = makeSdkStub({ sendResponses: [{ value: acceptedChatResult }] })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    await client.requestReview(requestParams)
+    await client.requestReview(requestParams, logger)
 
     expect(stub.sendCalls).toEqual([
       {
@@ -450,9 +446,9 @@ describe("requestReview", () => {
 
   it("returns the parsed review and a single accepted attempt on first success", async () => {
     const stub = makeSdkStub({ sendResponses: [{ value: acceptedChatResult }] })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(result).toEqual({
       review: acceptedReview,
@@ -474,9 +470,9 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ value: invalidJsonChatResult }, { value: acceptedChatResult }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
       "openai/gpt-5-mini",
@@ -512,9 +508,9 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ value: emptyContentResult }, { value: acceptedChatResult }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(result.attempts).toEqual([
       {
@@ -544,9 +540,9 @@ describe("requestReview", () => {
         { value: acceptedChatResult },
       ],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
       "openai/gpt-5-mini",
@@ -581,9 +577,9 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: makeStatusError(429) }, { value: acceptedChatResult }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
       "openai/gpt-5-mini",
@@ -603,9 +599,9 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: new Error("socket hang up") }, { value: acceptedChatResult }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
       "openai/gpt-5-mini",
@@ -629,7 +625,7 @@ describe("requestReview", () => {
     })
     const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
       "openai/gpt-5-mini",
@@ -666,9 +662,9 @@ describe("requestReview", () => {
       sendResponses: [{ value: acceptedChatResult }],
       generationResponses: [{ value: { data: { totalCost: 0.01 } } }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    await client.requestReview(requestParams)
+    await client.requestReview(requestParams, logger)
 
     const signal = stub.sendCalls[0]?.options?.signal
     expect(signal).toBeInstanceOf(AbortSignal)
@@ -682,36 +678,36 @@ describe("requestReview", () => {
       // DOMException the aborted fetch raised
       const rejectOnAbort = (options: StubOptions): Promise<unknown> => {
         return new Promise((_resolve, reject) => {
-          options?.signal?.addEventListener("abort", () =>
+          options?.signal?.addEventListener("abort", () => {
             reject(
               Object.assign(new Error("Request aborted by client"), {
                 name: "RequestAbortedError",
                 cause: new DOMException("This operation was aborted", "AbortError"),
               }),
-            ),
-          )
+            )
+          })
         })
       }
       const stub = makeSdkStub({
         sendResponses: [{ pending: rejectOnAbort }, { pending: rejectOnAbort }],
       })
       const logger = createTestLogger()
-      const client = createOpenRouterClient(
-        {
-          sdk: stub.sdk,
-          remainingReviewMs: () => Infinity,
-          requestTimeoutMs: 45_000,
-          retryDelayMs: 0,
-        },
-        logger,
-      )
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        remainingReviewMs: () => Infinity,
+        requestTimeoutMs: 45_000,
+        retryDelayMs: 0,
+      })
 
       // Attach the rejection handler BEFORE advancing timers so the
       // second attempt's async abort rejection is caught immediately.
-      const reviewPromise = client.requestReview({
-        ...requestParams,
-        fallbackModel: null,
-      })
+      const reviewPromise = client.requestReview(
+        {
+          ...requestParams,
+          fallbackModel: null,
+        },
+        logger,
+      )
       void reviewPromise.catch(() => undefined)
 
       // Two attempts × 45s each — advance past both deadlines
@@ -754,17 +750,14 @@ describe("requestReview", () => {
         ],
       })
       const logger = createTestLogger()
-      const client = createOpenRouterClient(
-        {
-          sdk: stub.sdk,
-          remainingReviewMs: () => Infinity,
-          requestTimeoutMs: 45_000,
-          retryDelayMs: 0,
-        },
-        logger,
-      )
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        remainingReviewMs: () => Infinity,
+        requestTimeoutMs: 45_000,
+        retryDelayMs: 0,
+      })
 
-      const reviewPromise = client.requestReview(requestParams)
+      const reviewPromise = client.requestReview(requestParams, logger)
       await vi.advanceTimersByTimeAsync(45_000)
       const result = await reviewPromise
 
@@ -842,17 +835,14 @@ describe("requestReview", () => {
         sendResponses: [{ pending: resolveLate }, { value: acceptedChatResult }],
       })
       const logger = createTestLogger()
-      const client = createOpenRouterClient(
-        {
-          sdk: stub.sdk,
-          remainingReviewMs: () => Infinity,
-          requestTimeoutMs: 45_000,
-          retryDelayMs: 0,
-        },
-        logger,
-      )
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        remainingReviewMs: () => Infinity,
+        requestTimeoutMs: 45_000,
+        retryDelayMs: 0,
+      })
 
-      const reviewPromise = client.requestReview(requestParams)
+      const reviewPromise = client.requestReview(requestParams, logger)
       await vi.advanceTimersByTimeAsync(45_000)
       const result = await reviewPromise
       expect(result.attempts.map((attempt) => [attempt.model, attempt.outcome])).toEqual([
@@ -880,6 +870,61 @@ describe("requestReview", () => {
     }
   })
 
+  it("tags a late settlement with the caller's logger context after the request has rejected", async () => {
+    vi.useFakeTimers()
+    try {
+      const resolveLate = (): Promise<unknown> => {
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(acceptedChatResult), 120_000)
+        })
+      }
+      const stub = makeSdkStub({
+        sendResponses: [{ pending: resolveLate }, { error: makeStatusError(400) }],
+      })
+      const logger = createTestLogger()
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        remainingReviewMs: () => Infinity,
+        requestTimeoutMs: 45_000,
+        retryDelayMs: 0,
+      })
+
+      const rejection = captureRejection(
+        client.requestReview(
+          { ...requestParams, fallbackModel: null },
+          logger.child({ phase: "subtle-bugs" }),
+        ),
+      )
+      await vi.advanceTimersByTimeAsync(45_000)
+      const error = await rejection
+
+      if (!(error instanceof ReviewRequestError)) throw error
+      expect(error.message).toBe(
+        "review request failed after 2 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); openai/gpt-5-mini: api_error (HTTP 400: HTTP 400)",
+      )
+      expect(logsWithMessage(logger, "deadline-elapsed request settled")).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(75_000)
+
+      expect(logsWithMessage(logger, "deadline-elapsed request settled")).toEqual([
+        {
+          level: "warn",
+          message: "deadline-elapsed request settled",
+          data: {
+            phase: "subtle-bugs",
+            operation: "chat request",
+            model: "openai/gpt-5-mini",
+            elapsedMs: 120_000,
+            timeoutMs: 45_000,
+            settledWith: "response",
+          },
+        },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("logs a late non-abort rejection without raising an unhandled rejection", async () => {
     vi.useFakeTimers()
     try {
@@ -892,17 +937,14 @@ describe("requestReview", () => {
         sendResponses: [{ pending: rejectLate }, { value: acceptedChatResult }],
       })
       const logger = createTestLogger()
-      const client = createOpenRouterClient(
-        {
-          sdk: stub.sdk,
-          remainingReviewMs: () => Infinity,
-          requestTimeoutMs: 45_000,
-          retryDelayMs: 0,
-        },
-        logger,
-      )
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        remainingReviewMs: () => Infinity,
+        requestTimeoutMs: 45_000,
+        retryDelayMs: 0,
+      })
 
-      const reviewPromise = client.requestReview(requestParams)
+      const reviewPromise = client.requestReview(requestParams, logger)
       await vi.advanceTimersByTimeAsync(45_000)
       const result = await reviewPromise
       expect(result.attempts.map((attempt) => [attempt.model, attempt.outcome])).toEqual([
@@ -940,20 +982,20 @@ describe("requestReview", () => {
         ],
       })
       const logger = createTestLogger()
-      const client = createOpenRouterClient(
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        remainingReviewMs: () => Infinity,
+        requestTimeoutMs: 45_000,
+        retryDelayMs: 0,
+      })
+
+      const reviewPromise = client.requestReview(
         {
-          sdk: stub.sdk,
-          remainingReviewMs: () => Infinity,
-          requestTimeoutMs: 45_000,
-          retryDelayMs: 0,
+          ...requestParams,
+          fallbackModel: null,
         },
         logger,
       )
-
-      const reviewPromise = client.requestReview({
-        ...requestParams,
-        fallbackModel: null,
-      })
       await vi.advanceTimersByTimeAsync(45_000)
       const result = await reviewPromise
 
@@ -995,17 +1037,14 @@ describe("requestReview", () => {
         ],
       })
       const logger = createTestLogger()
-      const client = createOpenRouterClient(
-        {
-          sdk: stub.sdk,
-          remainingReviewMs: () => Infinity,
-          requestTimeoutMs: 45_000,
-          retryDelayMs: 0,
-        },
-        logger,
-      )
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        remainingReviewMs: () => Infinity,
+        requestTimeoutMs: 45_000,
+        retryDelayMs: 0,
+      })
 
-      const reviewPromise = client.requestReview(requestParams)
+      const reviewPromise = client.requestReview(requestParams, logger)
       void reviewPromise.catch(() => undefined)
       // One primary deadline, then two fallback deadlines (last-rung retry)
       await vi.advanceTimersByTimeAsync(135_000)
@@ -1034,19 +1073,16 @@ describe("requestReview", () => {
         ],
       })
       const logger = createTestLogger()
-      const client = createOpenRouterClient(
-        {
-          sdk: stub.sdk,
-          remainingReviewMs: () => Infinity,
-          requestTimeoutMs: 45_000,
-          retryDelayMs,
-        },
-        logger,
-      )
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        remainingReviewMs: () => Infinity,
+        requestTimeoutMs: 45_000,
+        retryDelayMs,
+      })
 
       const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
       try {
-        const reviewPromise = client.requestReview(requestParams)
+        const reviewPromise = client.requestReview(requestParams, logger)
         await vi.advanceTimersByTimeAsync(45_000)
         await reviewPromise
 
@@ -1069,16 +1105,13 @@ describe("requestReview", () => {
       })
       const logger = createTestLogger()
       const deadline = performance.now() + 100
-      const client = createOpenRouterClient(
-        {
-          sdk: stub.sdk,
-          requestTimeoutMs: 45_000,
-          remainingReviewMs: () => deadline - performance.now(),
-        },
-        logger,
-      )
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        requestTimeoutMs: 45_000,
+        remainingReviewMs: () => deadline - performance.now(),
+      })
 
-      const reviewPromise = client.requestReview(requestParams)
+      const reviewPromise = client.requestReview(requestParams, logger)
       await vi.advanceTimersByTimeAsync(100)
       await reviewPromise
 
@@ -1095,7 +1128,11 @@ describe("requestReview", () => {
         {
           level: "warn",
           message: "generation cost lookup failed",
-          data: { error: "review deadline exceeded" },
+          data: {
+            operation: "generation cost lookup",
+            generationId: "gen-no-cost",
+            error: "review deadline exceeded",
+          },
         },
       ])
     } finally {
@@ -1111,17 +1148,14 @@ describe("requestReview", () => {
         generationResponses: [{ pending: () => new Promise(() => undefined) }],
       })
       const logger = createTestLogger()
-      const client = createOpenRouterClient(
-        {
-          sdk: stub.sdk,
-          remainingReviewMs: () => Infinity,
-          requestTimeoutMs: 45_000,
-          retryDelayMs: 0,
-        },
-        logger,
-      )
+      const client = createOpenRouterClient({
+        sdk: stub.sdk,
+        remainingReviewMs: () => Infinity,
+        requestTimeoutMs: 45_000,
+        retryDelayMs: 0,
+      })
 
-      const reviewPromise = client.requestReview(requestParams)
+      const reviewPromise = client.requestReview(requestParams, logger)
       await vi.advanceTimersByTimeAsync(45_000)
       const result = await reviewPromise
 
@@ -1141,7 +1175,11 @@ describe("requestReview", () => {
         {
           level: "warn",
           message: "generation cost lookup failed",
-          data: { error: "no response within 45s" },
+          data: {
+            operation: "generation cost lookup",
+            generationId: "gen-no-cost",
+            error: "no response within 45s",
+          },
         },
       ])
     } finally {
@@ -1154,11 +1192,11 @@ describe("requestReview", () => {
       sendResponses: [{ value: acceptedChatResult }],
     })
     delete stub.sdk.generations
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
     try {
-      await client.requestReview(requestParams)
+      await client.requestReview(requestParams, logger)
       expect(clearTimeoutSpy).toHaveBeenCalled()
     } finally {
       clearTimeoutSpy.mockRestore()
@@ -1171,21 +1209,18 @@ describe("requestReview", () => {
       sendResponses: [{ error: makeStatusError(429) }, { error: makeStatusError(429) }],
     })
     const logger = createTestLogger()
-    const client = createOpenRouterClient(
-      {
-        sdk: stub.sdk,
-        remainingReviewMs: () => Infinity,
-        requestTimeoutMs: 45_000,
-        retryDelayMs,
-      },
-      logger,
-    )
+    const client = createOpenRouterClient({
+      sdk: stub.sdk,
+      remainingReviewMs: () => Infinity,
+      requestTimeoutMs: 45_000,
+      retryDelayMs,
+    })
 
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
     try {
-      await expect(client.requestReview({ ...requestParams, fallbackModel: null })).rejects.toThrow(
-        "review request failed",
-      )
+      await expect(
+        client.requestReview({ ...requestParams, fallbackModel: null }, logger),
+      ).rejects.toThrow("review request failed")
 
       // retryDelayMs sleeps happen between retryable failures; the guard
       // `attemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
@@ -1209,9 +1244,9 @@ describe("requestReview", () => {
         { value: acceptedChatResult },
       ],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(result.attempts[0]?.errorSummary).toBe(`HTTP 429: ${"x".repeat(200)}…`)
   })
@@ -1220,9 +1255,9 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: makeStatusError(404) }, { value: acceptedChatResult }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
       "openai/gpt-5-mini",
@@ -1257,7 +1292,7 @@ describe("requestReview", () => {
     })
     const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     // 262,144 window − 135,762 input − 8,192 margin
     expect(sentCeilings(stub)).toEqual([
@@ -1304,9 +1339,9 @@ describe("requestReview", () => {
         { value: acceptedChatResult },
       ],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    await client.requestReview(requestParams)
+    await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
@@ -1322,9 +1357,9 @@ describe("requestReview", () => {
         { value: acceptedChatResult },
       ],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    await client.requestReview(requestParams)
+    await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
@@ -1340,9 +1375,9 @@ describe("requestReview", () => {
         { value: acceptedChatResult },
       ],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    await client.requestReview(requestParams)
+    await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
@@ -1358,9 +1393,9 @@ describe("requestReview", () => {
         { value: acceptedChatResult },
       ],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    await client.requestReview(requestParams)
+    await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
@@ -1379,7 +1414,7 @@ describe("requestReview", () => {
     })
     const { client, logger } = makeClient(stub)
 
-    await client.requestReview(requestParams)
+    await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
@@ -1398,7 +1433,7 @@ describe("requestReview", () => {
     })
     const { client, logger } = makeClient(stub)
 
-    await client.requestReview(requestParams)
+    await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
@@ -1416,9 +1451,9 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: overflowWordedGatewayError }, { value: acceptedChatResult }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    await client.requestReview(requestParams)
+    await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
@@ -1430,9 +1465,9 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: makeStatusError(400) }, { value: acceptedChatResult }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    await client.requestReview(requestParams)
+    await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
       { model: "openai/gpt-5-mini", maxCompletionTokens: 128_000 },
@@ -1446,9 +1481,9 @@ describe("requestReview", () => {
       const stub = makeSdkStub({
         sendResponses: [{ error: makeStatusError(statusCode) }],
       })
-      const { client } = makeClient(stub)
+      const { client, logger } = makeClient(stub)
 
-      await expect(client.requestReview(requestParams)).rejects.toThrow(
+      await expect(client.requestReview(requestParams, logger)).rejects.toThrow(
         `OpenRouter auth/credit error — aborting without fallback: openai/gpt-5-mini: api_error (HTTP ${statusCode}: HTTP ${statusCode})`,
       )
       expect(stub.sendCalls).toHaveLength(1)
@@ -1459,9 +1494,11 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: makeStatusError(500) }, { error: makeStatusError(503) }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    await expect(client.requestReview({ ...requestParams, fallbackModel: null })).rejects.toThrow(
+    await expect(
+      client.requestReview({ ...requestParams, fallbackModel: null }, logger),
+    ).rejects.toThrow(
       "review request failed after 2 attempt(s): openai/gpt-5-mini: api_error (HTTP 500: HTTP 500); openai/gpt-5-mini: api_error (HTTP 503: HTTP 503)",
     )
     expect(stub.sendCalls).toHaveLength(2)
@@ -1471,10 +1508,10 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: makeStatusError(500) }, { error: makeStatusError(503) }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
     const failure = await captureRejection(
-      client.requestReview({ ...requestParams, fallbackModel: null }),
+      client.requestReview({ ...requestParams, fallbackModel: null }, logger),
     )
 
     if (!(failure instanceof ReviewRequestError)) {
@@ -1505,9 +1542,9 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: makeStatusError(402) }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const failure = await captureRejection(client.requestReview(requestParams))
+    const failure = await captureRejection(client.requestReview(requestParams, logger))
 
     if (!(failure instanceof ReviewRequestError)) {
       throw new Error("expected a ReviewRequestError")
@@ -1534,9 +1571,9 @@ describe("requestReview", () => {
         { value: invalidJsonChatResult },
       ],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    await expect(client.requestReview(requestParams)).rejects.toThrow(
+    await expect(client.requestReview(requestParams, logger)).rejects.toThrow(
       "review request failed after 4 attempt(s)",
     )
     expect(stub.sendCalls).toHaveLength(4)
@@ -1546,9 +1583,9 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ value: { unexpected: true } }, { value: acceptedChatResult }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(result.attempts[0]).toEqual({
       model: "openai/gpt-5-mini",
@@ -1565,9 +1602,9 @@ describe("requestReview", () => {
       sendResponses: [{ value: makeNoCostChatResult() }],
       generationResponses: [{ value: { data: { totalCost: 0.0399 } } }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(stub.generationCalls).toEqual([
       {
@@ -1588,14 +1625,18 @@ describe("requestReview", () => {
     })
     const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(result.attempts[0]?.costUsd).toBeNull()
     expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
       {
         level: "warn",
         message: "generation cost lookup failed",
-        data: { error: "HTTP 500" },
+        data: {
+          operation: "generation cost lookup",
+          generationId: "gen-no-cost",
+          error: "HTTP 500",
+        },
       },
     ])
   })
@@ -1611,14 +1652,18 @@ describe("requestReview", () => {
     }
     const { client, logger } = makeClient({ sdk: sdkWithThrowingLookup })
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(result.attempts[0]?.costUsd).toBeNull()
     expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
       {
         level: "warn",
         message: "generation cost lookup failed",
-        data: { error: "lookup threw before returning a promise" },
+        data: {
+          operation: "generation cost lookup",
+          generationId: "gen-no-cost",
+          error: "lookup threw before returning a promise",
+        },
       },
     ])
   })
@@ -1630,14 +1675,14 @@ describe("requestReview", () => {
     })
     const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(result.attempts[0]?.costUsd).toBeNull()
     expect(logsWithMessage(logger, "unexpected generation response shape")).toEqual([
       {
         level: "warn",
         message: "unexpected generation response shape",
-        data: {},
+        data: { operation: "generation cost lookup", generationId: "gen-no-cost" },
       },
     ])
   })
@@ -1652,9 +1697,9 @@ describe("requestReview", () => {
       sendResponses: [{ value: noUsageResult }],
       generationResponses: [{ value: { data: { totalCost: 0.0399 } } }],
     })
-    const { client } = makeClient(stub)
+    const { client, logger } = makeClient(stub)
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     // costUsd from the lookup proves the missing usage block routed the
     // accepted attempt through the generation-cost fallback
@@ -1674,9 +1719,9 @@ describe("requestReview", () => {
     const sdkWithoutGenerations: OpenRouterLike = {
       chat: { send: async () => makeNoCostChatResult() },
     }
-    const { client } = makeClient({ sdk: sdkWithoutGenerations })
+    const { client, logger } = makeClient({ sdk: sdkWithoutGenerations })
 
-    const result = await client.requestReview(requestParams)
+    const result = await client.requestReview(requestParams, logger)
 
     expect(result.attempts[0]?.costUsd).toBeNull()
   })

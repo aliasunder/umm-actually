@@ -72,12 +72,18 @@ export type OpenRouterLike = {
 }
 
 export type OpenRouterClient = {
-  requestReview: (params: {
-    systemPrompt: string
-    userPrompt: string
-    model: string
-    fallbackModel: string | null
-  }) => Promise<StructuredReviewResult>
+  /** Every line the request logs goes through `logger`, so props the caller
+   *  binds to it tag all of them. A timed-out HTTP call can still settle
+   *  after requestReview returns, and the line that logs it uses `logger` too. */
+  requestReview: (
+    params: {
+      systemPrompt: string
+      userPrompt: string
+      model: string
+      fallbackModel: string | null
+    },
+    logger: Logger,
+  ) => Promise<StructuredReviewResult>
 }
 
 const chatResultSchema = z.object({
@@ -230,16 +236,15 @@ const describeLateSettlement = <T>(late: SettledResult<T>): LateSettlement => {
 /** Bounds an SDK call with an authoritative deadline:
  *  - Resolve the deadline before aborting so it wins deterministically.
  *  - Return at the deadline even when the SDK ignores the abort.
- *  - Observe the abandoned call and log how it eventually settles. */
+ *  - Observe the abandoned call and log how it eventually settles.
+ *  - Add no identifying props to its log lines; the caller binds them to `logger`. */
 const withDeadline = async <T>(
   {
     start,
     timeoutMs,
-    logContext,
   }: {
     start: (signal: AbortSignal) => Promise<T>
     timeoutMs: number
-    logContext: Record<string, unknown>
   },
   logger: Logger,
 ): Promise<BoundedResult<T>> => {
@@ -266,11 +271,10 @@ const withDeadline = async <T>(
 
   if (bounded.status !== "timed_out") return bounded
 
-  logger.warn("request deadline elapsed", { ...logContext, timeoutMs })
+  logger.warn("request deadline elapsed", { timeoutMs })
 
   const logLateSettlement = (late: SettledResult<T>): void => {
     logger.warn("deadline-elapsed request settled", {
-      ...logContext,
       elapsedMs: DateTime.now().diff(startedAt).toMillis(),
       timeoutMs,
       settledWith: describeLateSettlement(late),
@@ -382,30 +386,34 @@ const summarizeAttempts = (attempts: ModelAttempt[]): string => {
   return attempts.map(describeAttempt).join("; ")
 }
 
-export const createOpenRouterClient = (
-  {
-    sdk,
-    requestTimeoutMs,
-    remainingReviewMs,
-    retryDelayMs = RETRY_DELAY_MS,
-  }: {
-    sdk: OpenRouterLike
-    /** Per-attempt deadline. When it elapses the attempt records outcome
-     *  `timeout` and the ladder moves on — to the next model when one
-     *  exists, otherwise a same-model retry while attempts remain — whether
-     *  or not the provider connection closes. The HTTP call is aborted
-     *  best-effort. */
-    requestTimeoutMs: number
-    /** Milliseconds left in the whole review's time budget; 0 or less once
-     *  it has run out. Caps every attempt, cost lookup, and retry delay. */
-    remainingReviewMs: () => number
-    retryDelayMs?: number
-  },
-  logger: Logger,
-): OpenRouterClient => {
+/** The client holds no logger. Each requestReview call passes its own, so
+ *  concurrent callers can tag their requests' lines with their own props. */
+export const createOpenRouterClient = ({
+  sdk,
+  requestTimeoutMs,
+  remainingReviewMs,
+  retryDelayMs = RETRY_DELAY_MS,
+}: {
+  sdk: OpenRouterLike
+  /** Per-attempt deadline. When it elapses the attempt records outcome
+   *  `timeout` and the ladder moves on — to the next model when one
+   *  exists, otherwise a same-model retry while attempts remain — whether
+   *  or not the provider connection closes. The HTTP call is aborted
+   *  best-effort. */
+  requestTimeoutMs: number
+  /** Milliseconds left in the whole review's time budget; 0 or less once
+   *  it has run out. Caps every attempt, cost lookup, and retry delay. */
+  remainingReviewMs: () => number
+  retryDelayMs?: number
+}): OpenRouterClient => {
   const requestTimeoutSummary = `no response within ${Math.round(requestTimeoutMs / 1000)}s`
 
-  const attemptOnce = async (chatRequest: ChatRequestSubset): Promise<SingleAttempt> => {
+  /** Sends one chat request under the per-attempt deadline. Its only log lines
+   *  are withDeadline's; requestReview logs each attempt's outcome. */
+  const attemptOnce = async (
+    chatRequest: ChatRequestSubset,
+    logger: Logger,
+  ): Promise<SingleAttempt> => {
     const { model } = chatRequest
     const remainingMs = remainingReviewMs()
 
@@ -419,9 +427,8 @@ export const createOpenRouterClient = (
           return sdk.chat.send({ chatRequest }, { retries: { strategy: "none" }, signal })
         },
         timeoutMs: Math.min(requestTimeoutMs, remainingMs),
-        logContext: { operation: "chat request", model },
       },
-      logger,
+      logger.child({ operation: "chat request", model }),
     )
 
     // Retryable even when the review deadline caused the timeout, because
@@ -547,7 +554,10 @@ export const createOpenRouterClient = (
 
   /** A cost lookup failure must never fail a completed review, so every
    *  failure degrades to a null cost. */
-  const lookupGenerationCost = async (generationId: string): Promise<number | null> => {
+  const lookupGenerationCost = async (
+    generationId: string,
+    logger: Logger,
+  ): Promise<number | null> => {
     const generations = sdk.generations
     const remainingMs = remainingReviewMs()
 
@@ -556,6 +566,9 @@ export const createOpenRouterClient = (
     // The review deadline, not the per-request timeout, ends the lookup if it
     // runs long
     const reviewDeadlineIsBinding = remainingMs <= requestTimeoutMs
+
+    // Every lookup line names the generation, so a failure ties back to it
+    const lookupLogger = logger.child({ operation: "generation cost lookup", generationId })
 
     const lookup = await withDeadline(
       {
@@ -566,19 +579,18 @@ export const createOpenRouterClient = (
           )
         },
         timeoutMs: Math.min(requestTimeoutMs, remainingMs),
-        logContext: { operation: "generation cost lookup", generationId },
       },
-      logger,
+      lookupLogger,
     )
 
     if (lookup.status === "timed_out") {
-      logger.warn("generation cost lookup failed", {
+      lookupLogger.warn("generation cost lookup failed", {
         error: reviewDeadlineIsBinding ? "review deadline exceeded" : requestTimeoutSummary,
       })
       return null
     }
     if (lookup.status === "rejected") {
-      logger.warn("generation cost lookup failed", {
+      lookupLogger.warn("generation cost lookup failed", {
         error: summarizeError(lookup.error),
       })
       return null
@@ -587,7 +599,7 @@ export const createOpenRouterClient = (
     const parsed = generationResponseSchema.safeParse(lookup.value)
 
     if (!parsed.success) {
-      logger.warn("unexpected generation response shape")
+      lookupLogger.warn("unexpected generation response shape")
       return null
     }
 
@@ -595,17 +607,10 @@ export const createOpenRouterClient = (
     return parsed.data.data.totalCost
   }
 
-  const requestReview = async ({
-    systemPrompt,
-    userPrompt,
-    model,
-    fallbackModel,
-  }: {
-    systemPrompt: string
-    userPrompt: string
-    model: string
-    fallbackModel: string | null
-  }): Promise<StructuredReviewResult> => {
+  const requestReview: OpenRouterClient["requestReview"] = async (
+    { systemPrompt, userPrompt, model, fallbackModel },
+    logger,
+  ) => {
     const modelLadder = fallbackModel === null ? [model] : [model, fallbackModel]
     const attempts: ModelAttempt[] = []
     const ensureReviewTimeRemaining = (): void => {
@@ -630,13 +635,14 @@ export const createOpenRouterClient = (
         ensureReviewTimeRemaining()
         const attemptResult = await attemptOnce(
           buildChatRequest({ systemPrompt, userPrompt, model: ladderModel, maxCompletionTokens }),
+          logger,
         )
 
         if (attemptResult.kind === "accepted") {
           // The generation lookup runs only when the response's usage omits the cost
           const costUsd =
             attemptResult.attempt.costUsd ??
-            (await lookupGenerationCost(attemptResult.generationId))
+            (await lookupGenerationCost(attemptResult.generationId, logger))
           attempts.push({ ...attemptResult.attempt, costUsd })
           logger.info("review response accepted", {
             model: ladderModel,

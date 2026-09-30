@@ -1290,9 +1290,8 @@ export const orchestrate = async (
   }
 }
 
-/** Prompted strategy — builds the prompt for one review phase and sends it
- *  to OpenRouter; the stage dispatcher calls it once per phase. V1.5/V2
- *  tool-loop strategies swap in behind the same GenerateFindings interface. */
+/** Builds one review phase's prompt and sends it to OpenRouter with no tool
+ *  calls. The stage dispatcher calls the returned function once per phase. */
 export const createPromptedGenerateFindings = (
   {
     openrouterClient,
@@ -1305,8 +1304,6 @@ export const createPromptedGenerateFindings = (
   },
   logger: Logger,
 ): GenerateFindings => {
-  const log = logger.child({ module: "generateFindings" })
-
   return async (reviewContext) => {
     const delimiterNonce = generateDelimiterNonce()
     const systemPrompt = buildSystemPrompt({ phase: reviewContext.phase })
@@ -1315,17 +1312,15 @@ export const createPromptedGenerateFindings = (
       delimiterNonce,
     })
 
-    log.info("requesting review", {
-      phase: reviewContext.phase.id,
-      model,
-      fallbackModel,
-    })
+    // Parallel phases call the same model at once, so the phase prop is what
+    // tells their log lines apart
+    const phaseLogger = logger.child({ phase: reviewContext.phase.id })
 
-    return openrouterClient.requestReview({
-      systemPrompt,
-      userPrompt,
-      model,
-      fallbackModel,
-    })
+    phaseLogger.info("requesting review", { model, fallbackModel })
+
+    return openrouterClient.requestReview(
+      { systemPrompt, userPrompt, model, fallbackModel },
+      phaseLogger,
+    )
   }
 }
