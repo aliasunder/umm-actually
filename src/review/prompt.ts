@@ -20,22 +20,32 @@ export type PromptFile = {
 export const CHARS_PER_TOKEN = 4
 
 /** Longest conventions text, in characters, the conventions section carries
- *  before truncating. The render check, the prompt truncation, and the
- *  truncation report all read it, so they cannot drift apart. */
+ *  before truncating. conventionsRenderInFull, truncateConventions, and
+ *  classifyConventionsCoverage (context-notes.ts) all read it, so they cannot
+ *  drift apart. */
 export const conventionsCharacterCap = (conventionsBudgetTokens: number): number => {
   return conventionsBudgetTokens * CHARS_PER_TOKEN
 }
 
-/** Whether the conventions section will carry the file's complete text rather
- *  than a truncated head. A conventions file that also changed in the PR is
- *  rendered by the changed-files channel too — the caller uses this to decide
- *  which of the two copies is the full one, so exactly one full copy is ever
- *  sent. */
+/**
+ * Whether the conventions section will carry the file's complete text rather
+ * than a truncated head. The orchestrator uses it to send one full copy of the
+ * conventions file:
+ * - true: the section is the full copy, so readPriorityDocs never receives
+ *   the file and a changed conventions file's block is sent diff-only.
+ * - false: the section carries a truncated head, and a full copy can arrive
+ *   another way. When a priority-doc block (reason "priority documentation")
+ *   carries it, the orchestrator swaps the section's text for a placeholder
+ *   that points to that block. When a changed-file or related-file block, or
+ *   the diff of a newly added file, carries it, the truncated section stays.
+ */
 export const conventionsRenderInFull = (
   conventions: string,
   conventionsBudgetTokens: number,
 ): boolean => conventions.length <= conventionsCharacterCap(conventionsBudgetTokens)
 
+/** No code parses the "Pre-existing:" description prefix. It labels the
+ *  finding for the person reading the posted comment. */
 const IDENTITY_AND_SCOPE = `You are umm-actually, a code review bot. You review the changes in a pull
 request. You are skeptical: code being in the diff is not evidence it is correct.
 
@@ -95,6 +105,9 @@ Every key is required on every finding. When there is nothing to report,
 "findings" must be the empty array [] — never omit the key. Output only the
 JSON object: no markdown fences, no text before or after it.`
 
+/** filterNonFindings (filter-non-findings.ts) drops findings whose fields
+ *  start with the non-finding phrases quoted here, for when the model emits
+ *  them anyway. A phrase added here needs a matching pattern there. */
 const OUTPUT_DISCIPLINE = `OUTPUT DISCIPLINE — field constraints:
 - "title": imperative fix statement, under 80 characters (e.g. "Trim keys
   before inserting into the registry"). Do not start with "Issue:" or
@@ -121,6 +134,21 @@ the code is correct — including that a previously posted bot comment has
 been resolved by this revision — record that conclusion in "analysis" and
 move on — do not emit a finding for it.`
 
+/**
+ * This text quotes two strings that the diff module writes. annotateDiff
+ * (annotate-diff.ts) writes the "=== path ===" headers, and
+ * renderExcludedFilesNote (exclusion.ts) writes the "changed file(s) excluded
+ * from review" trailer. A wording change there must update this text.
+ *
+ * The File attribution paragraph covers three cases:
+ * - A finding inside the annotated diff needs no quote line. The paragraph's
+ *   first "Boundary:" states this case.
+ * - A finding outside the diff quotes its passage and is filed on the path
+ *   whose block holds that passage.
+ * - A finding about missing content quotes the nearest heading, marked
+ *   "(missing here)". The paragraph's second "Boundary:" keeps this case from
+ *   covering text that sits in another file's block.
+ */
 const ANCHORING_CONTRACT = `Prompt sections: the annotated diff is the <diff-…> section, a file block is
 one <file-… path="…"> section, and the conventions section is the
 <conventions-…> section.
@@ -164,6 +192,10 @@ trailer at the end of the diff are not in context — their content was not
 provided. Do not report findings on excluded file paths.`
 
 export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string => {
+  // Order matters because sections cite each other by position. PROOF_OF_WORK
+  // points "above" to the DIMENSION sections in phase.instructionSections and
+  // "below" to File attribution in ANCHORING_CONTRACT, which points back
+  // "above" to PROOF_OF_WORK's path: "sentence" form.
   return [
     IDENTITY_AND_SCOPE,
     ...phase.instructionSections,
@@ -176,9 +208,10 @@ export const buildSystemPrompt = ({ phase }: { phase: ReviewPhase }): string => 
 }
 
 const truncateConventions = (conventions: string, conventionsBudgetTokens: number): string => {
+  if (conventionsRenderInFull(conventions, conventionsBudgetTokens)) return conventions
+
   const characterCap = conventionsCharacterCap(conventionsBudgetTokens)
 
-  if (conventions.length <= characterCap) return conventions
   // toWellFormed: a cut mid-surrogate-pair would leave a lone surrogate,
   // which some HTTP stacks and providers reject in the request body
   return `${conventions.slice(0, characterCap).toWellFormed()}\n\n[conventions truncated at ~${conventionsBudgetTokens} tokens]`
@@ -204,20 +237,19 @@ const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
   // tag is tens of KB away, and models then attribute the text to a nearby file
   const pathAttribute = `path="${escapeAttributeValue(file.path)}"`
 
-  // Only changed files are sent diff-only, and a changed file needs no reason
-  // attribute to explain why it is in the prompt
+  const reasonAttribute = file.reason ? ` reason="${escapeAttributeValue(file.reason)}"` : ""
+
   if (file.includedAs === "diff-only") {
-    return `<${fileTag} ${pathAttribute} note="full content omitted — see diff">\n</${fileTag} ${pathAttribute}>`
+    return `<${fileTag} ${pathAttribute}${reasonAttribute} note="full content omitted — see diff">\n</${fileTag} ${pathAttribute}>`
   }
 
-  const reasonAttribute = file.reason ? ` reason="${escapeAttributeValue(file.reason)}"` : ""
   return `<${fileTag} ${pathAttribute}${reasonAttribute}>\n${file.content}\n</${fileTag} ${pathAttribute}>`
 }
 
 /**
  * Assembles the user message. Section order is stable → volatile so prefix
- * caching can help on providers that support it: metadata, conventions, file
- * contents, related files, related docs, diff, then prior bot comments and
+ * caching can help on providers that support it: metadata, conventions,
+ * changed files, related files, related docs, diff, then prior bot comments and
  * prior findings (most volatile — change between runs). The diff is never
  * truncated here — oversized PRs are skipped upstream rather than reviewed badly.
  */
@@ -235,9 +267,11 @@ export const buildUserPrompt = ({
   delimiterNonce,
 }: {
   prContext: PrContext
-  /** The conventions file's text, or a placeholder sentence pointing to its
-   *  full copy in a priority-doc file block. That block's path normalizes to
-   *  the same file, so either way the section's path attribute names it. */
+  /** The conventions file's text, or a placeholder sentence when a
+   *  priority-doc block already carries the full text (every case is listed
+   *  at conventionsRenderInFull). That block's path equals conventionsFile
+   *  after posix.normalize, so either way the section's path attribute names
+   *  the file. */
   conventions: string | null
   /** Repo-relative path of the conventions file — the section's path attribute. */
   conventionsFile: string
@@ -273,7 +307,11 @@ export const buildUserPrompt = ({
   const conventionsSection =
     conventions === null
       ? `<${conventionsTag}>\n(no conventions file found in this repository)\n</${conventionsTag}>`
-      : `<${conventionsTag} ${conventionsPathAttribute}>\n${truncateConventions(conventions, conventionsBudgetTokens)}\n</${conventionsTag} ${conventionsPathAttribute}>`
+      : [
+          `<${conventionsTag} ${conventionsPathAttribute}>`,
+          truncateConventions(conventions, conventionsBudgetTokens),
+          `</${conventionsTag} ${conventionsPathAttribute}>`,
+        ].join("\n")
 
   const changedFilesSection = changedFiles
     .map((changedFile) => renderFileBlock(changedFile, delimiterNonce))
@@ -282,6 +320,9 @@ export const buildUserPrompt = ({
     .map((relatedFile) => renderFileBlock(relatedFile, delimiterNonce))
     .join("\n\n")
 
+  // The header's two inclusion reasons are the reason strings the context
+  // reader sets (context/workspace.ts). readPriorityDocs sets "priority
+  // documentation", and findRelatedDocs sets "mentions <changed paths>".
   const relatedDocsSection =
     relatedDocs.length === 0
       ? ""
@@ -290,15 +331,32 @@ export const buildUserPrompt = ({
           ...relatedDocs.map((relatedDoc) => renderFileBlock(relatedDoc, delimiterNonce)),
         ].join("\n\n")
 
+  const diffSection = [
+    `<${diffTag} note="line numbers shown are new-file line numbers">`,
+    annotatedDiff,
+    `</${diffTag}>`,
+  ].join("\n")
+
+  // mergePhaseFindings (merge-phase-findings.ts) implements the
+  // keep-the-higher-severity rule this note states. Change the note whenever
+  // that rule changes.
   const priorFindingsSection =
     priorFindings.length === 0
       ? ""
-      : `<${priorFindingsTag} note="already reported by earlier phases — do not re-report them; when a later report overlaps one of these lines, only the higher-severity finding of the two is kept">\n${JSON.stringify(priorFindings, null, 2)}\n</${priorFindingsTag}>`
+      : [
+          `<${priorFindingsTag} note="already reported by earlier phases — do not re-report them; when a later report overlaps one of these lines, only the higher-severity finding of the two is kept">`,
+          JSON.stringify(priorFindings, null, 2),
+          `</${priorFindingsTag}>`,
+        ].join("\n")
 
   const priorBotCommentsSection =
     priorBotComments.length === 0
       ? ""
-      : `<${priorBotCommentsTag} note="findings already posted on this PR — do not re-report the same issues, even at different locations, and do not report that any of them are now addressed">\n${priorBotComments.join("\n\n---\n\n")}\n</${priorBotCommentsTag}>`
+      : [
+          `<${priorBotCommentsTag} note="findings already posted on this PR — do not re-report the same issues, even at different locations, and do not report that any of them are now addressed">`,
+          priorBotComments.join("\n\n---\n\n"),
+          `</${priorBotCommentsTag}>`,
+        ].join("\n")
 
   const sections = [
     metadataSection,
@@ -306,11 +364,13 @@ export const buildUserPrompt = ({
     changedFilesSection,
     relatedFilesSection,
     relatedDocsSection,
-    `<${diffTag} note="line numbers shown are new-file line numbers">\n${annotatedDiff}\n</${diffTag}>`,
+    diffSection,
     priorBotCommentsSection,
     priorFindingsSection,
   ]
 
+  // An empty input list renders its section as "", so dropping those leaves
+  // no blank gap between the sections that remain
   return sections.filter((section) => section !== "").join("\n\n")
 }
 
