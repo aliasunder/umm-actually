@@ -27,10 +27,9 @@ export const conventionsCharacterCap = (conventionsBudgetTokens: number): number
 }
 
 /** Whether the conventions section will carry the file's complete text rather
- *  than a truncated head. A conventions file that also changed in the PR is
- *  rendered by the changed-files channel too — the caller uses this to decide
- *  which of the two copies is the full one, so exactly one full copy is ever
- *  sent. */
+ *  than a truncated head. A conventions file that also changed in the PR gets
+ *  a changed-file block too — the caller uses this to decide which of the two
+ *  copies is the full one, so exactly one full copy is ever sent. */
 export const conventionsRenderInFull = (
   conventions: string,
   conventionsBudgetTokens: number,
@@ -121,6 +120,9 @@ the code is correct — including that a previously posted bot comment has
 been resolved by this revision — record that conclusion in "analysis" and
 move on — do not emit a finding for it.`
 
+/** File anchoring asks the model to copy a path attribute verbatim, and
+ *  escapeAttributeValue writes each `"` in that attribute as `&quot;`, so the
+ *  copied `file` can carry `&quot;`. filterUnknownFileFindings decodes it. */
 const ANCHORING_CONTRACT = `Prompt sections: the annotated diff is the <diff-…> section, a file block is
 one <file-… path="…"> section, and the conventions section is the
 <conventions-…> section.
@@ -179,6 +181,7 @@ const truncateConventions = (conventions: string, conventionsBudgetTokens: numbe
   const characterCap = conventionsCharacterCap(conventionsBudgetTokens)
 
   if (conventions.length <= characterCap) return conventions
+
   // toWellFormed: a cut mid-surrogate-pair would leave a lone surrogate,
   // which some HTTP stacks and providers reject in the request body
   return `${conventions.slice(0, characterCap).toWellFormed()}\n\n[conventions truncated at ~${conventionsBudgetTokens} tokens]`
@@ -193,9 +196,10 @@ const truncateConventions = (conventions: string, conventionsBudgetTokens: numbe
  */
 export const generateDelimiterNonce = (): string => randomBytes(6).toString("hex")
 
-/** A double quote would terminate the surrounding attribute — nothing else is
- *  structural inside a quoted attribute value. Change it together with
- *  unescapeAttributeValue, which decodes it. */
+/** A double quote would terminate the surrounding attribute. Nothing else,
+ *  `&` included, is structural inside a quoted attribute value, so nothing
+ *  else is escaped. Change it together with unescapeAttributeValue, which
+ *  decodes it. */
 const escapeAttributeValue = (value: string): string => value.replaceAll('"', "&quot;")
 
 /** Decodes the one entity escapeAttributeValue writes, never general HTML
@@ -242,9 +246,10 @@ export const buildUserPrompt = ({
   delimiterNonce,
 }: {
   prContext: PrContext
-  /** The conventions file's text, or a placeholder sentence pointing to its
-   *  full copy in a priority-doc file block. That block's path normalizes to
-   *  the same file, so either way the section's path attribute names it. */
+  /** The conventions file's text, or a placeholder sentence when a
+   *  priority-doc file block carries the full file instead. Either way the
+   *  section's path attribute is `conventionsFile`, the same file that block
+   *  holds. */
   conventions: string | null
   /** Repo-relative path of the conventions file — the section's path attribute. */
   conventionsFile: string

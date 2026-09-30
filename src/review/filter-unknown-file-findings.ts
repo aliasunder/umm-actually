@@ -2,7 +2,8 @@ import type { Finding } from "./finding.js"
 import { unescapeAttributeValue } from "./prompt.js"
 import { normalizeWorkspacePath } from "./workspace-path.js"
 
-/** A kept finding whose `file` was rewritten from its escaped spelling. */
+/** A kept finding whose `file` matched a known path only after each `&quot;`
+ *  in it was decoded to `"`. */
 export type UnescapedFileRewrite = {
   /** `file` exactly as the model wrote it, `&quot;` included. */
   writtenFile: string
@@ -26,12 +27,15 @@ type FileResolution =
  * Drops findings whose `file` names no file the model was given. A finding on
  * a path the model never saw is ungrounded by construction; without this gate
  * it would route to a beyond-diff comment.
- * - Membership is exact after normalization, never by basename or prefix.
- * - A `file` that matches as written is kept unchanged, even when it contains
- *   `&quot;`, because cross-run dedup anchors key on it.
+ * - `file` and each known path pass through normalizeWorkspacePath (trim,
+ *   resolve `.` and `..` segments, collapse repeated `/`, strip a leading or
+ *   trailing `/`). After that, membership is exact, never by basename or
+ *   prefix.
+ * - Only the comparison is normalized. A `file` that matches as written is
+ *   kept exactly as the model wrote it.
  * - A `file` that matches only after each `&quot;` becomes `"` is kept with
- *   that decoded spelling. Path attributes in the prompt escape `"` as
- *   `&quot;`, and the model copies the attribute verbatim.
+ *   that decoded spelling. File-block and conventions path attributes escape
+ *   `"` as `&quot;`, and the model copies the attribute verbatim.
  */
 export const filterUnknownFileFindings = ({
   findings,
@@ -45,8 +49,8 @@ export const filterUnknownFileFindings = ({
     return knownPathSet.has(normalizeWorkspacePath(filePath))
   }
 
-  // The written spelling is checked first, so a known path that literally
-  // contains "&quot;" is never rewritten
+  // A real file name can contain the literal text "&quot;", and decoding it
+  // would name a different file, so the written spelling is checked first
   const resolveFile = (finding: Finding): FileResolution => {
     if (isKnownPath(finding.file)) return { kind: "known", finding }
 

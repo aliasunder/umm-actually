@@ -433,22 +433,29 @@ type FilteredPhaseFindings = {
   droppedAsUnknownFile: number
 }
 
-/** Drops non-findings and findings on files the model never saw. */
+/** Drops non-findings and findings on files the model never saw. A kept
+ *  finding whose `file` matched only once `&quot;` was decoded comes back
+ *  with the decoded `file`. */
 const filterPhaseFindings = (
   { outcome, knownPaths }: { outcome: CompletedPhase; knownPaths: string[] },
   logger: Logger,
 ): FilteredPhaseFindings => {
-  const { findings: nonFindingFiltered, droppedAsNonFinding } = filterNonFindings(
+  const { findings: realFindings, droppedAsNonFinding } = filterNonFindings(
     outcome.result.review.findings,
   )
-  const { findings, droppedAsUnknownFile, unescapedFileRewrites } = filterUnknownFileFindings({
-    findings: nonFindingFiltered,
+  const {
+    findings,
+    droppedAsUnknownFile: unknownFileFindings,
+    unescapedFileRewrites,
+  } = filterUnknownFileFindings({
+    findings: realFindings,
     knownPaths,
   })
 
   // Each drop warns on its own because it is a model-quality event, not loop
-  // chatter. The title is omitted because it may be garbage.
-  for (const finding of droppedAsUnknownFile) {
+  // chatter. The title is left out because the model wrote it about a file it
+  // was never given, so it is unverified text.
+  for (const finding of unknownFileFindings) {
     logger.warn("dropping finding: file not in prompt context", {
       phase: outcome.phase.id,
       file: finding.file,
@@ -458,7 +465,8 @@ const filterPhaseFindings = (
   }
 
   // A rewritten file changes where the finding posts and its dedup anchor, so
-  // the log keeps both spellings
+  // the log keeps both spellings. It logs at debug, not warn, because the
+  // finding still posts, on the path the prompt gave.
   for (const { writtenFile, finding } of unescapedFileRewrites) {
     logger.debug("resolved escaped finding file to a prompt path", {
       phase: outcome.phase.id,
@@ -467,13 +475,14 @@ const filterPhaseFindings = (
       line: finding.line,
     })
   }
+
   return {
     findings: findings.map((finding) => ({
       ...finding,
       modelUsed: outcome.result.modelUsed,
     })),
     droppedAsNonFinding,
-    droppedAsUnknownFile: droppedAsUnknownFile.length,
+    droppedAsUnknownFile: unknownFileFindings.length,
   }
 }
 
@@ -737,9 +746,9 @@ const runReviewPipeline = async (
       .map((file) => posix.normalize(file.path)),
     ...conventionsFullCopyPaths.map((conventionsPath) => posix.normalize(conventionsPath)),
   ])
-  const needsPriorityDocFloor =
-    reviewablePriorityDocs.length > 0 &&
-    reviewablePriorityDocs.some((docPath) => !preFloorInContext.has(posix.normalize(docPath)))
+  const needsPriorityDocFloor = reviewablePriorityDocs.some(
+    (docPath) => !preFloorInContext.has(posix.normalize(docPath)),
+  )
   const remainingPriorityDocFloor = needsPriorityDocFloor
     ? Math.min(priorityDocFloorLimit - earlyPriorityDocTokens, remainingTokens)
     : 0
@@ -878,9 +887,14 @@ const runReviewPipeline = async (
 
   const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
 
-  // Every path the model can see: diff headers (deleted files render a
-  // header but have no new path, so they are added here), file blocks, and
-  // the conventions section when the file was found.
+  // Every path the model can see:
+  // - Diff headers. changedPaths holds each new path and a rename's old path,
+  //   which the header prints as "renamed from". A deleted file's header
+  //   names a path changedPaths lacks, so it is added here.
+  // - File blocks, and the conventions section when the file was found.
+  // These paths go in as written: filterUnknownFileFindings normalizes both
+  // sides with normalizeWorkspacePath, which also strips a leading or
+  // trailing "/" that the posix.normalize sets above keep.
   const deletedPaths = reviewableFiles.flatMap((file) => {
     return file.deleted && file.from ? [file.from] : []
   })
@@ -973,7 +987,9 @@ const runReviewPipeline = async (
   )
   const completedPhases = phaseOutcomes.filter((outcome) => outcome.status === "completed")
   const phases = phaseOutcomes.map(describePhaseOutcome)
-  /** Cost lookup expiry alone does not lose review coverage. */
+
+  // Only a phase that failed on the deadline lost coverage. A completed phase
+  // whose cost lookup the deadline skipped still delivered its findings.
   const coverageLostToReviewDeadline = phaseOutcomes.some(
     (outcome) => outcome.status === "failed" && outcome.deadlineExceeded,
   )

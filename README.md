@@ -142,7 +142,7 @@ The patterns are deliberately anchored (start-of-field, end-of-field, or separat
 A finding's `file` must name a file the model was given: a diff header (including renamed-from and deleted paths), a changed, related, or priority-doc file block, or the conventions file. A finding on any other path is ungrounded — the model saw nothing there — and is dropped before threshold, dedup, and cap.
 
 - Paths are normalized before comparison (`./src/x.ts` and `src/x.ts` match), but only whole paths match: a bare filename or a directory prefix does not.
-- File blocks and the conventions section write a `"` in their path as `&quot;`. A `file` that matches only after each `&quot;` is read as `"` is kept and posts under that decoded path. Each rewrite is logged at debug level (`resolved escaped finding file to a prompt path`) with both spellings.
+- A path containing `"` reaches the model with each `"` written as `&quot;` in the tags that wrap each file's content and the conventions file; diff headers print the path unchanged. A model that copies the path from a tag writes `&quot;` into `file`, so a `file` that matches no given path as written, but matches once each `&quot;` becomes `"`, is kept and posts under that decoded path. Each such rewrite is logged at debug level (`resolved escaped finding file to a prompt path`) with the model's spelling and the decoded path.
 - Each drop is logged as a warning (`dropping finding: file not in prompt context`) with the file, line, and category; the per-run count appears in the job summary.
 
 ## Debug logging
