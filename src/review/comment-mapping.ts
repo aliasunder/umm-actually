@@ -383,9 +383,10 @@ export const REVIEW_MARKER = "<!-- umm-actually-review -->"
 /** Identifies the single updatable status comment. */
 export const STATUS_ANCHOR = "<!-- umm-actually-status -->"
 
-/** A beyond-diff finding posted as its own issue comment — a new comment is
- *  a visible event to PR watchers, unlike an in-place status update. Carries
- *  its dedup anchor like any inline comment. */
+/** A finding posted as its own issue comment: a beyond-diff finding, or an
+ *  in-diff one whose inline anchor GitHub rejected. A new comment is a visible
+ *  event to PR watchers, unlike an in-place status update. It carries its dedup
+ *  anchor like any inline comment. */
 export const renderStandaloneFinding = (finding: AttributedFinding): string => {
   return `${findingHeader(finding)}
 
