@@ -4492,6 +4492,43 @@ describe("staged phases", () => {
     ])
   })
 
+  it("leaves the cost table out of the failure summary when cost_summary is off", async () => {
+    const timeoutAttempt: ModelAttempt = {
+      model: "test/model",
+      outcome: "timeout",
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      errorSummary: "no response within 900s",
+    }
+    const stubs = makeOrchestrateDeps({
+      config: { costSummary: false },
+      generateFindings: async () => {
+        throw new ReviewRequestError({
+          message: "review request failed after 1 attempt(s)",
+          attempts: [timeoutAttempt],
+          keyRejected: false,
+        })
+      },
+    })
+    const logger = createTestLogger()
+
+    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+      "every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+    )
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "failure",
+        output: {
+          title: "Error — review did not complete",
+          summary:
+            "[AllPhasesFailedError]: every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+        },
+      },
+    ])
+  })
+
   it("lists each attempted model once in the failure summary", async () => {
     const primaryTimeout: ModelAttempt = {
       model: "test/model",
