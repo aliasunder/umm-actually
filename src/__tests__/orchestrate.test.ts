@@ -2926,6 +2926,47 @@ describe("orchestrate", () => {
       ])
     })
 
+    it("posts a finding on an escaped changed-file path inline under the decoded diff path", async () => {
+      // Git C-quotes a path holding a double quote, and parse-diff keeps the
+      // backslash, so the diff path and the file block path are docs/a\"b.md
+      const quotedPathDiff = `${sampleDiff}diff --git "a/docs/a\\"b.md" "b/docs/a\\"b.md"\nindex 1111111..2222222 100644\n--- "a/docs/a\\"b.md"\n+++ "b/docs/a\\"b.md"\n@@ -1,2 +1,2 @@\n # Title\n-old line\n+new line\n`
+      const decodedPath = 'docs/a\\"b.md'
+      const escapedFinding = makeFinding({ file: "docs/a\\&quot;b.md", line: 2 })
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: { review: { analysis: "checked", findings: [escapedFinding] } },
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: quotedPathDiff }),
+        },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [
+              fixtureChangedFile,
+              { path: decodedPath, content: "# Title\nnew line", includedAs: "full" },
+            ],
+            remainingTokens: 40_000,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const expectedMapped = mapFindingsToReview({
+        findings: findingsWithRoutedModel([{ ...escapedFinding, file: decodedPath }], "test/model"),
+        commentableByPath: computeCommentableLines(parseDiff(quotedPathDiff)),
+      })
+      expect(expectedMapped.comments.map((comment) => comment.path)).toEqual([decodedPath])
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        {
+          prNumber: 7,
+          commitId: fixturePrContext.headSha,
+          body: REVIEW_MARKER,
+          comments: expectedMapped.comments,
+        },
+      ])
+      expect(stubs.postIssueCommentCalls).toEqual([])
+    })
+
     it("continues when the findings review post throws", async () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
