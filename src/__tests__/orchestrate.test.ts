@@ -844,7 +844,13 @@ describe("orchestrate", () => {
 
       /** Wires the real prompt builder over a stub client that records each
        *  user prompt and returns one finding on the conventions file. */
-      const makeConventionsFindingDeps = (diffExcludePathPatterns: string[]) => {
+      const makeConventionsFindingDeps = ({
+        diffExcludePathPatterns,
+        conventionsFile = "AGENTS.md",
+      }: {
+        diffExcludePathPatterns: string[]
+        conventionsFile?: string
+      }) => {
         const userPrompts: string[] = []
         const stubClient: OpenRouterClient = {
           requestReview: async (params) => {
@@ -858,7 +864,7 @@ describe("orchestrate", () => {
         }
         const stubs = makeOrchestrateDeps({
           config: {
-            conventionsFile: "AGENTS.md",
+            conventionsFile,
             diffExcludePaths: { defaultPatterns: [], diffExcludePathPatterns },
           },
           githubClient: {
@@ -874,7 +880,9 @@ describe("orchestrate", () => {
       }
 
       it("drops a finding on a diff-excluded conventions file and still sends its section", async () => {
-        const { stubs, userPrompts } = makeConventionsFindingDeps(["AGENTS.md"])
+        const { stubs, userPrompts } = makeConventionsFindingDeps({
+          diffExcludePathPatterns: ["AGENTS.md"],
+        })
         const logger = createTestLogger()
 
         const result = await orchestrate(stubs.deps, logger)
@@ -902,8 +910,34 @@ describe("orchestrate", () => {
         ])
       })
 
+      it("drops a finding on a diff-excluded conventions file configured with a ./ prefix", async () => {
+        const { stubs } = makeConventionsFindingDeps({
+          diffExcludePathPatterns: ["AGENTS.md"],
+          conventionsFile: "./AGENTS.md",
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(result.findingsCount).toBe(0)
+        expect(stubs.postFindingsReviewCalls).toEqual([])
+        expect(stubs.postIssueCommentCalls).toEqual([])
+        expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([
+          {
+            level: "warn",
+            message: "dropping finding: file not in prompt context",
+            data: {
+              phase: "combined",
+              file: "AGENTS.md",
+              line: 1,
+              category: conventionsFinding.category,
+            },
+          },
+        ])
+      })
+
       it("keeps a finding on a conventions file that stays in the review diff", async () => {
-        const { stubs } = makeConventionsFindingDeps([])
+        const { stubs } = makeConventionsFindingDeps({ diffExcludePathPatterns: [] })
         const logger = createTestLogger()
 
         const result = await orchestrate(stubs.deps, logger)
