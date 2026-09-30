@@ -12,7 +12,8 @@ export type AttemptOutcome =
 
 export type ModelAttempt = {
   /** The model this attempt requested. The ladder is the primary model, then
-   *  the fallback when one is set. OpenRouter's routed model is modelUsed. */
+   *  the fallback when one is set. OpenRouter's routed model is reported only
+   *  for the accepted attempt, as StructuredReviewResult.modelUsed. */
   model: string
   outcome: AttemptOutcome
   promptTokens: number | null

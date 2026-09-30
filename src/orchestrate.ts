@@ -216,7 +216,8 @@ const fetchIssueCommentState = async (
 
 type InlinePostOutcome = {
   url: string
-  /** Findings whose anchors GitHub rejected — re-routed to issue comments. */
+  /** Every inline finding when GitHub rejected the review, re-routed to issue
+   *  comments. One bad anchor fails the whole review. */
   rerouted: AttributedFinding[]
   /** Inline comments that actually landed — zero when the post failed. */
   postedCount: number
@@ -563,8 +564,9 @@ const runReviewPipeline = async (
     return postSkipReview({ reason: "empty diff" })
   }
 
-  // Generated files leave the review before the budget check, so one
-  // oversized artifact cannot starve the reviewable rest of the PR
+  // Diff-excluded files, such as generated artifacts, leave the review before
+  // the budget check, so one oversized artifact cannot starve the reviewable
+  // rest of the PR
   const gitAttributesContent = config.respectLinguistGenerated
     ? await contextReader.readGitAttributes()
     : null
@@ -1068,7 +1070,8 @@ const runReviewPipeline = async (
     logger,
   )
 
-  // Beyond-diff findings, plus in-diff findings whose anchors GitHub rejected
+  // Beyond-diff findings, plus every in-diff finding when GitHub rejected the
+  // inline review, since one bad anchor fails the whole review
   const issueCommentFindings = [...unanchoredFindings, ...inlineOutcome.rerouted]
 
   // Each finding posts as its own issue comment. A failed post is logged and
