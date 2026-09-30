@@ -1316,12 +1316,7 @@ export const createPromptedGenerateFindings = (
     // tells their log lines apart
     const phaseLogger = logger.child({ phase: reviewContext.phase.id })
 
-    // Only this line gets the module tag. The client's lines record their own
-    // source file, and a generateFindings tag on them would misattribute them
-    phaseLogger.child({ module: "generateFindings" }).info("requesting review", {
-      model,
-      fallbackModel,
-    })
+    phaseLogger.info("requesting review", { model, fallbackModel })
 
     return openrouterClient.requestReview(
       { systemPrompt, userPrompt, model, fallbackModel },

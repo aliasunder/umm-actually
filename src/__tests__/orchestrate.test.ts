@@ -4663,7 +4663,7 @@ describe("createPromptedGenerateFindings", () => {
     ])
   })
 
-  it("logs the review request with its phase, module tag, and ladder models", async () => {
+  it("logs the review request with its phase and ladder models", async () => {
     const stubClient: OpenRouterClient = {
       requestReview: async () => {
         return { review: { analysis: "", findings: [] }, modelUsed: "test/primary", attempts: [] }
@@ -4695,7 +4695,6 @@ describe("createPromptedGenerateFindings", () => {
         message: "requesting review",
         data: {
           phase: "subtle-bugs",
-          module: "generateFindings",
           model: "test/primary",
           fallbackModel: "test/fallback",
         },
