@@ -891,20 +891,30 @@ const runReviewPipeline = async (
   // - Diff headers. changedPaths holds each new path and a rename's old path,
   //   which the header prints as "renamed from". A deleted file's header
   //   names a path changedPaths lacks, so it is added here.
-  // - File blocks, and the conventions section when the file was found.
+  // - File blocks, and the conventions section when the file was found and
+  //   diff exclusion did not remove it.
   // These paths go in as written: filterUnknownFileFindings normalizes both
   // sides with normalizeWorkspacePath, which also strips a leading or
   // trailing "/" that the posix.normalize sets above keep.
   const deletedPaths = reviewableFiles.flatMap((file) => {
     return file.deleted && file.from ? [file.from] : []
   })
+
+  // A PR can change the conventions file while diff exclusion removes it from
+  // the review. The excluded-files note then tells the model the file's
+  // content was not shown, though the conventions section still sends it as
+  // the rubric. Leaving its path out here drops findings on it like findings
+  // on any other excluded file. Without this check, those findings would post.
+  const acceptsConventionsFindings =
+    conventions !== null && !diffExcludedPathSet.has(posix.normalize(config.conventionsFile))
+
   const promptFilePaths = [
     ...changedPaths,
     ...deletedPaths,
     ...changedFiles.map((file) => file.path),
     ...relatedFiles.map((file) => file.path),
     ...relatedDocs.map((file) => file.path),
-    ...(conventions !== null ? [config.conventionsFile] : []),
+    ...(acceptsConventionsFindings ? [config.conventionsFile] : []),
   ]
 
   logger.info("context sent to model", {

@@ -128,7 +128,7 @@ An empty value, such as an unset repo variable, selects the input's default, so 
 
 ## Non-finding filter
 
-Models sometimes report "findings" that conclude the code is fine — titled `N/A — …` or `…is correct`, with suggestions like "No action needed". The system prompt prohibits these, but models don't always comply, so every finding also passes a deterministic filter before cross-run dedup, the severity threshold, and the cap. A finding is dropped when:
+Models sometimes report "findings" that conclude the code is fine — titled `N/A — …` or `…is correct`, with suggestions like "No action needed". The system prompt prohibits these, but models don't always comply, so every finding also passes a deterministic filter before cross-phase and cross-run deduplication, the severity threshold, and the cap. A finding is dropped when:
 
 - its **title**, **failure_scenario**, or **suggestion** starts with a non-finding signal — `N/A`, `not applicable`, `placeholder`, or a separator-delimited confirmation phrase (`none — …`, `not a finding — …`, `no failure — …`, `no concrete failure scenario — …`, `no bug — …`, `no (further) action needed — …`, `no change needed — …`)
 - its **title** ends with a declarative confirmation — `…is correct` or `…is accurate` — or starts with a prior-finding resolution confirmation — `Prior (bot) finding(s) addressed/resolved/fixed …`
@@ -139,13 +139,13 @@ The patterns are deliberately anchored (start-of-field, end-of-field, or separat
 
 ## Unknown-file filter
 
-A finding's `file` (the path it is filed on) must name a file the model was given. A finding on any other path is ungrounded, because the model saw nothing there, and is dropped before deduplication, the severity threshold, and the cap. The model was given:
+A finding's `file` (the path it is filed on) must name a file the model was given. A finding on any other path is ungrounded, because the model saw nothing there, and is dropped before cross-phase and cross-run deduplication, the severity threshold, and the cap. The model was given:
 
-- paths in diff headers, including renamed-from and deleted paths (findings on those post as standalone comments)
+- paths in diff headers, including renamed-from and deleted paths (findings on renamed-from and deleted paths post as standalone comments)
 - changed files, import-traced related files, mention-matched docs, and priority docs
 - the conventions file
 
-Files removed by `diff_exclude_paths` or linguist rules are listed by path at the end of the diff, but their content is withheld, so findings on them are dropped too. The conventions file is the exception: it is sent even when excluded. The filter compares paths and reports drops as follows:
+Files removed by `diff_exclude_paths` or linguist rules are listed by path at the end of the diff, but their content is withheld, so findings on them are dropped too. When the conventions file is excluded, it is still sent as the review's conventions, but findings on it are dropped like those on any other excluded file. The filter compares paths and reports drops as follows:
 
 - Paths are normalized before comparison: surrounding whitespace, `.` segments, `..` segments that stay inside the repository, repeated slashes, and a leading or trailing `/` don't affect the match (`./src/x.ts`, `/src/x.ts`, and `src/x.ts` match). Matching is case-sensitive, and only whole paths match: a bare filename or a directory prefix does not.
 - A path containing `"` reaches the model with each `"` written as `&quot;` in the tags that wrap each file's content and the conventions file. A diff header prints the path as the diff spells it, and the filter matches that spelling as written. A model that copies the path from a tag writes `&quot;` into `file`, so a `file` that matches no given path as written, but matches once each `&quot;` becomes `"`, is kept and posts under that decoded path. Each such rewrite is logged at debug level (`resolved escaped finding file to a prompt path`) with the model's spelling and the decoded path.
