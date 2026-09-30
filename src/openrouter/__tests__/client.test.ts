@@ -1202,7 +1202,6 @@ describe("requestReview", () => {
     const stub = makeSdkStub({
       sendResponses: [{ value: acceptedChatResult }],
     })
-    delete stub.sdk.generations
     const { client, logger } = makeClient(stub)
 
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
@@ -1722,28 +1721,6 @@ describe("requestReview", () => {
         completionTokens: null,
         costUsd: 0.0399,
         errorSummary: null,
-      },
-    ])
-  })
-
-  it("skips the cost lookup entirely when the sdk has no generations surface", async () => {
-    const sdkWithoutGenerations: OpenRouterLike = {
-      chat: { send: async () => makeNoCostChatResult() },
-    }
-    const { client, logger } = makeClient({ sdk: sdkWithoutGenerations })
-
-    const result = await client.requestReview(requestParams, logger)
-
-    expect(result.attempts[0]?.costUsd).toBeNull()
-    expect(logsWithMessage(logger, "generation cost lookup skipped")).toEqual([
-      {
-        level: "debug",
-        message: "generation cost lookup skipped",
-        data: {
-          operation: "generation cost lookup",
-          generationId: "gen-no-cost",
-          reason: "no generations client",
-        },
       },
     ])
   })

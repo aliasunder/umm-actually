@@ -61,9 +61,7 @@ export type OpenRouterLike = {
       },
     ): Promise<unknown>
   }
-  /** The real SDK always has this. It is optional so a test stub can leave it
-   *  out, and the cost lookup then returns null. */
-  generations?: {
+  generations: {
     getGeneration(
       request: { id: string },
       options?: {
@@ -572,16 +570,11 @@ export const createOpenRouterClient = ({
     generationId: string,
     logger: Logger,
   ): Promise<number | null> => {
-    const generations = sdk.generations
     const remainingMs = remainingReviewMs()
 
     // Every lookup line names the generation, so a failure ties back to it
     const lookupLogger = logger.child({ operation: "generation cost lookup", generationId })
 
-    if (!generations) {
-      lookupLogger.debug("generation cost lookup skipped", { reason: "no generations client" })
-      return null
-    }
     if (remainingMs <= 0) {
       lookupLogger.debug("generation cost lookup skipped", { reason: "review deadline exceeded" })
       return null
@@ -592,7 +585,7 @@ export const createOpenRouterClient = ({
     const lookup = await withDeadline(
       {
         start: (signal) => {
-          return generations.getGeneration(
+          return sdk.generations.getGeneration(
             { id: generationId },
             { retries: { strategy: "none" }, signal },
           )

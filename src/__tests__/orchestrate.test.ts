@@ -4035,7 +4035,7 @@ describe("staged phases", () => {
         .mockResolvedValueOnce(response)
         .mockImplementation(() => lateResponse.promise)
       const client = createOpenRouterClient({
-        sdk: { chat: { send } },
+        sdk: { chat: { send }, generations: { getGeneration: vi.fn() } },
         requestTimeoutMs: 900_000,
         remainingReviewMs,
       })
@@ -4142,7 +4142,7 @@ describe("staged phases", () => {
       return response
     })
     const client = createOpenRouterClient({
-      sdk: { chat: { send } },
+      sdk: { chat: { send }, generations: { getGeneration: vi.fn() } },
       requestTimeoutMs: 900_000,
       remainingReviewMs: () => Infinity,
       retryDelayMs: 0,
