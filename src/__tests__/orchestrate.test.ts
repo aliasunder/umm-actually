@@ -4663,6 +4663,46 @@ describe("createPromptedGenerateFindings", () => {
     ])
   })
 
+  it("logs the review request with its phase, module tag, and ladder models", async () => {
+    const stubClient: OpenRouterClient = {
+      requestReview: async () => {
+        return { review: { analysis: "", findings: [] }, modelUsed: "test/primary", attempts: [] }
+      },
+    }
+    const logger = createTestLogger()
+    const generate = createPromptedGenerateFindings(
+      { openrouterClient: stubClient, model: "test/primary", fallbackModel: "test/fallback" },
+      logger,
+    )
+
+    await generate({
+      prContext: fixturePrContext,
+      phase: SUBTLE_BUGS_PHASE,
+      conventions: null,
+      conventionsFile: "AGENTS.md",
+      conventionsBudgetTokens: 8_000,
+      changedFiles: [],
+      relatedFiles: [],
+      relatedDocs: [],
+      annotatedDiff: annotateDiff(parseDiff(sampleDiff)),
+      priorFindings: [],
+      priorBotComments: [],
+    })
+
+    expect(logsWithMessage(logger, "requesting review")).toEqual([
+      {
+        level: "info",
+        message: "requesting review",
+        data: {
+          phase: "subtle-bugs",
+          module: "generateFindings",
+          model: "test/primary",
+          fallbackModel: "test/fallback",
+        },
+      },
+    ])
+  })
+
   it("includes annotated diff in the user prompt", async () => {
     const requestReviewCalls: RequestReviewParams[] = []
     const stubClient: OpenRouterClient = {

@@ -9,8 +9,9 @@ import {
   type OpenRouterLike,
 } from "../client.js"
 
-const readJsonFixture = (name: string): unknown =>
-  JSON.parse(readFileSync(new URL(`../../../fixtures/${name}`, import.meta.url), "utf8"))
+const readJsonFixture = (name: string): unknown => {
+  return JSON.parse(readFileSync(new URL(`../../../fixtures/${name}`, import.meta.url), "utf8"))
+}
 
 const acceptedChatResult = readJsonFixture("openrouter.chat-result.json")
 const invalidJsonChatResult = readJsonFixture("openrouter.invalid-json.json")
@@ -67,7 +68,7 @@ const makeSdkStub = ({
   }): unknown => {
     const next = queue[callCount - 1]
 
-    if (next === undefined) {
+    if (!next) {
       throw new Error(`stub: unexpected ${operation} call #${callCount}`)
     }
     if ("error" in next) throw next.error
@@ -677,14 +678,14 @@ describe("requestReview", () => {
       // DOMException the aborted fetch raised
       const rejectOnAbort = (options: StubOptions): Promise<unknown> => {
         return new Promise((_resolve, reject) => {
-          options?.signal?.addEventListener("abort", () =>
+          options?.signal?.addEventListener("abort", () => {
             reject(
               Object.assign(new Error("Request aborted by client"), {
                 name: "RequestAbortedError",
                 cause: new DOMException("This operation was aborted", "AbortError"),
               }),
-            ),
-          )
+            )
+          })
         })
       }
       const stub = makeSdkStub({
@@ -895,7 +896,12 @@ describe("requestReview", () => {
         ),
       )
       await vi.advanceTimersByTimeAsync(45_000)
-      expect(await rejection).toBeInstanceOf(ReviewRequestError)
+      const error = await rejection
+
+      if (!(error instanceof ReviewRequestError)) throw error
+      expect(error.message).toBe(
+        "review request failed after 2 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); openai/gpt-5-mini: api_error (HTTP 400: HTTP 400)",
+      )
       expect(logsWithMessage(logger, "deadline-elapsed request settled")).toEqual([])
 
       await vi.advanceTimersByTimeAsync(75_000)
