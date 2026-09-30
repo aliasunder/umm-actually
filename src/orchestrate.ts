@@ -259,6 +259,7 @@ const postInlineFindings = async (
     logger.info("findings review posted", {
       reviewUrl: result.url,
       inlineCount: comments.length,
+      locations: comments.map((comment) => `${comment.path}:${comment.line}`),
     })
     return { url: result.url, rerouted: [], postedCount: comments.length }
   } catch (postError) {
@@ -1075,15 +1076,16 @@ const runReviewPipeline = async (
   const issueCommentFindings = [...unanchoredFindings, ...inlineOutcome.rerouted]
 
   // Each finding posts as its own issue comment. A failed post is logged and
-  // skipped without stopping the loop, and the let counts only the posts that landed
-  let postedAsIssueComments = 0
+  // skipped without stopping the loop, so the list is appended in place and
+  // holds only the posts that landed
+  const postedAsIssueComments: AttributedFinding[] = []
   for (const finding of issueCommentFindings) {
     try {
       await githubClient.postIssueComment({
         prNumber: prContext.prNumber,
         body: renderStandaloneFinding(finding),
       })
-      postedAsIssueComments += 1
+      postedAsIssueComments.push(finding)
     } catch (postError) {
       logger.warn("failed to post finding as an issue comment — it will re-report next run", {
         error: describeError(postError),
@@ -1093,14 +1095,17 @@ const runReviewPipeline = async (
     }
   }
 
-  if (postedAsIssueComments > 0) {
-    logger.info("findings posted as issue comments", { count: postedAsIssueComments })
+  if (postedAsIssueComments.length > 0) {
+    logger.info("findings posted as issue comments", {
+      count: postedAsIssueComments.length,
+      locations: postedAsIssueComments.map((finding) => `${finding.file}:${finding.line}`),
+    })
   }
 
   // The status comment is the always-updated run receipt. Counts report
   // what actually landed; unposted findings self-heal next run and the
   // comment says so rather than claiming they were posted.
-  const postedCount = inlineOutcome.postedCount + postedAsIssueComments
+  const postedCount = inlineOutcome.postedCount + postedAsIssueComments.length
   const statusBody = buildStatusComment({
     sha: prContext.headSha,
     isFirstRun: !issueState.statusCommentExists,

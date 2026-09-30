@@ -910,9 +910,20 @@ describe("orchestrate", () => {
         conventionsNote: null,
       })
 
+      const expectedReview = expectedFindingsReview(expectedSelection.selected)
+
       expect(stubs.submitReviewCalls).toHaveLength(0)
-      expect(stubs.postFindingsReviewCalls).toEqual([
-        expectedFindingsReview(expectedSelection.selected),
+      expect(stubs.postFindingsReviewCalls).toEqual([expectedReview])
+      expect(logsWithMessage(logger, "findings review posted")).toEqual([
+        {
+          level: "info",
+          message: "findings review posted",
+          data: {
+            reviewUrl: "https://github.com/test/review/1",
+            inlineCount: expectedReview.comments.length,
+            locations: expectedReview.comments.map((comment) => `${comment.path}:${comment.line}`),
+          },
+        },
       ])
       expect(stubs.postIssueCommentCalls).toEqual(
         expectedMapped.standaloneFindings.map((finding) => ({
@@ -2758,7 +2769,11 @@ describe("orchestrate", () => {
         },
       ])
       expect(logsWithMessage(logger, "findings posted as issue comments")).toEqual([
-        { level: "info", message: "findings posted as issue comments", data: { count: 1 } },
+        {
+          level: "info",
+          message: "findings posted as issue comments",
+          data: { count: 1, locations: ["src/untouched.ts:420"] },
+        },
       ])
     })
 
