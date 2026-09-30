@@ -10,6 +10,7 @@ import {
   renderExcludedFilesNote,
   summarizeExclusionSources,
 } from "./diff/exclusion.js"
+import { decodeQuotedFilePaths } from "./diff/quoted-paths.js"
 import { describeError, type Logger } from "./logger.js"
 import type { CheckRunConclusion, CheckRunOutput, GithubClient } from "./github/client.js"
 import { resolvePullRequestEvent, type PrContext } from "./github/event.js"
@@ -560,7 +561,7 @@ const runReviewPipeline = async (
     return postSkipReview({ reason: "diff exceeds GitHub's diff API limits" })
   }
 
-  const files = parseDiff(diffResult.diff)
+  const files = decodeQuotedFilePaths(parseDiff(diffResult.diff), logger)
 
   if (files.length === 0) {
     return postSkipReview({ reason: "empty diff" })

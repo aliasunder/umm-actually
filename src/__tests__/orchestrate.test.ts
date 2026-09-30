@@ -977,6 +977,44 @@ describe("orchestrate", () => {
   })
 
   describe("context wiring", () => {
+    it("reads and comments on a git-quoted non-ASCII path under its decoded name", async () => {
+      const quotedPathDiff = String.raw`diff --git "a/nn/0016_\303\245-f\303\270de.md" "b/nn/0016_\303\245-f\303\270de.md"
+index 1111111..2222222 100644
+--- "a/nn/0016_\303\245-f\303\270de.md"
++++ "b/nn/0016_\303\245-f\303\270de.md"
+@@ -1 +1 @@
+-old line
++new line
+`
+      const decodedPath = "nn/0016_å-føde.md"
+      const finding = makeFinding({ file: decodedPath, line: 1 })
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: quotedPathDiff }),
+        },
+        fixtureResult: { review: { analysis: "checked", findings: [finding] } },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(stubs.readChangedFilesCalls.map((call) => call.changedPaths)).toEqual([[decodedPath]])
+      const expectedComments = mapFindingsToReview({
+        findings: [withRoutedModel(finding, "test/model")],
+        commentableByPath: new Map([
+          [decodedPath, { rightLines: new Set([1]), hunkRanges: [{ start: 1, end: 1 }] }],
+        ]),
+      }).comments
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        {
+          prNumber: 7,
+          commitId: fixturePrContext.headSha,
+          body: REVIEW_MARKER,
+          comments: expectedComments,
+        },
+      ])
+      expect(expectedComments.map((comment) => comment.path)).toEqual([decodedPath])
+    })
+
     it("keeps a priority doc in the rendered prompt when changed files use the rest of the budget", async () => {
       const priorityDocContent = "# Review reference\nCheck API behavior."
       const priorityDocTokens = estimateTokens(priorityDocContent)
