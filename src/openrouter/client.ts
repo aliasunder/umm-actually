@@ -11,7 +11,8 @@ export type AttemptOutcome =
   "accepted" | "api_error" | "timeout" | "empty_content" | "invalid_json" | "schema_mismatch"
 
 export type ModelAttempt = {
-  /** The model slug requested for this attempt (ladder position, not routing). */
+  /** The model this attempt requested. The ladder is the primary model, then
+   *  the fallback when one is set. OpenRouter's routed model is modelUsed. */
   model: string
   outcome: AttemptOutcome
   promptTokens: number | null
@@ -103,8 +104,9 @@ const generationResponseSchema = z.object({
   data: z.object({ totalCost: z.number() }),
 })
 
-/** Auth/credit failures abort the ladder — the fallback model shares the key. */
-const ABORT_STATUSES = new Set([401, 402, 403])
+/** Auth and credit statuses. The fallback model shares the key, so these end
+ *  the ladder without trying it. */
+const KEY_REJECTED_STATUSES = new Set([401, 402, 403])
 
 /** The transient 4xx statuses — HTTP request timeout (408) and rate limit
  *  (429). attemptOnce also marks 5xx and status-less network errors
@@ -251,8 +253,9 @@ const withDeadline = async <T>(
   const controller = new AbortController()
   const startedAt = DateTime.now()
 
-  // Promise.try settles a synchronous throw from start as a rejection, and
-  // toResult wraps it before the race so a late rejection never goes unhandled
+  // Promise.try passes controller.signal on to start and settles a synchronous
+  // throw from start as a rejection. toResult wraps it before the race so a
+  // late rejection never goes unhandled
   const settled = toResult(Promise.try(start, controller.signal))
   const deadline = Promise.withResolvers<BoundedResult<T>>()
 
@@ -338,7 +341,8 @@ type SingleAttempt =
       kind: "failed"
       attempt: ModelAttempt
       retryable: boolean
-      abort: boolean
+      /** An auth or credit status. The key fails for every model, so the ladder stops. */
+      keyRejected: boolean
     }
   | {
       kind: "context_overflow"
@@ -408,6 +412,17 @@ export const createOpenRouterClient = ({
 }): OpenRouterClient => {
   const requestTimeoutSummary = `no response within ${Math.round(requestTimeoutMs / 1000)}s`
 
+  /** How long the next bounded call may run, and the summary a timeout gets.
+   *  The review deadline takes the blame when it is the nearer of the two. */
+  const getCallDeadline = (remainingMs: number): { timeoutMs: number; timeoutSummary: string } => {
+    const reviewDeadlineIsBinding = remainingMs <= requestTimeoutMs
+
+    return {
+      timeoutMs: Math.min(requestTimeoutMs, remainingMs),
+      timeoutSummary: reviewDeadlineIsBinding ? "review deadline exceeded" : requestTimeoutSummary,
+    }
+  }
+
   /** Sends one chat request under the per-attempt deadline. Its only log lines
    *  are withDeadline's; requestReview logs each attempt's outcome. */
   const attemptOnce = async (
@@ -415,18 +430,14 @@ export const createOpenRouterClient = ({
     logger: Logger,
   ): Promise<SingleAttempt> => {
     const { model } = chatRequest
-    const remainingMs = remainingReviewMs()
-
-    // The review deadline, not the per-attempt timeout, ends this attempt
-    // if it runs long
-    const reviewDeadlineIsBinding = remainingMs <= requestTimeoutMs
+    const callDeadline = getCallDeadline(remainingReviewMs())
 
     const sendResult = await withDeadline(
       {
         start: (signal) => {
           return sdk.chat.send({ chatRequest }, { retries: { strategy: "none" }, signal })
         },
-        timeoutMs: Math.min(requestTimeoutMs, remainingMs),
+        timeoutMs: callDeadline.timeoutMs,
       },
       logger.child({ operation: "chat request", model }),
     )
@@ -442,12 +453,10 @@ export const createOpenRouterClient = ({
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
-          errorSummary: reviewDeadlineIsBinding
-            ? "review deadline exceeded"
-            : requestTimeoutSummary,
+          errorSummary: callDeadline.timeoutSummary,
         },
         retryable: true,
-        abort: false,
+        keyRejected: false,
       }
     }
     if (sendResult.status === "rejected") {
@@ -474,14 +483,14 @@ export const createOpenRouterClient = ({
         return { kind: "context_overflow", attempt, fittedMaxCompletionTokens: fittedCeiling }
       }
 
-      const abort = statusCode ? ABORT_STATUSES.has(statusCode) : false
+      const keyRejected = statusCode ? KEY_REJECTED_STATUSES.has(statusCode) : false
 
       // An unknown status, a 5xx, a 408, or a 429 is transient and retries;
-      // any other 4xx, such as a 400 bad request or a 401/402/403 abort
-      // status, is structural and does not
+      // any other 4xx, such as a 400 bad request or a 401/402/403 auth or
+      // credit status, is structural and does not
       const retryable = !statusCode || statusCode >= 500 || RETRYABLE_4XX_STATUSES.has(statusCode)
 
-      return { kind: "failed", attempt, retryable, abort }
+      return { kind: "failed", attempt, retryable, keyRejected }
     }
 
     const parsedResult = chatResultSchema.safeParse(sendResult.value)
@@ -500,7 +509,7 @@ export const createOpenRouterClient = ({
           errorSummary: "unexpected chat response shape",
         },
         retryable: true,
-        abort: false,
+        keyRejected: false,
       }
     }
 
@@ -516,7 +525,7 @@ export const createOpenRouterClient = ({
       kind: "failed",
       attempt: { model, outcome, ...usage, errorSummary },
       retryable: true,
-      abort: false,
+      keyRejected: false,
     })
 
     const content = chatResult.choices[0]?.message.content
@@ -561,14 +570,19 @@ export const createOpenRouterClient = ({
     const generations = sdk.generations
     const remainingMs = remainingReviewMs()
 
-    if (!generations || remainingMs <= 0) return null
-
-    // The review deadline, not the per-request timeout, ends the lookup if it
-    // runs long
-    const reviewDeadlineIsBinding = remainingMs <= requestTimeoutMs
-
     // Every lookup line names the generation, so a failure ties back to it
     const lookupLogger = logger.child({ operation: "generation cost lookup", generationId })
+
+    if (!generations) {
+      lookupLogger.debug("generation cost lookup skipped", { reason: "no generations client" })
+      return null
+    }
+    if (remainingMs <= 0) {
+      lookupLogger.debug("generation cost lookup skipped", { reason: "review deadline exceeded" })
+      return null
+    }
+
+    const callDeadline = getCallDeadline(remainingMs)
 
     const lookup = await withDeadline(
       {
@@ -578,15 +592,13 @@ export const createOpenRouterClient = ({
             { retries: { strategy: "none" }, signal },
           )
         },
-        timeoutMs: Math.min(requestTimeoutMs, remainingMs),
+        timeoutMs: callDeadline.timeoutMs,
       },
       lookupLogger,
     )
 
     if (lookup.status === "timed_out") {
-      lookupLogger.warn("generation cost lookup failed", {
-        error: reviewDeadlineIsBinding ? "review deadline exceeded" : requestTimeoutSummary,
-      })
+      lookupLogger.warn("generation cost lookup failed", { error: callDeadline.timeoutSummary })
       return null
     }
     if (lookup.status === "rejected") {
@@ -626,12 +638,12 @@ export const createOpenRouterClient = ({
     for (const [ladderIndex, ladderModel] of modelLadder.entries()) {
       const nextLadderModel = modelLadder[ladderIndex + 1]
 
-      // Reassigned across attempts, like attemptNumber. Each model starts at
-      // the full ceiling because that model's endpoints decide what fits, so
-      // a context overflow lowers it only for the same model's retry
+      // Both are reassigned across this model's attempts. Each model starts at
+      // the full ceiling because its own endpoints decide what fits, so a
+      // context overflow lowers the ceiling only for the same model's retry
       let maxCompletionTokens = MAX_COMPLETION_TOKENS
-      let attemptNumber = 1
-      while (attemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
+      let modelAttemptNumber = 1
+      while (modelAttemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
         ensureReviewTimeRemaining()
         const attemptResult = await attemptOnce(
           buildChatRequest({ systemPrompt, userPrompt, model: ladderModel, maxCompletionTokens }),
@@ -660,12 +672,12 @@ export const createOpenRouterClient = ({
         attempts.push(attemptResult.attempt)
         logger.warn("review attempt failed", {
           model: ladderModel,
-          attemptNumber,
+          modelAttemptNumber,
           outcome: attemptResult.attempt.outcome,
           errorSummary: attemptResult.attempt.errorSummary,
         })
 
-        if (attemptResult.kind === "failed" && attemptResult.abort) {
+        if (attemptResult.kind === "failed" && attemptResult.keyRejected) {
           throw new ReviewRequestError({
             message: `OpenRouter auth/credit error — aborting without fallback: ${summarizeAttempts(attempts)}`,
             attempts,
@@ -690,10 +702,13 @@ export const createOpenRouterClient = ({
           })
           break
         }
+
+        // A structural failure ends this model's attempts. A context overflow
+        // is not a `failed` result, so it goes on to the fitted-ceiling retry
         if (attemptResult.kind === "failed" && !attemptResult.retryable) break
 
-        attemptNumber++
-        const retryRemains = attemptNumber <= MAX_ATTEMPTS_PER_MODEL
+        modelAttemptNumber++
+        const retryRemains = modelAttemptNumber <= MAX_ATTEMPTS_PER_MODEL
 
         // An overflow on the model's last attempt has no retry left to use the
         // fitted ceiling, so the loop ends and any next model starts at the

@@ -5,7 +5,7 @@ import envVar from "env-var"
 import { parseConfig, type RawInputs } from "./config.js"
 import { createContextReader } from "./context/workspace.js"
 import { createGithubClient } from "./github/client.js"
-import { createLogger } from "./logger.js"
+import { createLogger, describeError } from "./logger.js"
 import { createOpenRouterClient } from "./openrouter/client.js"
 import { createPromptedGenerateFindings, orchestrate } from "./orchestrate.js"
 
@@ -14,7 +14,7 @@ const logger = createLogger("umm-actually")
 
 process.on("unhandledRejection", (error) => {
   logger.warn("unhandled promise rejection (likely SDK internal)", {
-    error: error instanceof Error ? `[${error.name}]: ${error.message}` : String(error),
+    error: describeError(error),
   })
 })
 
@@ -35,8 +35,8 @@ let cancellationExitStarted = false
 const exitOnCancellationSignal = (signalName: NodeJS.Signals): void => {
   if (cancellationExitStarted) return
   cancellationExitStarted = true
-  // Observed, not awaited — a signal handler cannot await, and the cleanups
-  // never throw
+  // Observed, not awaited — a signal handler cannot await. The only registered
+  // cleanup is completeCheckRunSafely, which catches its own errors
   void (async () => {
     logger.warn("cancellation signal received — closing the check run", {
       signal: signalName,
@@ -57,8 +57,8 @@ process.on("SIGTERM", exitOnCancellationSignal)
  * - Strings come from getInput.
  * - Booleans come pre-parsed from getBooleanInput, which accepts only the YAML
  *   1.2 core-schema values (true|True|TRUE / false|False|FALSE) and throws on
- *   anything else, an empty value included. An empty boolean input therefore
- *   skips it and passes undefined.
+ *   anything else, an empty value included. So for an empty boolean input,
+ *   collectRawInputs skips getBooleanInput and passes undefined.
  * - The runner fills in the action.yml default for an omitted input;
  *   parseConfig applies it for an explicitly empty one.
  */
@@ -135,7 +135,7 @@ try {
             remainingReviewMs,
           }),
           model: config.model,
-          fallbackModel: config.fallbackModel === "" ? null : config.fallbackModel,
+          fallbackModel: config.fallbackModel,
         },
         logger,
       ),

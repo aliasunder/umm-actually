@@ -216,7 +216,7 @@ const baseConfig: ActionConfig = {
   githubToken: "ghp_test",
   openrouterApiKey: "sk-test",
   model: "test/model",
-  fallbackModel: "",
+  fallbackModel: null,
   requestTimeoutSeconds: 600,
   reviewTimeoutSeconds: 1500,
   maxFindings: undefined,
@@ -4185,7 +4185,7 @@ describe("staged phases", () => {
         data: {
           phase: "correctness-security",
           model: "test/model",
-          attemptNumber: 1,
+          modelAttemptNumber: 1,
           outcome: "api_error",
           errorSummary: "HTTP 500: HTTP 500",
         },

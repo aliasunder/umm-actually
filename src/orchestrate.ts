@@ -251,6 +251,7 @@ const postInlineFindings = async (
       comments,
     })
 
+    // githubClient already warns about the 422 with the rejected comment count
     if (result.kind === "rejected") {
       return { url: "", rerouted: inlineFindings, postedCount: 0 }
     }
@@ -466,14 +467,14 @@ const filterPhaseFindings = (
  *  a cost table when every phase failed — the operator still pays. */
 const describePipelineFailure = ({
   pipelineError,
-  costSummary,
+  includeCostSummary,
 }: {
   pipelineError: unknown
-  costSummary: boolean
+  includeCostSummary: boolean
 }): string => {
   const description = describeError(pipelineError)
 
-  if (!costSummary || !(pipelineError instanceof AllPhasesFailedError)) {
+  if (!includeCostSummary || !(pipelineError instanceof AllPhasesFailedError)) {
     return description
   }
 
@@ -513,9 +514,8 @@ const incompletePhaseIds = (phases: PhaseStatus[]): string[] => {
   return phases.filter((phase) => phase.status === "failed").map((phase) => phase.phase)
 }
 
-/** Steps 4–14: diff fetch through status comment — everything downstream of
- *  PR-context resolution, extracted so orchestrate can bracket it with the
- *  check-run lifecycle. */
+/** Runs everything after PR-context resolution, from the diff fetch through
+ *  the status comment. orchestrate brackets it with the check-run lifecycle. */
 const runReviewPipeline = async (
   {
     deps,
@@ -549,7 +549,6 @@ const runReviewPipeline = async (
     return { ...SKIPPED_RESULT_BASE, reviewUrl: url, skippedReason: reason }
   }
 
-  // Step 4: diff fetch
   const diffResult = await githubClient.fetchDiff({
     prNumber: prContext.prNumber,
   })
@@ -558,16 +557,14 @@ const runReviewPipeline = async (
     return postSkipReview({ reason: "diff exceeds GitHub's diff API limits" })
   }
 
-  // Step 5: parse diff
   const files = parseDiff(diffResult.diff)
 
   if (files.length === 0) {
     return postSkipReview({ reason: "empty diff" })
   }
 
-  // Step 5.5: diff-level exclusion — generated files leave the review
-  // subject before the budget check so one oversized artifact cannot
-  // starve the reviewable rest of the PR
+  // Generated files leave the review before the budget check, so one
+  // oversized artifact cannot starve the reviewable rest of the PR
   const gitAttributesContent = config.respectLinguistGenerated
     ? await contextReader.readGitAttributes()
     : null
@@ -595,8 +592,8 @@ const runReviewPipeline = async (
     })
   }
 
-  // Step 6: annotate + token check. The excluded-files trailer sits inside
-  // the annotated diff string, so its (few) tokens debit the diff budget.
+  // The excluded-files trailer sits inside the annotated diff string, so its
+  // few tokens count against the diff budget
   const excludedFilesNote = renderExcludedFilesNote(excludedDiffFiles)
   const annotatedDiff = excludedFilesNote
     ? `${annotateDiff(reviewableFiles)}\n\n${excludedFilesNote}`
@@ -611,7 +608,6 @@ const runReviewPipeline = async (
     })
   }
 
-  // Step 7: commentable lines
   const commentableByPath = computeCommentableLines(reviewableFiles)
 
   // Diff-excluded files must stay out of every context channel: the trailer
@@ -625,21 +621,22 @@ const runReviewPipeline = async (
     (docPath) => !diffExcludedPathSet.has(posix.normalize(docPath)),
   )
 
-  // Step 8: extract changed paths (includes old path for renames so the
-  // import scanner finds callers that still reference the pre-rename path)
+  // A rename contributes its old path too, so the import scanner finds
+  // callers that still reference the pre-rename path
   const changedPaths = reviewableFiles
     .flatMap((file) => {
       const toPath = newFilePath(file)
       const fromPath = file.from
+
       // parse-diff: from can be undefined for a binary file and is "/dev/null"
       // for an added file (binary or not) — neither is a pre-rename path worth tracing
-      const isRename =
-        toPath !== null && fromPath && fromPath !== "/dev/null" && fromPath !== file.to
-      return isRename ? [toPath, fromPath] : [toPath]
+      if (toPath === null || !fromPath || fromPath === "/dev/null" || fromPath === file.to) {
+        return [toPath]
+      }
+      return [toPath, fromPath]
     })
     .filter((path) => path !== null)
 
-  // Step 9: context reads
   const conventions = await contextReader.readConventions({
     conventionsFile: config.conventionsFile,
   })
@@ -740,10 +737,7 @@ const runReviewPipeline = async (
     : { files: [], excludedByCapPaths: [] }
 
   const relatedFiles = relatedFilesResult.files
-  const relatedFilesTokens = relatedFiles.reduce(
-    (sum, file) => sum + estimateTokens(file.content),
-    0,
-  )
+  const relatedFilesTokens = sumBy(relatedFiles, (file) => estimateTokens(file.content))
   const docBudgetTokens = Math.max(0, remainingTokens - relatedFilesTokens)
 
   // Every path whose full text a higher-priority channel already sent.
@@ -925,9 +919,8 @@ const runReviewPipeline = async (
     diffExcludedFiles: excludedDiffFiles,
   })
 
-  // Step 9.5: fetch prior bot comments — needed both for the prompt (the
-  // model sees what's already posted and self-suppresses conceptual dupes)
-  // and for positional dedup after generation.
+  // Prior bot comments go into the prompt, so the model sees what is already
+  // posted and skips conceptual duplicates. Positional dedup uses them too
   const inlineState = await fetchInlineCommentState(
     { githubClient, prNumber: prContext.prNumber },
     logger,
@@ -940,7 +933,7 @@ const runReviewPipeline = async (
     .map(stripAnchorComment)
     .slice(-PRIOR_COMMENT_CAP)
 
-  // Step 10–11: generate findings — one model call per phase, stages in order
+  // Each phase makes one model call, and the stages run in order
   const runPhase: RunPhase = ({ phase, priorFindings }) => {
     return generateFindings({
       prContext,
@@ -975,8 +968,8 @@ const runReviewPipeline = async (
     incomplete: incompletePhaseIds(phases),
   })
 
-  // Step 12: per phase, drop non-findings and findings on files the model
-  // never saw, then collapse cross-phase duplicates — all before selection so
+  // Each phase drops non-findings and findings on files the model never saw,
+  // then cross-phase duplicates collapse. All of it runs before selection so
   // cap slots aren't wasted
   const filteredPhases = completedPhases.map((outcome) => {
     return filterPhaseFindings({ outcome, knownPaths: promptFilePaths }, logger)
@@ -995,10 +988,10 @@ const runReviewPipeline = async (
     duplicatesAcrossPhases,
   })
 
-  // Step 12.5: cross-run dedup — every run walks the same path; a first run
-  // is just the case where no bot comments exist yet. Sources: the bot's
-  // inline comments (live positions) and its beyond-diff issue comments
-  // (anchor lines). Runs before the cap so duplicates don't consume slots.
+  // Cross-run dedup runs on every run, and a first run is the case where no bot
+  // comments exist yet. It compares against the bot's inline comments (live
+  // positions) and its beyond-diff issue comments (anchor lines), before the
+  // cap so duplicates don't consume slots.
   const existingAnchors = [...inlineState.anchors, ...issueState.anchors]
   const newFindings: AttributedFinding[] = []
   const dedupCounts = { positional: 0, content: 0, title: 0 }
@@ -1046,16 +1039,20 @@ const runReviewPipeline = async (
     droppedByCap: droppedByCap.length,
   })
 
-  // Step 13: post findings — anchorable ones batch into a single review
-  // (invisible marker body: one notification, a bare "reviewed" timeline
-  // event, no prose); the rest post as individual issue comments so every
-  // new finding is a visible event. All narration lives in the status
-  // comment. Unposted findings carry no anchor and re-report next run.
+  // Findings post in two ways, and all narration lives in the status comment.
+  // - Anchorable findings batch into one review with an invisible marker body,
+  //   which makes one notification and a bare "reviewed" timeline event.
+  // - The rest post as individual issue comments, so every new finding is a
+  //   visible event.
+  // Unposted findings carry no anchor and re-report next run.
   const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
   const { comments, standaloneFindings: unanchoredFindings } = mapFindingsToReview({
     findings: selected,
     commentableByPath,
   })
+
+  // mapFindingsToReview returns the same finding objects it was given, so an
+  // identity check separates the anchored findings from the unanchored ones
   const inlineFindings = selected.filter((finding) => !unanchoredFindings.includes(finding))
 
   const inlineOutcome = await postInlineFindings(
@@ -1092,7 +1089,7 @@ const runReviewPipeline = async (
     logger.info("beyond-diff findings posted", { count: postedStandalone })
   }
 
-  // Step 14: status comment — the always-updated run receipt. Counts report
+  // The status comment is the always-updated run receipt. Counts report
   // what actually landed; unposted findings self-heal next run and the
   // comment says so rather than claiming they were posted.
   const postedCount = inlineOutcome.postedCount + postedStandalone
@@ -1176,13 +1173,13 @@ export const orchestrate = async (
 ): Promise<OrchestrateResult> => {
   const { config, githubClient } = deps
 
-  // Step 1: fail-fast validation — throws before any network call
+  // Invalid settings throw here, before any network call
   const severityThreshold = resolveSeverityThreshold(config.severityThreshold)
   const stages = resolveStages(config.phases)
 
   logger.info("review settings from action inputs", {
     model: config.model,
-    fallbackModel: config.fallbackModel || null,
+    fallbackModel: config.fallbackModel,
     phases: config.phases,
     reviewTimeoutSeconds: config.reviewTimeoutSeconds,
     severityThreshold: config.severityThreshold,
@@ -1201,7 +1198,6 @@ export const orchestrate = async (
     costSummary: config.costSummary,
   })
 
-  // Step 2: event resolution
   const resolvedEvent = resolvePullRequestEvent(
     {
       eventName: deps.eventName,
@@ -1220,7 +1216,6 @@ export const orchestrate = async (
     }
   }
 
-  // Step 3: PR context
   const prContext: PrContext =
     resolvedEvent.kind === "complete"
       ? resolvedEvent.context
@@ -1228,7 +1223,7 @@ export const orchestrate = async (
           prNumber: resolvedEvent.prNumber,
         })
 
-  // Step 3.5: open the branded check run now that the head SHA is known
+  // The branded check run opens once the head SHA is known
   const checkRun = await createCheckRunSafely({ githubClient, headSha: prContext.headSha }, logger)
 
   // A cancelled job stops the container before the completions below run,
@@ -1277,7 +1272,7 @@ export const orchestrate = async (
           title: "Error — review did not complete",
           summary: describePipelineFailure({
             pipelineError,
-            costSummary: config.costSummary,
+            includeCostSummary: config.costSummary,
           }),
         },
       },

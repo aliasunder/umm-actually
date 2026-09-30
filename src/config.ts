@@ -133,7 +133,8 @@ const configSchema = z.object({
   githubToken: z.string().min(1, "github_token is required"),
   openrouterApiKey: z.string().min(1, "openrouter_api_key is required"),
   model: z.string().transform((value) => value || "anthropic/claude-sonnet-4-6"),
-  fallbackModel: z.string(),
+  // Empty means no fallback model
+  fallbackModel: z.string().transform((value) => value || null),
   requestTimeoutSeconds: timerSafeSeconds(900),
   reviewTimeoutSeconds: timerSafeSeconds(1500),
   maxFindings: optionalPositiveInteger,

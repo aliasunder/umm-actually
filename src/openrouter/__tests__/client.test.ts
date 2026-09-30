@@ -358,6 +358,17 @@ describe("requestReview", () => {
       requestParams.model,
     ])
     expect(stub.generationCalls).toEqual([])
+    expect(logsWithMessage(logger, "generation cost lookup skipped")).toEqual([
+      {
+        level: "debug",
+        message: "generation cost lookup skipped",
+        data: {
+          operation: "generation cost lookup",
+          generationId: "gen-no-cost",
+          reason: "review deadline exceeded",
+        },
+      },
+    ])
   })
 
   it("retains an accepted review when cost lookup reaches the review deadline and ignores its late response", async () => {
@@ -649,7 +660,7 @@ describe("requestReview", () => {
         message: "review attempt failed",
         data: {
           model: "openai/gpt-5-mini",
-          attemptNumber: 1,
+          modelAttemptNumber: 1,
           outcome: "api_error",
           errorSummary: "Request timed out",
         },
@@ -812,7 +823,7 @@ describe("requestReview", () => {
           message: "review attempt failed",
           data: {
             model: "openai/gpt-5-mini",
-            attemptNumber: 1,
+            modelAttemptNumber: 1,
             outcome: "timeout",
             errorSummary: "no response within 45s",
           },
@@ -1223,7 +1234,7 @@ describe("requestReview", () => {
       ).rejects.toThrow("review request failed")
 
       // retryDelayMs sleeps happen between retryable failures; the guard
-      // `attemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
+      // `modelAttemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
       // after the final attempt. Only one sleep (between attempts 1 and 2).
       const retrySleepCalls = setTimeoutSpy.mock.calls.filter((call) => call[1] === retryDelayMs)
       expect(retrySleepCalls).toHaveLength(1)
@@ -1724,5 +1735,16 @@ describe("requestReview", () => {
     const result = await client.requestReview(requestParams, logger)
 
     expect(result.attempts[0]?.costUsd).toBeNull()
+    expect(logsWithMessage(logger, "generation cost lookup skipped")).toEqual([
+      {
+        level: "debug",
+        message: "generation cost lookup skipped",
+        data: {
+          operation: "generation cost lookup",
+          generationId: "gen-no-cost",
+          reason: "no generations client",
+        },
+      },
+    ])
   })
 })
