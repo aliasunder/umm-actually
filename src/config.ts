@@ -153,7 +153,7 @@ const configSchema = z.object({
   maxScanFiles: positiveIntegerOrDefault(5_000),
   maxScanBytes: positiveIntegerOrDefault(524_288),
   maxRelatedFiles: positiveIntegerOrDefault(15),
-  maxRelatedDocs: positiveIntegerOrDefault(12),
+  maxRelatedDocs: positiveIntegerOrDefault(10),
   // Empty is not the default here. action.yml defaults this input to
   // README.md, and an explicit empty value disables priority docs.
   // normalizeWorkspacePath("") yields ".", so it is stripped with empty entries
