@@ -1014,7 +1014,7 @@ const runReviewPipeline = async (
   const { findings: realFindings, duplicatesAcrossPhases } = mergePhaseFindings(
     filteredPhases.map((filtered) => filtered.findings),
   )
-  logger.info("non-finding filter applied to model output", {
+  logger.info("per-phase finding filters applied to model output", {
     totalFromModel,
     kept: realFindings.length,
     droppedAsNonFinding,

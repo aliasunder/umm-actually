@@ -2707,10 +2707,10 @@ describe("orchestrate", () => {
           },
         },
       ])
-      expect(logsWithMessage(logger, "non-finding filter applied to model output")).toEqual([
+      expect(logsWithMessage(logger, "per-phase finding filters applied to model output")).toEqual([
         {
           level: "info",
-          message: "non-finding filter applied to model output",
+          message: "per-phase finding filters applied to model output",
           data: {
             totalFromModel: 2,
             kept: 1,
@@ -2955,10 +2955,10 @@ describe("orchestrate", () => {
         },
       ])
 
-      expect(logsWithMessage(logger, "non-finding filter applied to model output")).toEqual([
+      expect(logsWithMessage(logger, "per-phase finding filters applied to model output")).toEqual([
         {
           level: "info",
-          message: "non-finding filter applied to model output",
+          message: "per-phase finding filters applied to model output",
           data: {
             totalFromModel: 2,
             kept: 1,
@@ -3079,10 +3079,10 @@ describe("orchestrate", () => {
           },
         },
       ])
-      expect(logsWithMessage(logger, "non-finding filter applied to model output")).toEqual([
+      expect(logsWithMessage(logger, "per-phase finding filters applied to model output")).toEqual([
         {
           level: "info",
-          message: "non-finding filter applied to model output",
+          message: "per-phase finding filters applied to model output",
           data: {
             totalFromModel: 2,
             kept: 1,
