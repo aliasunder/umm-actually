@@ -441,7 +441,7 @@ const filterPhaseFindings = (
   const { findings: nonFindingFiltered, droppedAsNonFinding } = filterNonFindings(
     outcome.result.review.findings,
   )
-  const { findings, droppedAsUnknownFile } = filterUnknownFileFindings({
+  const { findings, droppedAsUnknownFile, unescapedFileRewrites } = filterUnknownFileFindings({
     findings: nonFindingFiltered,
     knownPaths,
   })
@@ -454,6 +454,17 @@ const filterPhaseFindings = (
       file: finding.file,
       line: finding.line,
       category: finding.category,
+    })
+  }
+
+  // A rewritten file changes where the finding posts and its dedup anchor, so
+  // the log keeps both spellings
+  for (const { writtenFile, finding } of unescapedFileRewrites) {
+    logger.debug("resolved escaped finding file to a prompt path", {
+      phase: outcome.phase.id,
+      writtenFile,
+      resolvedFile: finding.file,
+      line: finding.line,
     })
   }
   return {

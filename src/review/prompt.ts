@@ -194,8 +194,14 @@ const truncateConventions = (conventions: string, conventionsBudgetTokens: numbe
 export const generateDelimiterNonce = (): string => randomBytes(6).toString("hex")
 
 /** A double quote would terminate the surrounding attribute — nothing else is
- *  structural inside a quoted attribute value. */
+ *  structural inside a quoted attribute value. Change it together with
+ *  unescapeAttributeValue, which inverts it. */
 const escapeAttributeValue = (value: string): string => value.replaceAll('"', "&quot;")
+
+/** Inverts escapeAttributeValue for a path the model copied out of a path
+ *  attribute. It decodes only the one entity escapeAttributeValue writes, never
+ *  general HTML entities. */
+export const unescapeAttributeValue = (value: string): string => value.replaceAll("&quot;", '"')
 
 const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
   const fileTag = `file-${delimiterNonce}`

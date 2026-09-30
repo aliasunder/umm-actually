@@ -139,7 +139,11 @@ The patterns are deliberately anchored (start-of-field, end-of-field, or separat
 
 ## Unknown-file filter
 
-A finding's `file` must name a file the model was given: a diff header (including renamed-from and deleted paths), a changed, related, or priority-doc file block, or the conventions file. A finding on any other path is ungrounded — the model saw nothing there — and is dropped before threshold, dedup, and cap. Paths are normalized before comparison (`./src/x.ts` and `src/x.ts` match), but only whole paths match: a bare filename or a directory prefix does not. Each drop is logged as a warning (`dropping finding: file not in prompt context`) with the file, line, and category; the per-run count appears in the job summary.
+A finding's `file` must name a file the model was given: a diff header (including renamed-from and deleted paths), a changed, related, or priority-doc file block, or the conventions file. A finding on any other path is ungrounded — the model saw nothing there — and is dropped before threshold, dedup, and cap.
+
+- Paths are normalized before comparison (`./src/x.ts` and `src/x.ts` match), but only whole paths match: a bare filename or a directory prefix does not.
+- File blocks and the conventions section write a `"` in their path as `&quot;`. A `file` that matches only after each `&quot;` is read as `"` is kept and posts under that decoded path. Each rewrite is logged at debug level (`resolved escaped finding file to a prompt path`) with both spellings.
+- Each drop is logged as a warning (`dropping finding: file not in prompt context`) with the file, line, and category; the per-run count appears in the job summary.
 
 ## Debug logging
 
