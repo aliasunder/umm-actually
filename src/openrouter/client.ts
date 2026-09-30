@@ -237,7 +237,7 @@ const describeLateSettlement = <T>(late: SettledResult<T>): LateSettlement => {
  *  - Resolve the deadline before aborting so it wins deterministically.
  *  - Return at the deadline even when the SDK ignores the abort.
  *  - Observe the abandoned call and log how it eventually settles.
- *  - Log only timing; the caller binds the operation's identifying props to `logger`. */
+ *  - Add no identifying props to its log lines; the caller binds them to `logger`. */
 const withDeadline = async <T>(
   {
     start,
@@ -567,6 +567,9 @@ export const createOpenRouterClient = ({
     // runs long
     const reviewDeadlineIsBinding = remainingMs <= requestTimeoutMs
 
+    // Every lookup line names the generation, so a failure ties back to it
+    const lookupLogger = logger.child({ operation: "generation cost lookup", generationId })
+
     const lookup = await withDeadline(
       {
         start: (signal) => {
@@ -577,17 +580,17 @@ export const createOpenRouterClient = ({
         },
         timeoutMs: Math.min(requestTimeoutMs, remainingMs),
       },
-      logger.child({ operation: "generation cost lookup", generationId }),
+      lookupLogger,
     )
 
     if (lookup.status === "timed_out") {
-      logger.warn("generation cost lookup failed", {
+      lookupLogger.warn("generation cost lookup failed", {
         error: reviewDeadlineIsBinding ? "review deadline exceeded" : requestTimeoutSummary,
       })
       return null
     }
     if (lookup.status === "rejected") {
-      logger.warn("generation cost lookup failed", {
+      lookupLogger.warn("generation cost lookup failed", {
         error: summarizeError(lookup.error),
       })
       return null
@@ -596,7 +599,7 @@ export const createOpenRouterClient = ({
     const parsed = generationResponseSchema.safeParse(lookup.value)
 
     if (!parsed.success) {
-      logger.warn("unexpected generation response shape")
+      lookupLogger.warn("unexpected generation response shape")
       return null
     }
 

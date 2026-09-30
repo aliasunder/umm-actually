@@ -1128,7 +1128,11 @@ describe("requestReview", () => {
         {
           level: "warn",
           message: "generation cost lookup failed",
-          data: { error: "review deadline exceeded" },
+          data: {
+            operation: "generation cost lookup",
+            generationId: "gen-no-cost",
+            error: "review deadline exceeded",
+          },
         },
       ])
     } finally {
@@ -1171,7 +1175,11 @@ describe("requestReview", () => {
         {
           level: "warn",
           message: "generation cost lookup failed",
-          data: { error: "no response within 45s" },
+          data: {
+            operation: "generation cost lookup",
+            generationId: "gen-no-cost",
+            error: "no response within 45s",
+          },
         },
       ])
     } finally {
@@ -1624,7 +1632,11 @@ describe("requestReview", () => {
       {
         level: "warn",
         message: "generation cost lookup failed",
-        data: { error: "HTTP 500" },
+        data: {
+          operation: "generation cost lookup",
+          generationId: "gen-no-cost",
+          error: "HTTP 500",
+        },
       },
     ])
   })
@@ -1647,7 +1659,11 @@ describe("requestReview", () => {
       {
         level: "warn",
         message: "generation cost lookup failed",
-        data: { error: "lookup threw before returning a promise" },
+        data: {
+          operation: "generation cost lookup",
+          generationId: "gen-no-cost",
+          error: "lookup threw before returning a promise",
+        },
       },
     ])
   })
@@ -1666,7 +1682,7 @@ describe("requestReview", () => {
       {
         level: "warn",
         message: "unexpected generation response shape",
-        data: {},
+        data: { operation: "generation cost lookup", generationId: "gen-no-cost" },
       },
     ])
   })

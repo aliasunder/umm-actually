@@ -1290,9 +1290,8 @@ export const orchestrate = async (
   }
 }
 
-/** Builds one review phase's prompt and sends it to OpenRouter in a single
- *  request with no tool calls. The stage dispatcher calls the returned
- *  function once per phase. */
+/** Builds one review phase's prompt and sends it to OpenRouter with no tool
+ *  calls. The stage dispatcher calls the returned function once per phase. */
 export const createPromptedGenerateFindings = (
   {
     openrouterClient,
