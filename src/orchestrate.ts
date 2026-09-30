@@ -739,7 +739,11 @@ const runReviewPipeline = async (
     ? await contextReader.findRelatedFiles({
         changedPaths,
         budgetTokens: relatedFilesBudgetTokens,
-        excludePaths: [...diffExcludedPaths, ...earlyPriorityDocFiles.map((file) => file.path)],
+        excludePaths: [
+          ...diffExcludedPaths,
+          ...earlyPriorityDocFiles.map((file) => file.path),
+          ...conventionsFullCopyPaths,
+        ],
       })
     : { files: [], excludedByCapPaths: [] }
 
