@@ -5,7 +5,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it, vi } from "vitest"
 import { createTestLogger, logsWithMessage } from "../../__tests__/test-logger.js"
-import { estimateTokens } from "../../review/prompt.js"
+import { buildUserPrompt, estimateTokens } from "../../review/prompt.js"
 import { createContextReader, type ContextReaderConfig } from "../workspace.js"
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -33,8 +33,9 @@ const defaultConfig = (workspaceRoot: string): ContextReaderConfig => ({
 
 const workspaceRoot = fileURLToPath(new URL("../../../fixtures/workspace", import.meta.url))
 
-const readFixture = (workspaceRelativePath: string): string =>
-  readFileSync(path.join(workspaceRoot, workspaceRelativePath), "utf8")
+const readFixture = (workspaceRelativePath: string): string => {
+  return readFileSync(path.join(workspaceRoot, workspaceRelativePath), "utf8")
+}
 
 const greeterContent = readFixture("src/greeter.ts")
 const registryContent = readFixture("src/registry.ts")
@@ -1390,6 +1391,51 @@ describe("readPriorityDocs", () => {
         ],
         remainingTokens: 100_000 - estimateTokens(readmeContent),
       })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  // The related-docs header quotes the priority-doc reason, so renaming the
+  // reason without the header leaves the model a label that matches no block.
+  it("sets the reason that the related-docs header quotes", async () => {
+    const { root, cleanup } = await makeTempWorkspace({ "README.md": "# Greeter" })
+    try {
+      const reader = createContextReader(defaultConfig(root), createTestLogger())
+
+      const { files } = await reader.readPriorityDocs({
+        priorityDocs: ["README.md"],
+        budgetTokens: 100_000,
+        excludePaths: [],
+      })
+
+      const userPrompt = buildUserPrompt({
+        prContext: {
+          prNumber: 1,
+          title: "docs: greeter",
+          body: null,
+          headSha: "abc123",
+          headRef: "docs/greeter",
+          baseRef: "main",
+        },
+        conventions: null,
+        conventionsFile: "AGENTS.md",
+        conventionsBudgetTokens: 8_000,
+        changedFiles: [],
+        relatedFiles: [],
+        relatedDocs: files,
+        annotatedDiff: "",
+        priorFindings: [],
+        priorBotComments: [],
+        delimiterNonce: "abc123def456",
+      })
+
+      expect(userPrompt).toContain(
+        [
+          'Documentation provided as context — flag any claims that have become stale. A block whose reason is "priority documentation" is included whether or not the diff touches it; every other block\'s reason names changed files it mentions:',
+          '<file-abc123def456 path="README.md" reason="priority documentation">\n# Greeter\n</file-abc123def456 path="README.md">',
+        ].join("\n\n"),
+      )
     } finally {
       await cleanup()
     }

@@ -374,7 +374,16 @@ describe("buildUserPrompt", () => {
     })
 
     expect(userPrompt.isWellFormed()).toBe(true)
-    expect(userPrompt).toContain("[conventions truncated at ~8000 tokens]")
+    // toWellFormed replaces the orphaned high surrogate with U+FFFD
+    expect(userPrompt).toContain(
+      [
+        '<conventions-abc123def456 path="AGENTS.md">',
+        `${"x".repeat(31_999)}�`,
+        "",
+        "[conventions truncated at ~8000 tokens]",
+        '</conventions-abc123def456 path="AGENTS.md">',
+      ].join("\n"),
+    )
   })
 
   it("truncates oversized conventions with an explicit notice", () => {
@@ -407,6 +416,38 @@ describe("buildUserPrompt", () => {
     )
   })
 
+  it("keeps the reason attribute on a diff-only file block", () => {
+    const userPrompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      relatedFiles: [
+        {
+          path: "src/caller.ts",
+          content: "",
+          includedAs: "diff-only" as const,
+          reason: "references changed-file src/greeter.ts",
+        },
+      ],
+    })
+
+    expect(userPrompt).toContain(
+      '<file-abc123def456 path="src/caller.ts" reason="references changed-file src/greeter.ts" note="full content omitted — see diff">\n</file-abc123def456 path="src/caller.ts">',
+    )
+  })
+
+  it("wraps the annotated diff in the nonce-tagged diff section", () => {
+    const userPrompt = buildUserPrompt(makeUserPromptParts())
+
+    expect(userPrompt).toContain(
+      [
+        '<diff-abc123def456 note="line numbers shown are new-file line numbers">',
+        "=== src/greeter.ts ===",
+        "@@ -1,1 +1,1 @@",
+        "     1 + export const greet",
+        "</diff-abc123def456>",
+      ].join("\n"),
+    )
+  })
+
   it("omits the prior_findings section when there are none", () => {
     const userPrompt = buildUserPrompt(makeUserPromptParts())
 
@@ -421,7 +462,15 @@ describe("buildUserPrompt", () => {
       prContext: { ...prContext, body: null },
     })
 
-    expect(userPrompt).toContain("PR description:\n(none)")
+    expect(userPrompt).toContain(
+      [
+        "<pr_metadata-abc123def456>",
+        "PR title: feat: trim names before greeting",
+        "Branch: feat/trim-names → main",
+        "PR description:\n(none)",
+        "</pr_metadata-abc123def456>",
+      ].join("\n"),
+    )
   })
 
   it("includes prior findings with a do-not-re-report instruction when present", () => {
@@ -433,14 +482,32 @@ describe("buildUserPrompt", () => {
     })
 
     expect(userPrompt).toContain(
-      '<prior_findings-abc123def456 note="already reported by earlier phases — do not re-report them; when a later report overlaps one of these lines, only the higher-severity finding of the two is kept">',
+      [
+        '<prior_findings-abc123def456 note="already reported by earlier phases — do not re-report them; when a later report overlaps one of these lines, only the higher-severity finding of the two is kept">',
+        "[",
+        "  {",
+        '    "file": "src/greeter.ts",',
+        '    "line": 145,',
+        '    "end_line": null,',
+        '    "category": "correctness",',
+        '    "severity": "medium",',
+        '    "confidence": "high",',
+        '    "title": "Whitespace-only keys pass the empty-key guard",',
+        '    "description": "The guard rejects only the exact empty string.",',
+        '    "suggestion": null,',
+        '    "failure_scenario": "register(\\" \\", \\"value\\") succeeds and the entry is orphaned."',
+        "  }",
+        "]",
+        "</prior_findings-abc123def456>",
+      ].join("\n"),
     )
-    expect(userPrompt).toContain(priorFinding.title)
   })
 
   it("omits the prior bot comments section when empty", () => {
     const userPrompt = buildUserPrompt(makeUserPromptParts())
 
+    // Positive anchor first — an empty prompt would also pass the negative check
+    expect(userPrompt).toContain("<diff-abc123def456")
     expect(userPrompt).not.toContain("prior_bot_comments")
   })
 
@@ -487,7 +554,11 @@ describe("buildUserPrompt", () => {
     const userPrompt = buildUserPrompt(makeUserPromptParts())
 
     expect(userPrompt).toContain(
-      '<file-abc123def456 path="src/caller.ts" reason="references changed-file src/greeter.ts">',
+      [
+        '<file-abc123def456 path="src/caller.ts" reason="references changed-file src/greeter.ts">',
+        'import { greet } from "./greeter.js"',
+        '</file-abc123def456 path="src/caller.ts">',
+      ].join("\n"),
     )
   })
 
@@ -586,7 +657,29 @@ describe("conventionsRenderInFull", () => {
     })
 
     expect(conventionsRenderInFull(oversizedConventions, budgetTokens)).toBe(false)
-    expect(prompt).toContain("[conventions truncated at ~8000 tokens]")
+    expect(prompt).toContain(
+      [
+        '<conventions-abc123def456 path="AGENTS.md">',
+        "c".repeat(conventionsCharacterCap),
+        "",
+        "[conventions truncated at ~8000 tokens]",
+        '</conventions-abc123def456 path="AGENTS.md">',
+      ].join("\n"),
+    )
+  })
+
+  it("agrees with buildUserPrompt rendering conventions exactly at the cap in full", () => {
+    const conventionsAtCap = "c".repeat(conventionsCharacterCap)
+
+    const prompt = buildUserPrompt({
+      ...makeUserPromptParts(),
+      conventions: conventionsAtCap,
+    })
+
+    expect(conventionsRenderInFull(conventionsAtCap, budgetTokens)).toBe(true)
+    expect(prompt).toContain(
+      `<conventions-abc123def456 path="AGENTS.md">\n${conventionsAtCap}\n</conventions-abc123def456 path="AGENTS.md">`,
+    )
   })
 
   it("respects a custom budget", () => {
@@ -608,7 +701,14 @@ describe("conventionsRenderInFull", () => {
       conventionsBudgetTokens: customBudget,
     })
 
-    expect(prompt).toContain("[conventions truncated at ~16000 tokens]")
-    expect(prompt).not.toContain("[conventions truncated at ~8000 tokens]")
+    expect(prompt).toContain(
+      [
+        '<conventions-abc123def456 path="AGENTS.md">',
+        "c".repeat(customCharacterCap),
+        "",
+        "[conventions truncated at ~16000 tokens]",
+        '</conventions-abc123def456 path="AGENTS.md">',
+      ].join("\n"),
+    )
   })
 })
