@@ -22,6 +22,7 @@ import {
   computeAnchorKey,
   mapFindingsToReview,
   renderBeyondDiffFinding,
+  renderRejectedPathFinding,
   renderReroutedFinding,
   REVIEW_MARKER,
   STATUS_ANCHOR,
@@ -1128,7 +1129,7 @@ index 3333333..4444444 100644
       expect(stubs.postIssueCommentCalls).toEqual([
         {
           prNumber: 7,
-          body: renderBeyondDiffFinding(withRoutedModel(rejectedPathFinding, "test/model")),
+          body: renderRejectedPathFinding(withRoutedModel(rejectedPathFinding, "test/model")),
         },
       ])
       expect(

@@ -9,6 +9,7 @@ import {
   isDuplicateFinding,
   mapFindingsToReview,
   renderBeyondDiffFinding,
+  renderRejectedPathFinding,
   renderReroutedFinding,
   STATUS_ANCHOR,
   type AnchorSource,
@@ -432,6 +433,28 @@ The guard rejects only the exact empty string.
 *umm-actually · test/model*
 
 <!-- umm-actually:src/untouched.ts:correctness:30 -->`)
+  })
+})
+
+describe("renderRejectedPathFinding", () => {
+  it("places the finding in a changed file whose path cannot take an inline comment", () => {
+    const finding = makeFinding({ file: "src/rejected.ts", line: 1 })
+
+    const body = renderRejectedPathFinding(finding)
+
+    expect(body).toBe(`**Whitespace-only keys pass the empty-key guard**
+Medium severity · correctness · high confidence
+
+\`src/rejected.ts:1\` — in a changed file whose path cannot take an inline comment.
+
+The guard rejects only the exact empty string.
+
+**Failure scenario:** register(" ", "value") succeeds and the entry is orphaned.
+
+---
+*umm-actually · test/model*
+
+<!-- umm-actually:src/rejected.ts:correctness:1 -->`)
   })
 })
 

@@ -28,6 +28,7 @@ import {
   classifyDuplicate,
   mapFindingsToReview,
   renderBeyondDiffFinding,
+  renderRejectedPathFinding,
   renderReroutedFinding,
   REVIEW_MARKER,
   STATUS_ANCHOR,
@@ -1101,11 +1102,17 @@ const runReviewPipeline = async (
     logger,
   )
 
-  // Beyond-diff findings, plus every in-diff finding when GitHub rejected the
-  // inline review, since one bad anchor fails the whole review. Each keeps a
-  // location note that matches where it sits.
+  // Beyond-diff findings and findings on a rejected diff path, plus every
+  // in-diff finding when GitHub rejected the inline review, since one bad
+  // anchor fails the whole review. Each keeps a location note that matches
+  // where it sits.
   const issueCommentPosts = [
-    ...unanchoredFindings.map((finding) => ({ finding, body: renderBeyondDiffFinding(finding) })),
+    ...unanchoredFindings.map((finding) => ({
+      finding,
+      body: rejectedPaths.has(finding.file)
+        ? renderRejectedPathFinding(finding)
+        : renderBeyondDiffFinding(finding),
+    })),
     ...inlineOutcome.rerouted.map((finding) => ({ finding, body: renderReroutedFinding(finding) })),
   ]
 

@@ -413,6 +413,15 @@ export const renderBeyondDiffFinding = (finding: AttributedFinding): string => {
   })
 }
 
+/** Renders a finding in a changed file whose diff path was rejected. That path
+ *  names no file GitHub knows, so the finding cannot post inline. */
+export const renderRejectedPathFinding = (finding: AttributedFinding): string => {
+  return renderIssueCommentFinding({
+    finding,
+    locationNote: "in a changed file whose path cannot take an inline comment.",
+  })
+}
+
 /** Renders an in-diff finding posted after GitHub rejected the inline review.
  *  Its line is at or near a changed line, not beyond the diff. */
 export const renderReroutedFinding = (finding: AttributedFinding): string => {

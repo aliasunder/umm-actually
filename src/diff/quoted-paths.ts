@@ -133,7 +133,7 @@ export const decodeQuotedFilePaths = (
     // diff alone. GitHub rejects a whole review when one inline comment names
     // such a path, so the caller keeps the file out of inline comments.
     if (decoding.kind === "rejected") {
-      logger.warn("quoted diff path rejected — kept as received", {
+      logger.warn("diff path rejected — kept as received", {
         path: rawPath,
         reason: decoding.reason,
       })
@@ -146,9 +146,11 @@ export const decodeQuotedFilePaths = (
     return decoding
   }
 
-  const rawPaths = files
-    .flatMap((file) => [file.from, file.to])
-    .filter((rawPath) => rawPath !== undefined)
+  // A modified file lists one path as both from and to. Each distinct path
+  // decodes and logs once.
+  const rawPaths = Array.from(new Set(files.flatMap((file) => [file.from, file.to]))).filter(
+    (rawPath) => rawPath !== undefined,
+  )
   const decodingByRawPath = new Map(
     rawPaths.map((rawPath): [string, QuotedPathDecoding] => [rawPath, decodePath(rawPath)]),
   )

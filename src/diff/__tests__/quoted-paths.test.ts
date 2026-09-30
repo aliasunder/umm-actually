@@ -262,12 +262,7 @@ rename to "docs/\341\213\265-new.md"`
     expect(logger.messages).toEqual([
       {
         level: "warn",
-        message: "quoted diff path rejected — kept as received",
-        data: { path: String.raw`caf\351.md`, reason: "escaped bytes are not valid UTF-8" },
-      },
-      {
-        level: "warn",
-        message: "quoted diff path rejected — kept as received",
+        message: "diff path rejected — kept as received",
         data: { path: String.raw`caf\351.md`, reason: "escaped bytes are not valid UTF-8" },
       },
     ])
@@ -285,7 +280,7 @@ rename to "docs/\341\213\265-new.md"`
     expect(logger.messages).toEqual([
       {
         level: "warn",
-        message: "quoted diff path rejected — kept as received",
+        message: "diff path rejected — kept as received",
         data: {
           path: escapedPath,
           reason: "path contains line-break character U+000A",
