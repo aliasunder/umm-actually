@@ -1355,22 +1355,24 @@ describe("orchestrate", () => {
       expect(call.budgetTokens).toBe(expectedRemainingTokens)
     })
 
-    it("passes paths extracted from the diff to readChangedFiles", async () => {
+    it("passes readChangedFiles each new path plus a rename's old path, and no deleted path", async () => {
       const stubs = makeOrchestrateDeps()
       const logger = createTestLogger()
 
       await orchestrate(stubs.deps, logger)
 
-      expect(stubs.readChangedFilesCalls).toHaveLength(1)
-      const changedPaths = first(stubs.readChangedFilesCalls).changedPaths
-      // The fixture diff modifies src/greeter.ts, adds src/added-file.ts,
-      // renames to src/new-name.ts, modifies src/no-trailing-newline.ts, and
-      // deletes src/removed-file.ts (null newFilePath) + binary logo.png
-      expect(changedPaths).toContain("src/greeter.ts")
-      expect(changedPaths).toContain("src/added-file.ts")
-      expect(changedPaths).toContain("src/new-name.ts")
-      // Deleted file has no newFilePath — should NOT appear
-      expect(changedPaths).not.toContain("src/removed-file.ts")
+      // The fixture diff deletes src/removed-file.ts, so that path is absent.
+      // It renames src/old-name.ts to src/new-name.ts, so both paths appear
+      expect(stubs.readChangedFilesCalls.map((call) => call.changedPaths)).toEqual([
+        [
+          "src/greeter.ts",
+          "src/added-file.ts",
+          "src/new-name.ts",
+          "src/old-name.ts",
+          "assets/logo.png",
+          "src/no-trailing-newline.ts",
+        ],
+      ])
     })
 
     it("passes remaining budget after related files to findRelatedDocs", async () => {
@@ -2698,6 +2700,65 @@ describe("orchestrate", () => {
             line: 400,
           },
         },
+      ])
+      expect(logsWithMessage(logger, "findings posted as issue comments")).toEqual([])
+    })
+
+    it("logs the count of findings posted as issue comments, leaving out a failed post", async () => {
+      const failedFinding = makeFinding({
+        file: "src/untouched.ts",
+        line: 400,
+        title: "Unchecked greet result",
+      })
+      const postedFinding = makeFinding({
+        file: "src/untouched.ts",
+        line: 420,
+        title: "Caller ignores the empty-key throw",
+      })
+      const failedBody = renderStandaloneFinding(withRoutedModel(failedFinding, "test/model"))
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [failedFinding, postedFinding] },
+        },
+        contextReader: {
+          findRelatedFiles: async () => ({
+            files: [
+              {
+                path: "src/untouched.ts",
+                content: "import { greet } from './greeter.js'",
+                includedAs: "full",
+                reason: "imports src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
+        githubClient: {
+          postIssueComment: async ({ body }) => {
+            if (body === failedBody) throw new Error("boom")
+            return { url: "https://github.com/test/comment/2" }
+          },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      // The failed post's warning proves both findings reached the posting loop
+      expect(
+        logsWithMessage(
+          logger,
+          "failed to post finding as an issue comment — it will re-report next run",
+        ),
+      ).toEqual([
+        {
+          level: "warn",
+          message: "failed to post finding as an issue comment — it will re-report next run",
+          data: { error: "[Error]: boom", file: "src/untouched.ts", line: 400 },
+        },
+      ])
+      expect(logsWithMessage(logger, "findings posted as issue comments")).toEqual([
+        { level: "info", message: "findings posted as issue comments", data: { count: 1 } },
       ])
     })
 
