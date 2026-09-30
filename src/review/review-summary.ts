@@ -39,11 +39,11 @@ export type ReviewSummaryStats = {
 }
 
 /** Comma-joined items for one markdown line or table cell — em-dash when
- *  empty so cells are never blank. Pipes are escaped so an item can't break
- *  a table row. */
+ *  empty so cells are never blank. Backslashes and pipes are escaped, so an
+ *  item's own backslash can't cancel a pipe's escape and break the row. */
 const renderCommaList = (items: string[]): string => {
   if (items.length === 0) return "—"
-  return items.map((item) => item.replaceAll("|", "\\|")).join(", ")
+  return items.map((item) => item.replaceAll("\\", "\\\\").replaceAll("|", "\\|")).join(", ")
 }
 
 /** The conventions file and how much of it reached the model. */

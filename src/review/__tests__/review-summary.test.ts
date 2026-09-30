@@ -337,4 +337,13 @@ describe("renderReviewSummary", () => {
     expect(summary.split("\n")[12]).toBe("| Changed files | 1 | src/a\\|b.ts |")
     expect(summary).not.toContain("| src/a|b.ts |")
   })
+
+  it("escapes a backslash before a pipe so the pipe stays escaped", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      changedFilePaths: [String.raw`src/a\|b.ts`],
+    })
+
+    expect(summary.split("\n")[12]).toBe(String.raw`| Changed files | 1 | src/a\\\|b.ts |`)
+  })
 })

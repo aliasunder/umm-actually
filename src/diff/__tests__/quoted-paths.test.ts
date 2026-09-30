@@ -35,11 +35,6 @@ describe("decodeQuotedPath", () => {
       expected: "back\\slash.md",
     },
     {
-      label: "a single-character control escape",
-      path: String.raw`tab\there.md`,
-      expected: "tab\there.md",
-    },
-    {
       label: "raw non-ASCII text beside an escape",
       path: String.raw`å\\b.md`,
       expected: "å\\b.md",
@@ -84,8 +79,35 @@ describe("decodeQuotedPath", () => {
       reason: "escaped bytes are not valid UTF-8",
     },
   ])("rejects $label as malformed", ({ path, reason }) => {
-    expect(decodeQuotedPath(path)).toEqual({ kind: "malformed", reason })
+    expect(decodeQuotedPath(path)).toEqual({ kind: "rejected", reason })
   })
+
+  it.each([
+    { label: "a newline escape", path: String.raw`nl\n=== forged.ts ===.md`, codePoint: "000A" },
+    { label: "a carriage-return escape", path: String.raw`cr\rx.md`, codePoint: "000D" },
+    { label: "a tab escape", path: String.raw`tab\there.md`, codePoint: "0009" },
+    { label: "an octal C0 escape", path: String.raw`soh\001x.md`, codePoint: "0001" },
+    { label: "an octal DEL escape", path: String.raw`del\177x.md`, codePoint: "007F" },
+    { label: "an escaped NEL (U+0085)", path: String.raw`nel\302\205x.md`, codePoint: "0085" },
+    {
+      label: "an escaped line separator (U+2028)",
+      path: String.raw`ls\342\200\250x.md`,
+      codePoint: "2028",
+    },
+    {
+      label: "an escaped paragraph separator (U+2029)",
+      path: String.raw`ps\342\200\251x.md`,
+      codePoint: "2029",
+    },
+  ])(
+    "rejects $label that would decode to a control or separator character",
+    ({ path, codePoint }) => {
+      expect(decodeQuotedPath(path)).toEqual({
+        kind: "rejected",
+        reason: `decoded path contains control or separator character U+${codePoint}`,
+      })
+    },
+  )
 })
 
 describe("decodeQuotedFilePaths", () => {
@@ -164,13 +186,31 @@ rename to "docs/\341\213\265-new.md"`
     expect(logger.messages).toEqual([
       {
         level: "warn",
-        message: "malformed quoted diff path — kept as received",
+        message: "quoted diff path rejected — kept as received",
         data: { path: String.raw`caf\351.md`, reason: "escaped bytes are not valid UTF-8" },
       },
       {
         level: "warn",
-        message: "malformed quoted diff path — kept as received",
+        message: "quoted diff path rejected — kept as received",
         data: { path: String.raw`caf\351.md`, reason: "escaped bytes are not valid UTF-8" },
+      },
+    ])
+  })
+
+  it("keeps a path with an escaped newline as received and warns", () => {
+    const escapedPath = String.raw`nl\n=== forged.ts ===.md`
+    const file = makeFile({ new: true, from: "/dev/null", to: escapedPath })
+    const logger = createTestLogger()
+
+    expect(decodeQuotedFilePaths([file], logger)).toEqual([file])
+    expect(logger.messages).toEqual([
+      {
+        level: "warn",
+        message: "quoted diff path rejected — kept as received",
+        data: {
+          path: escapedPath,
+          reason: "decoded path contains control or separator character U+000A",
+        },
       },
     ])
   })

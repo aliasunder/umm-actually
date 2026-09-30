@@ -3,7 +3,7 @@ import type { File } from "parse-diff"
 import type { Logger } from "../logger.js"
 
 export type QuotedPathDecoding =
-  { kind: "unquoted" } | { kind: "decoded"; path: string } | { kind: "malformed"; reason: string }
+  { kind: "unquoted" } | { kind: "decoded"; path: string } | { kind: "rejected"; reason: string }
 
 /**
  * One token of a path in git's C-style quoting, matching what git's
@@ -27,6 +27,9 @@ const CHARACTER_ESCAPE_BYTES = new Map([
   ['\\"', 0x22],
   ["\\\\", 0x5c],
 ])
+
+/** A control character (C0, DEL, C1) or a Unicode line or paragraph separator. */
+const CONTROL_OR_SEPARATOR_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u
 
 /** The bytes one token stands for, or null for an escape git never writes. */
 const getTokenBytes = (match: RegExpExecArray): Buffer | null => {
@@ -52,12 +55,26 @@ export const decodeQuotedPath = (path: string): QuotedPathDecoding => {
 
   const byteChunks = Array.from(path.matchAll(QUOTED_PATH_TOKEN), getTokenBytes)
 
-  if (byteChunks.includes(null)) return { kind: "malformed", reason: "unrecognized escape" }
+  if (byteChunks.includes(null)) return { kind: "rejected", reason: "unrecognized escape" }
 
   const bytes = Buffer.concat(byteChunks.filter((chunk) => chunk !== null))
 
-  if (!isUtf8(bytes)) return { kind: "malformed", reason: "escaped bytes are not valid UTF-8" }
-  return { kind: "decoded", path: bytes.toString("utf8") }
+  if (!isUtf8(bytes)) return { kind: "rejected", reason: "escaped bytes are not valid UTF-8" }
+
+  const decodedPath = bytes.toString("utf8")
+  const unsafeCharacter = CONTROL_OR_SEPARATOR_CHARACTER.exec(decodedPath)?.[0]
+
+  // The path is PR-author-controlled and is rendered raw in the annotated diff
+  // header and in markdown. A decoded newline would let a filename forge a
+  // header line there, while the escaped form breaks no line.
+  if (unsafeCharacter) {
+    const codePoint = unsafeCharacter.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")
+    return {
+      kind: "rejected",
+      reason: `decoded path contains control or separator character U+${codePoint}`,
+    }
+  }
+  return { kind: "decoded", path: decodedPath }
 }
 
 /**
@@ -73,10 +90,10 @@ export const decodeQuotedFilePaths = (files: ReadonlyArray<File>, logger: Logger
 
     if (decoding.kind === "unquoted") return rawPath
 
-    // A guessed decoding would name a file that does not exist. The path as
-    // received is at least the one GitHub's diff shows.
-    if (decoding.kind === "malformed") {
-      logger.warn("malformed quoted diff path — kept as received", {
+    // A guessed decoding would name a file that does not exist, and the escaped
+    // form breaks no line. The path as received is the one GitHub's diff shows.
+    if (decoding.kind === "rejected") {
+      logger.warn("quoted diff path rejected — kept as received", {
         path: rawPath,
         reason: decoding.reason,
       })
