@@ -1321,11 +1321,14 @@ export const createPromptedGenerateFindings = (
       fallbackModel,
     })
 
-    return openrouterClient.requestReview({
-      systemPrompt,
-      userPrompt,
-      model,
-      fallbackModel,
-    })
+    // Parallel phases call the same model at once, so the phase is what tells
+    // their client log lines apart. The child comes from `logger`, not `log`,
+    // because those lines come from the client module, not this one
+    const phaseLogger = logger.child({ phase: reviewContext.phase.id })
+
+    return openrouterClient.requestReview(
+      { systemPrompt, userPrompt, model, fallbackModel },
+      phaseLogger,
+    )
   }
 }

@@ -127,14 +127,11 @@ try {
       ),
       generateFindings: createPromptedGenerateFindings(
         {
-          openrouterClient: createOpenRouterClient(
-            {
-              sdk: new OpenRouter({ apiKey: config.openrouterApiKey }),
-              requestTimeoutMs: config.requestTimeoutSeconds * 1000,
-              remainingReviewMs,
-            },
-            logger,
-          ),
+          openrouterClient: createOpenRouterClient({
+            sdk: new OpenRouter({ apiKey: config.openrouterApiKey }),
+            requestTimeoutMs: config.requestTimeoutSeconds * 1000,
+            remainingReviewMs,
+          }),
           model: config.model,
           fallbackModel: config.fallbackModel === "" ? null : config.fallbackModel,
         },

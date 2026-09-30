@@ -72,12 +72,18 @@ export type OpenRouterLike = {
 }
 
 export type OpenRouterClient = {
-  requestReview: (params: {
-    systemPrompt: string
-    userPrompt: string
-    model: string
-    fallbackModel: string | null
-  }) => Promise<StructuredReviewResult>
+  /** Every line the request logs goes through `logger`, including a late
+   *  settlement logged after the call has returned, so props the caller binds
+   *  to it tag all of them. */
+  requestReview: (
+    params: {
+      systemPrompt: string
+      userPrompt: string
+      model: string
+      fallbackModel: string | null
+    },
+    logger: Logger,
+  ) => Promise<StructuredReviewResult>
 }
 
 const chatResultSchema = z.object({
@@ -382,30 +388,30 @@ const summarizeAttempts = (attempts: ModelAttempt[]): string => {
   return attempts.map(describeAttempt).join("; ")
 }
 
-export const createOpenRouterClient = (
-  {
-    sdk,
-    requestTimeoutMs,
-    remainingReviewMs,
-    retryDelayMs = RETRY_DELAY_MS,
-  }: {
-    sdk: OpenRouterLike
-    /** Per-attempt deadline. When it elapses the attempt records outcome
-     *  `timeout` and the ladder moves on — to the next model when one
-     *  exists, otherwise a same-model retry while attempts remain — whether
-     *  or not the provider connection closes. The HTTP call is aborted
-     *  best-effort. */
-    requestTimeoutMs: number
-    /** Milliseconds left in the whole review's time budget; 0 or less once
-     *  it has run out. Caps every attempt, cost lookup, and retry delay. */
-    remainingReviewMs: () => number
-    retryDelayMs?: number
-  },
-  logger: Logger,
-): OpenRouterClient => {
+export const createOpenRouterClient = ({
+  sdk,
+  requestTimeoutMs,
+  remainingReviewMs,
+  retryDelayMs = RETRY_DELAY_MS,
+}: {
+  sdk: OpenRouterLike
+  /** Per-attempt deadline. When it elapses the attempt records outcome
+   *  `timeout` and the ladder moves on — to the next model when one
+   *  exists, otherwise a same-model retry while attempts remain — whether
+   *  or not the provider connection closes. The HTTP call is aborted
+   *  best-effort. */
+  requestTimeoutMs: number
+  /** Milliseconds left in the whole review's time budget; 0 or less once
+   *  it has run out. Caps every attempt, cost lookup, and retry delay. */
+  remainingReviewMs: () => number
+  retryDelayMs?: number
+}): OpenRouterClient => {
   const requestTimeoutSummary = `no response within ${Math.round(requestTimeoutMs / 1000)}s`
 
-  const attemptOnce = async (chatRequest: ChatRequestSubset): Promise<SingleAttempt> => {
+  const attemptOnce = async (
+    chatRequest: ChatRequestSubset,
+    logger: Logger,
+  ): Promise<SingleAttempt> => {
     const { model } = chatRequest
     const remainingMs = remainingReviewMs()
 
@@ -547,7 +553,10 @@ export const createOpenRouterClient = (
 
   /** A cost lookup failure must never fail a completed review, so every
    *  failure degrades to a null cost. */
-  const lookupGenerationCost = async (generationId: string): Promise<number | null> => {
+  const lookupGenerationCost = async (
+    generationId: string,
+    logger: Logger,
+  ): Promise<number | null> => {
     const generations = sdk.generations
     const remainingMs = remainingReviewMs()
 
@@ -595,17 +604,20 @@ export const createOpenRouterClient = (
     return parsed.data.data.totalCost
   }
 
-  const requestReview = async ({
-    systemPrompt,
-    userPrompt,
-    model,
-    fallbackModel,
-  }: {
-    systemPrompt: string
-    userPrompt: string
-    model: string
-    fallbackModel: string | null
-  }): Promise<StructuredReviewResult> => {
+  const requestReview = async (
+    {
+      systemPrompt,
+      userPrompt,
+      model,
+      fallbackModel,
+    }: {
+      systemPrompt: string
+      userPrompt: string
+      model: string
+      fallbackModel: string | null
+    },
+    logger: Logger,
+  ): Promise<StructuredReviewResult> => {
     const modelLadder = fallbackModel === null ? [model] : [model, fallbackModel]
     const attempts: ModelAttempt[] = []
     const ensureReviewTimeRemaining = (): void => {
@@ -630,13 +642,14 @@ export const createOpenRouterClient = (
         ensureReviewTimeRemaining()
         const attemptResult = await attemptOnce(
           buildChatRequest({ systemPrompt, userPrompt, model: ladderModel, maxCompletionTokens }),
+          logger,
         )
 
         if (attemptResult.kind === "accepted") {
           // The generation lookup runs only when the response's usage omits the cost
           const costUsd =
             attemptResult.attempt.costUsd ??
-            (await lookupGenerationCost(attemptResult.generationId))
+            (await lookupGenerationCost(attemptResult.generationId, logger))
           attempts.push({ ...attemptResult.attempt, costUsd })
           logger.info("review response accepted", {
             model: ladderModel,

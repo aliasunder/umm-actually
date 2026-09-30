@@ -8,6 +8,7 @@ import type { ContextReader } from "../context/workspace.js"
 import {
   ReviewRequestError,
   createOpenRouterClient,
+  type ChatRequestSubset,
   type ModelAttempt,
   type OpenRouterClient,
   type StructuredReviewResult,
@@ -3939,14 +3940,11 @@ describe("staged phases", () => {
         choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
         usage: { promptTokens: 10, completionTokens: 20 },
       }))
-      const client = createOpenRouterClient(
-        {
-          sdk: { chat: { send }, generations: { getGeneration } },
-          requestTimeoutMs: 900_000,
-          remainingReviewMs,
-        },
-        createTestLogger(),
-      )
+      const client = createOpenRouterClient({
+        sdk: { chat: { send }, generations: { getGeneration } },
+        requestTimeoutMs: 900_000,
+        remainingReviewMs,
+      })
       const stubs = makeOrchestrateDeps({
         remainingReviewMs,
         generateFindings: createPromptedGenerateFindings(
@@ -4033,14 +4031,11 @@ describe("staged phases", () => {
         .mockResolvedValueOnce(response)
         .mockResolvedValueOnce(response)
         .mockImplementation(() => lateResponse.promise)
-      const client = createOpenRouterClient(
-        {
-          sdk: { chat: { send } },
-          requestTimeoutMs: 900_000,
-          remainingReviewMs,
-        },
-        createTestLogger(),
-      )
+      const client = createOpenRouterClient({
+        sdk: { chat: { send } },
+        requestTimeoutMs: 900_000,
+        remainingReviewMs,
+      })
       const stubs = makeOrchestrateDeps({
         config: { phases: "parallel" },
         remainingReviewMs,
@@ -4117,6 +4112,90 @@ describe("staged phases", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("tags each parallel phase's client log lines with that phase", async () => {
+    const response = {
+      id: "completed",
+      model: "test/model",
+      choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
+      usage: { promptTokens: 10, completionTokens: 20, cost: 0.01 },
+    }
+
+    // correctness-security is dispatched first, so a logger shared across the
+    // concurrent calls would already carry a later phase when its failure logs.
+    // The failure is keyed on that phase's prompt text, not on call order
+    const correctnessSecurityPassScope = "this pass covers correctness & security"
+    const failedPrompts = new Set<string>()
+    const send = vi.fn(async ({ chatRequest }: { chatRequest: ChatRequestSubset }) => {
+      const systemPrompt = first(chatRequest.messages).content
+      const isFirstCorrectnessSecurityRequest =
+        systemPrompt.includes(correctnessSecurityPassScope) && !failedPrompts.has(systemPrompt)
+
+      if (isFirstCorrectnessSecurityRequest) {
+        failedPrompts.add(systemPrompt)
+        throw Object.assign(new Error("HTTP 500"), { statusCode: 500 })
+      }
+      return response
+    })
+    const client = createOpenRouterClient({
+      sdk: { chat: { send } },
+      requestTimeoutMs: 900_000,
+      remainingReviewMs: () => Infinity,
+      retryDelayMs: 0,
+    })
+    const generateLogger = createTestLogger()
+    const stubs = makeOrchestrateDeps({
+      config: { phases: "parallel" },
+      generateFindings: createPromptedGenerateFindings(
+        { openrouterClient: client, model: "test/model", fallbackModel: null },
+        generateLogger,
+      ),
+    })
+
+    const result = await orchestrate(stubs.deps, createTestLogger())
+
+    // Completion order depends on scheduling; which phase each line names is
+    // what this test checks, so the accepted lines are compared by phase
+    const acceptedByPhase = logsWithMessage(generateLogger, "review response accepted").toSorted(
+      (left, right) => String(left.data.phase).localeCompare(String(right.data.phase)),
+    )
+    const acceptedEntry = (phase: string, attemptCount: number) => ({
+      level: "info",
+      message: "review response accepted",
+      data: {
+        phase,
+        model: "test/model",
+        routedModel: "test/model",
+        generationId: "completed",
+        attemptCount,
+      },
+    })
+
+    expect(result.phases).toEqual([
+      { phase: "correctness-security", status: "completed" },
+      { phase: "conventions-tests", status: "completed" },
+      { phase: "subtle-bugs", status: "completed" },
+    ])
+    expect(send).toHaveBeenCalledTimes(4)
+    expect(logsWithMessage(generateLogger, "review attempt failed")).toEqual([
+      {
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          phase: "correctness-security",
+          model: "test/model",
+          attemptNumber: 1,
+          outcome: "api_error",
+          errorSummary: "HTTP 500: HTTP 500",
+        },
+      },
+    ])
+    expect(acceptedByPhase).toEqual([
+      acceptedEntry("conventions-tests", 1),
+      acceptedEntry("correctness-security", 2),
+      acceptedEntry("subtle-bugs", 1),
+    ])
   })
 
   it("posts the surviving phases' findings when one phase fails, naming the gap on the status comment and the check run", async () => {
@@ -4548,6 +4627,40 @@ describe("createPromptedGenerateFindings", () => {
     expect(
       requestReviewCalls.map(({ model, fallbackModel }) => ({ model, fallbackModel })),
     ).toEqual([{ model: "test/primary", fallbackModel: "test/fallback" }])
+  })
+
+  it("passes requestReview a logger tagged with the review phase", async () => {
+    const stubClient: OpenRouterClient = {
+      requestReview: async (_params, logger) => {
+        logger.info("stub client line")
+        return { review: { analysis: "", findings: [] }, modelUsed: "m", attempts: [] }
+      },
+    }
+    const logger = createTestLogger()
+    const generate = createPromptedGenerateFindings(
+      { openrouterClient: stubClient, model: "m", fallbackModel: null },
+      logger,
+    )
+    const reviewContext: Omit<ReviewContext, "phase"> = {
+      prContext: fixturePrContext,
+      conventions: null,
+      conventionsFile: "AGENTS.md",
+      conventionsBudgetTokens: 8_000,
+      changedFiles: [],
+      relatedFiles: [],
+      relatedDocs: [],
+      annotatedDiff: annotateDiff(parseDiff(sampleDiff)),
+      priorFindings: [],
+      priorBotComments: [],
+    }
+
+    await generate({ ...reviewContext, phase: COMBINED_PHASE })
+    await generate({ ...reviewContext, phase: SUBTLE_BUGS_PHASE })
+
+    expect(logsWithMessage(logger, "stub client line")).toEqual([
+      { level: "info", message: "stub client line", data: { phase: "combined" } },
+      { level: "info", message: "stub client line", data: { phase: "subtle-bugs" } },
+    ])
   })
 
   it("includes annotated diff in the user prompt", async () => {
