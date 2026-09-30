@@ -96,6 +96,13 @@ export const decodeQuotedPath = (path: string): QuotedPathDecoding => {
   return { kind: "decoded", path: decodedPath }
 }
 
+export type DecodedDiffFiles = {
+  files: File[]
+  /** Paths whose decoding was rejected. Each stays in its escaped spelling and
+   *  names no file in the checkout or on GitHub. */
+  rejectedPaths: ReadonlySet<string>
+}
+
 /**
  * Decodes the quoted from and to paths of parsed diff files. GitHub's diff
  * quotes every non-ASCII path and any path with a quote, a backslash, or a
@@ -103,30 +110,55 @@ export const decodeQuotedPath = (path: string): QuotedPathDecoding => {
  * workspace read, diff exclusion, and inline comments all see a path that
  * does not exist.
  */
-export const decodeQuotedFilePaths = (files: ReadonlyArray<File>, logger: Logger): File[] => {
-  const decodePath = (rawPath: string): string => {
+export const decodeQuotedFilePaths = (
+  files: ReadonlyArray<File>,
+  logger: Logger,
+): DecodedDiffFiles => {
+  const decodePath = (rawPath: string): QuotedPathDecoding => {
     const decoding = decodeQuotedPath(rawPath)
-
-    if (decoding.kind === "unquoted") return rawPath
 
     // A guessed decoding would name a file that does not exist, and the escaped
     // form breaks no line, so the path stays as GitHub's diff shows it. The
-    // checkout has no file at that path, so the file is reviewed from its diff alone.
+    // checkout has no file at that path, so the file is reviewed from its diff
+    // alone. GitHub rejects a whole review when one inline comment names that
+    // path, so the caller keeps the file out of inline comments.
     if (decoding.kind === "rejected") {
       logger.warn("quoted diff path rejected — kept as received", {
         path: rawPath,
         reason: decoding.reason,
       })
-      return rawPath
     }
 
-    logger.debug("decoded quoted diff path", { quotedPath: rawPath, path: decoding.path })
-    return decoding.path
+    if (decoding.kind === "decoded") {
+      logger.debug("decoded quoted diff path", { quotedPath: rawPath, path: decoding.path })
+    }
+
+    return decoding
   }
 
-  return files.map((file) => ({
-    ...file,
-    ...(file.from && { from: decodePath(file.from) }),
-    ...(file.to && { to: decodePath(file.to) }),
-  }))
+  const rawPaths = files
+    .flatMap((file) => [file.from, file.to])
+    .filter((rawPath) => rawPath !== undefined)
+  const decodingByRawPath = new Map(
+    rawPaths.map((rawPath): [string, QuotedPathDecoding] => [rawPath, decodePath(rawPath)]),
+  )
+
+  /** The decoded path, or the path as received when it was unquoted or rejected. */
+  const getResolvedPath = (rawPath: string): string => {
+    const decoding = decodingByRawPath.get(rawPath)
+    return decoding?.kind === "decoded" ? decoding.path : rawPath
+  }
+
+  const isRejectedPath = (rawPath: string): boolean => {
+    return decodingByRawPath.get(rawPath)?.kind === "rejected"
+  }
+
+  return {
+    files: files.map((file) => ({
+      ...file,
+      ...(file.from && { from: getResolvedPath(file.from) }),
+      ...(file.to && { to: getResolvedPath(file.to) }),
+    })),
+    rejectedPaths: new Set(rawPaths.filter(isRejectedPath)),
+  }
 }

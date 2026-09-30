@@ -563,7 +563,7 @@ const runReviewPipeline = async (
 
   // parse-diff keeps git's escapes in quoted paths. Decoding them once here
   // gives every later step, from exclusion to inline comments, the real path.
-  const files = decodeQuotedFilePaths(parseDiff(diffResult.diff), logger)
+  const { files, rejectedPaths } = decodeQuotedFilePaths(parseDiff(diffResult.diff), logger)
 
   if (files.length === 0) {
     return postSkipReview({ reason: "empty diff" })
@@ -622,7 +622,22 @@ const runReviewPipeline = async (
     })
   }
 
-  const commentableByPath = computeCommentableLines(reviewableFiles)
+  // A rejected path keeps git's escapes, so it names no file GitHub knows.
+  // GitHub fails the whole review when one inline comment names such a path,
+  // so the file gets no commentable lines and its findings post as standalone
+  // comments.
+  const diffCommentableByPath = computeCommentableLines(reviewableFiles)
+  const commentableByPath = new Map(
+    Array.from(diffCommentableByPath).filter(([path]) => !rejectedPaths.has(path)),
+  )
+
+  for (const path of diffCommentableByPath.keys()) {
+    if (rejectedPaths.has(path)) {
+      logger.debug("file left out of inline comments because its diff path was rejected", {
+        path,
+      })
+    }
+  }
 
   // Diff-excluded files must stay out of every context channel: the trailer
   // told the model their content is not shown, so neither the related-file

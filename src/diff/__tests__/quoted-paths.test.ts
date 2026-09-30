@@ -140,9 +140,10 @@ rename to "docs/\341\213\265-new.md"`
 
     const decoded = decodeQuotedFilePaths(parseDiff(renameDiff), createTestLogger())
 
-    expect(decoded).toEqual([
-      { chunks: [], additions: 0, deletions: 0, from: "docs/ድ.md", to: "docs/ድ-new.md" },
-    ])
+    expect(decoded).toEqual({
+      files: [{ chunks: [], additions: 0, deletions: 0, from: "docs/ድ.md", to: "docs/ድ-new.md" }],
+      rejectedPaths: new Set(),
+    })
   })
 
   it("decodes a path ending in a backslash from both diff header forms", () => {
@@ -164,7 +165,7 @@ rename to "docs/\341\213\265-new.md"`
     const decodedPaths = decodeQuotedFilePaths(
       parseDiff(`${editedFileDiff}\n${renamedFileDiff}`),
       createTestLogger(),
-    ).map(({ from, to }) => ({ from, to }))
+    ).files.map(({ from, to }) => ({ from, to }))
 
     expect(decodedPaths).toEqual([
       { from: "dir\\sub\\", to: "dir\\sub\\" },
@@ -175,32 +176,38 @@ rename to "docs/\341\213\265-new.md"`
   it("decodes an added file and keeps its /dev/null old path", () => {
     const file = makeFile({ new: true, from: "/dev/null", to: String.raw`\303\245.md` })
 
-    expect(decodeQuotedFilePaths([file], createTestLogger())).toEqual([
-      { ...file, from: "/dev/null", to: "å.md" },
-    ])
+    expect(decodeQuotedFilePaths([file], createTestLogger())).toEqual({
+      files: [{ ...file, from: "/dev/null", to: "å.md" }],
+      rejectedPaths: new Set(),
+    })
   })
 
   it("decodes a deleted file and keeps its /dev/null new path", () => {
     const file = makeFile({ deleted: true, from: String.raw`\303\245.md`, to: "/dev/null" })
 
-    expect(decodeQuotedFilePaths([file], createTestLogger())).toEqual([
-      { ...file, from: "å.md", to: "/dev/null" },
-    ])
+    expect(decodeQuotedFilePaths([file], createTestLogger())).toEqual({
+      files: [{ ...file, from: "å.md", to: "/dev/null" }],
+      rejectedPaths: new Set(),
+    })
   })
 
   it("leaves an absent old path absent", () => {
     const file: File = { chunks: [], additions: 0, deletions: 0, to: String.raw`\303\245.png` }
 
-    expect(decodeQuotedFilePaths([file], createTestLogger())).toStrictEqual([
-      { chunks: [], additions: 0, deletions: 0, to: "å.png" },
-    ])
+    expect(decodeQuotedFilePaths([file], createTestLogger())).toStrictEqual({
+      files: [{ chunks: [], additions: 0, deletions: 0, to: "å.png" }],
+      rejectedPaths: new Set(),
+    })
   })
 
   it("returns unquoted files unchanged without logging", () => {
     const file = makeFile()
     const logger = createTestLogger()
 
-    expect(decodeQuotedFilePaths([file], logger)).toEqual([file])
+    expect(decodeQuotedFilePaths([file], logger)).toEqual({
+      files: [file],
+      rejectedPaths: new Set(),
+    })
     expect(logger.messages).toEqual([])
   })
 
@@ -230,7 +237,10 @@ rename to "docs/\341\213\265-new.md"`
     const file = makeFile({ from: String.raw`caf\351.md`, to: String.raw`caf\351.md` })
     const logger = createTestLogger()
 
-    expect(decodeQuotedFilePaths([file], logger)).toEqual([file])
+    expect(decodeQuotedFilePaths([file], logger)).toEqual({
+      files: [file],
+      rejectedPaths: new Set([String.raw`caf\351.md`]),
+    })
     expect(logger.messages).toEqual([
       {
         level: "warn",
@@ -250,7 +260,10 @@ rename to "docs/\341\213\265-new.md"`
     const file = makeFile({ new: true, from: "/dev/null", to: escapedPath })
     const logger = createTestLogger()
 
-    expect(decodeQuotedFilePaths([file], logger)).toEqual([file])
+    expect(decodeQuotedFilePaths([file], logger)).toEqual({
+      files: [file],
+      rejectedPaths: new Set([escapedPath]),
+    })
     expect(logger.messages).toEqual([
       {
         level: "warn",
@@ -261,5 +274,15 @@ rename to "docs/\341\213\265-new.md"`
         },
       },
     ])
+  })
+
+  it("reports only the rejected path of a rename whose new path decodes", () => {
+    const rejectedOldPath = String.raw`old\tname.md`
+    const file = makeFile({ from: rejectedOldPath, to: String.raw`\303\245.md` })
+
+    expect(decodeQuotedFilePaths([file], createTestLogger())).toEqual({
+      files: [{ ...file, from: rejectedOldPath, to: "å.md" }],
+      rejectedPaths: new Set([rejectedOldPath]),
+    })
   })
 })

@@ -1075,6 +1075,72 @@ index 1111111..2222222 100644
       expect(headerLines).toEqual([String.raw`=== nl\n=== forged.ts ===.md ===`])
     })
 
+    it("posts a finding on a rejected quoted path as a standalone comment and keeps the rest inline", async () => {
+      const escapedPath = String.raw`a\tb.ts`
+      const mixedPathDiff = String.raw`diff --git a/src/app.ts b/src/app.ts
+index 1111111..2222222 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old app line
++new app line
+diff --git "a/a\tb.ts" "b/a\tb.ts"
+index 3333333..4444444 100644
+--- "a/a\tb.ts"
++++ "b/a\tb.ts"
+@@ -1 +1 @@
+-old tab line
++new tab line
+`
+      const normalFinding = makeFinding({ file: "src/app.ts", line: 1, title: "App line bug" })
+      const rejectedPathFinding = makeFinding({ file: escapedPath, line: 1, title: "Tab bug" })
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: mixedPathDiff }),
+        },
+        fixtureResult: {
+          review: { analysis: "checked", findings: [normalFinding, rejectedPathFinding] },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const expectedComments = mapFindingsToReview({
+        findings: [withRoutedModel(normalFinding, "test/model")],
+        commentableByPath: new Map([
+          ["src/app.ts", { rightLines: new Set([1]), hunkRanges: [{ start: 1, end: 1 }] }],
+        ]),
+      }).comments
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        {
+          prNumber: 7,
+          commitId: fixturePrContext.headSha,
+          body: REVIEW_MARKER,
+          comments: expectedComments,
+        },
+      ])
+      expect(expectedComments.map((comment) => comment.path)).toEqual(["src/app.ts"])
+      expect(stubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderBeyondDiffFinding(withRoutedModel(rejectedPathFinding, "test/model")),
+        },
+      ])
+      expect(
+        logsWithMessage(
+          logger,
+          "file left out of inline comments because its diff path was rejected",
+        ),
+      ).toEqual([
+        {
+          level: "debug",
+          message: "file left out of inline comments because its diff path was rejected",
+          data: { path: escapedPath },
+        },
+      ])
+    })
+
     it("keeps a priority doc in the rendered prompt when changed files use the rest of the budget", async () => {
       const priorityDocContent = "# Review reference\nCheck API behavior."
       const priorityDocTokens = estimateTokens(priorityDocContent)
