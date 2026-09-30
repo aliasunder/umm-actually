@@ -23,6 +23,8 @@ export type ReviewSummaryStats = {
   docsExcludedPaths: string[]
   tokenBudgetTotal: number
   tokenBudgetUsedByDiff: number
+  /** Tokens reserved for priority docs: what the early priority-doc read spent
+   *  plus what was held back from related files. */
   tokenBudgetPriorityDocFloor: number
   tokenBudgetRemainingForDocs: number
   totalFromModel: number
@@ -31,6 +33,7 @@ export type ReviewSummaryStats = {
   droppedAsUnknownFile: number
   /** Findings two phases reported on overlapping lines of one file. */
   duplicatesAcrossPhases: number
+  /** Findings dropped because an earlier run already posted them. */
   duplicatesRemoved: number
   droppedBelowThreshold: number
   droppedAsOverlapping: number
@@ -43,6 +46,10 @@ export type ReviewSummaryStats = {
  *  item's own backslash can't cancel a pipe's escape and break the row. */
 const renderCommaList = (items: string[]): string => {
   if (items.length === 0) return "—"
+
+  // Backslashes are escaped first. Escaping pipes first would double each
+  // pipe escape's own backslash and leave the pipe bare. For example, `a\|b`
+  // renders as `a\\\|b`.
   return items.map((item) => item.replaceAll("\\", "\\\\").replaceAll("|", "\\|")).join(", ")
 }
 
@@ -52,12 +59,14 @@ const renderConventionsCoverage = ({
   conventionsCoverage,
 }: Pick<ReviewSummaryStats, "conventionsFile" | "conventionsCoverage">): string => {
   if (conventionsCoverage.status === "not-found") return "none"
+
   // The size against the cap shows how close a fitting file is to truncating
   if (conventionsCoverage.status === "full") {
     const { characterCap, totalCharacters } = conventionsCoverage
     return `${conventionsFile} (${totalCharacters} characters, within the ${characterCap}-character cap)`
   }
 
+  // Only the truncated status remains
   const { fullCopyChannel, characterCap, totalCharacters } = conventionsCoverage
 
   // A priority-doc copy replaces the truncated section, so no head was sent

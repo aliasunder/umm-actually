@@ -11,11 +11,17 @@ export type QuotedPathDecoding =
  * - literal: a run of characters with no backslash.
  * - octal: three octal digits for one byte. Git writes the first digit as 0-3.
  * - The unnamed last branch takes any other backslash and the character after
- *   it. CHARACTER_ESCAPE_BYTES decides whether that pair is a valid escape.
+ *   it. A backslash at the end of the path matches alone. The s flag lets that
+ *   character be a newline. CHARACTER_ESCAPE_BYTES decides whether the match
+ *   is a valid escape.
+ *
+ * Every character starts one of the three branches, so matchAll consumes the
+ * whole path and skips nothing.
  */
 const QUOTED_PATH_TOKEN = /(?<literal>[^\\]+)|\\(?<octal>[0-3][0-7]{2})|\\.?/gs
 
-/** Git's single-character escapes and the byte each stands for. */
+/** Git's single-character escapes and the byte each stands for. Each key is
+ *  the escape as written in the path, backslash included. */
 const CHARACTER_ESCAPE_BYTES = new Map([
   ["\\a", 0x07],
   ["\\b", 0x08],
@@ -41,7 +47,8 @@ const getTokenBytes = (match: RegExpExecArray): Buffer | null => {
 
   const escapeByte = CHARACTER_ESCAPE_BYTES.get(match[0])
 
-  if (!escapeByte) return null
+  // 0x00 is a valid byte, so only a missing key marks an unrecognized escape
+  if (escapeByte === undefined) return null
   return Buffer.of(escapeByte)
 }
 
@@ -50,30 +57,36 @@ const getTokenBytes = (match: RegExpExecArray): Buffer | null => {
 export const decodeQuotedPath = (path: string): QuotedPathDecoding => {
   // Git quotes any path containing a backslash, whatever core.quotePath says,
   // and every character it quotes becomes an escape that starts with one. So
-  // a backslash is present exactly when the path was quoted.
+  // a backslash is present exactly when the path was quoted. GitHub's diff
+  // also quotes every control and non-ASCII character, so an unquoted path
+  // holds none of the characters the check below rejects.
   if (!path.includes("\\")) return { kind: "unquoted" }
 
   const byteChunks = Array.from(path.matchAll(QUOTED_PATH_TOKEN), getTokenBytes)
 
-  if (byteChunks.includes(null)) return { kind: "rejected", reason: "unrecognized escape" }
+  if (!byteChunks.every((chunk) => chunk !== null)) {
+    return { kind: "rejected", reason: "unrecognized escape" }
+  }
 
-  const bytes = Buffer.concat(byteChunks.filter((chunk) => chunk !== null))
+  const bytes = Buffer.concat(byteChunks)
 
   if (!isUtf8(bytes)) return { kind: "rejected", reason: "escaped bytes are not valid UTF-8" }
 
   const decodedPath = bytes.toString("utf8")
   const unsafeCharacter = CONTROL_OR_SEPARATOR_CHARACTER.exec(decodedPath)?.[0]
 
-  // The path is PR-author-controlled and is rendered raw in the annotated diff
-  // header and in markdown. A decoded newline would let a filename forge a
-  // header line there, while the escaped form breaks no line.
+  // The path is PR-author-controlled and is rendered raw in markdown and in
+  // the "=== path ===" line annotateDiff writes above each file's hunks. A
+  // decoded newline would let a filename forge such a line, while the escaped
+  // form breaks no line.
   if (unsafeCharacter) {
-    const codePoint = unsafeCharacter.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")
+    const codePointHex = unsafeCharacter.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")
     return {
       kind: "rejected",
-      reason: `decoded path contains control or separator character U+${codePoint}`,
+      reason: `decoded path contains control or separator character U+${codePointHex}`,
     }
   }
+
   return { kind: "decoded", path: decodedPath }
 }
 
@@ -91,7 +104,8 @@ export const decodeQuotedFilePaths = (files: ReadonlyArray<File>, logger: Logger
     if (decoding.kind === "unquoted") return rawPath
 
     // A guessed decoding would name a file that does not exist, and the escaped
-    // form breaks no line. The path as received is the one GitHub's diff shows.
+    // form breaks no line, so the path stays as GitHub's diff shows it. The
+    // checkout has no file at that path, so the file is reviewed from its diff alone.
     if (decoding.kind === "rejected") {
       logger.warn("quoted diff path rejected — kept as received", {
         path: rawPath,
