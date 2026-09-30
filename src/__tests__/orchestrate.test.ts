@@ -775,7 +775,10 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, logger)
 
-      expect(first(stubs.findRelatedFilesCalls).excludePaths).toEqual(["assets/logo.png"])
+      expect(first(stubs.findRelatedFilesCalls).excludePaths).toEqual([
+        "assets/logo.png",
+        "AGENTS.md",
+      ])
       expect(first(stubs.findRelatedDocsCalls).excludePaths).toEqual(["assets/logo.png"])
     })
 
@@ -1360,7 +1363,9 @@ describe("orchestrate", () => {
 
       await orchestrate(stubs.deps, createTestLogger())
 
-      expect(relatedFileCalls.map((call) => call.excludePaths)).toEqual([[priorityDoc.path]])
+      expect(relatedFileCalls.map((call) => call.excludePaths)).toEqual([
+        [priorityDoc.path, "AGENTS.md"],
+      ])
       const reviewContext = first(stubs.generateFindingsCalls)
       expect(reviewContext.relatedFiles).toEqual([])
       expect(reviewContext.relatedDocs).toEqual([priorityDoc])
@@ -1999,6 +2004,56 @@ describe("orchestrate", () => {
         [],
         ["src/greeter.ts"],
       ])
+    })
+
+    it("keeps a conventions file its own section carries whole out of the related-file scan", async () => {
+      // A JS/TS conventions file that imports a changed file is a related-file
+      // candidate. Its section already sends the whole text, so a related-file
+      // block would send it a second time.
+      const conventionsImporter: PromptFile = {
+        path: "conventions.ts",
+        content: "import { greet } from './src/greeter.js'",
+        includedAs: "full",
+        reason: "imports src/greeter.ts",
+      }
+      const relatedFileCalls: FindRelatedFilesParams[] = []
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: conventionsImporter.path },
+        contextReader: {
+          readConventions: async () => conventionsImporter.content,
+          findRelatedFiles: async (params) => {
+            relatedFileCalls.push(params)
+            return {
+              files: params.excludePaths.includes(conventionsImporter.path)
+                ? []
+                : [conventionsImporter],
+              excludedByCapPaths: [],
+            }
+          },
+        },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(relatedFileCalls.map((call) => call.excludePaths)).toEqual([
+        [conventionsImporter.path],
+      ])
+      expect(first(stubs.generateFindingsCalls).relatedFiles).toEqual([])
+    })
+
+    it("leaves a truncated conventions file eligible for the related-file scan", async () => {
+      // Over the 8k-token cap the section holds only a head, so a related-file
+      // block is the one channel that can still send the whole text.
+      const stubs = makeOrchestrateDeps({
+        config: { conventionsFile: "conventions.ts" },
+        contextReader: {
+          readConventions: async () => "c".repeat(32_001),
+        },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(stubs.findRelatedFilesCalls.map((call) => call.excludePaths)).toEqual([[]])
     })
 
     it("excludes an over-cap conventions file from priority docs when it is changed in the PR", async () => {
