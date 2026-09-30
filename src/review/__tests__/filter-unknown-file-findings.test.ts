@@ -12,10 +12,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, unknownFinding],
         knownPaths: ["src/greeter.ts"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [finding],
       droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -32,10 +34,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, exactFinding],
         knownPaths: ["deploy/railway/README.md"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [exactFinding],
       droppedAsUnknownFile: [finding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -47,8 +51,14 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding],
         knownPaths: ["src/greeter.ts"],
+        excludedPaths: [],
       }),
-    ).toEqual({ findings: [], droppedAsUnknownFile: [finding], unescapedFileRewrites: [] })
+    ).toEqual({
+      findings: [],
+      droppedAsUnknownFile: [finding],
+      droppedAsExcludedFile: [],
+      unescapedFileRewrites: [],
+    })
   })
 
   it("filters selectively in a mixed set, preserving order", () => {
@@ -60,10 +70,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [first, unknown, third],
         knownPaths: ["src/greeter.ts"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [first, third],
       droppedAsUnknownFile: [unknown],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -76,10 +88,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, unknownFinding],
         knownPaths: ["src/greeter.ts"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [finding],
       droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
     expect(finding.file).toBe("./src/greeter.ts")
@@ -93,10 +107,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, unknownFinding],
         knownPaths: ["./src/greeter.ts"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [finding],
       droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -134,10 +150,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, unknownFinding],
         knownPaths: [knownPath],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [finding],
       droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -150,10 +168,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, unknownFinding],
         knownPaths: ["src/greeter.ts"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [finding],
       droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -166,10 +186,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, unknownFinding],
         knownPaths: ["src/greeter.ts"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [finding],
       droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -182,10 +204,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, unknownFinding],
         knownPaths: ["src/greeter.ts", "src/caller.ts"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [finding],
       droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -200,10 +224,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [escapedFinding, unrelatedFinding, undecodableFinding],
         knownPaths: ["src/greeter.ts", 'docs/a"b.md'],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [resolvedFinding, unrelatedFinding],
       droppedAsUnknownFile: [undecodableFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [{ writtenFile: "docs/a&quot;b.md", finding: resolvedFinding }],
     })
     expect(escapedFinding.file).toBe("docs/a&quot;b.md")
@@ -218,10 +244,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [escapedFinding, unknownFinding],
         knownPaths: ['docs/a&amp;"b.md'],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [resolvedFinding],
       droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [{ writtenFile: "./docs/a&amp;&quot;b.md", finding: resolvedFinding }],
     })
   })
@@ -234,10 +262,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, unknownFinding],
         knownPaths: ['docs/a"b.md', "docs/a&quot;b.md"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [finding],
       droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -251,10 +281,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, escapedFinding],
         knownPaths: ['docs/a"b.md', "docs/cd.md"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [resolvedFinding],
       droppedAsUnknownFile: [finding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [{ writtenFile: "docs/a&quot;b.md", finding: resolvedFinding }],
     })
   })
@@ -303,10 +335,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, unknownFinding],
         knownPaths: [relatedDoc.path],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [resolvedFinding],
       droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [{ writtenFile, finding: resolvedFinding }],
     })
   })
@@ -319,10 +353,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, fullPathFinding],
         knownPaths: ["src/greeter.ts"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [fullPathFinding],
       droppedAsUnknownFile: [finding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -335,10 +371,12 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [finding, fullPathFinding],
         knownPaths: ["src/greeter.ts"],
+        excludedPaths: [],
       }),
     ).toEqual({
       findings: [fullPathFinding],
       droppedAsUnknownFile: [finding],
+      droppedAsExcludedFile: [],
       unescapedFileRewrites: [],
     })
   })
@@ -346,9 +384,85 @@ describe("filterUnknownFileFindings", () => {
   it("drops every finding when no paths are known", () => {
     const finding = makeFinding()
 
-    expect(filterUnknownFileFindings({ findings: [finding], knownPaths: [] })).toEqual({
+    expect(
+      filterUnknownFileFindings({ findings: [finding], knownPaths: [], excludedPaths: [] }),
+    ).toEqual({
       findings: [],
       droppedAsUnknownFile: [finding],
+      droppedAsExcludedFile: [],
+      unescapedFileRewrites: [],
+    })
+  })
+
+  it("drops a finding on an excluded path into its own bucket, apart from unknown-file drops", () => {
+    const keptFinding = makeFinding()
+    const excludedFinding = makeFinding({ file: "assets/logo.png", line: 1 })
+    const unknownFinding = makeFinding({ file: "src/imagined.ts", line: 2 })
+
+    expect(
+      filterUnknownFileFindings({
+        findings: [keptFinding, excludedFinding, unknownFinding],
+        knownPaths: ["src/greeter.ts"],
+        excludedPaths: ["assets/logo.png"],
+      }),
+    ).toEqual({
+      findings: [keptFinding],
+      droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [excludedFinding],
+      unescapedFileRewrites: [],
+    })
+  })
+
+  it("normalizes excluded paths the same way as known paths", () => {
+    const excludedFinding = makeFinding({ file: "./AGENTS.md", line: 1 })
+    const basenameFinding = makeFinding({ file: "logo.png", line: 2 })
+
+    expect(
+      filterUnknownFileFindings({
+        findings: [excludedFinding, basenameFinding],
+        knownPaths: ["src/greeter.ts"],
+        excludedPaths: ["/AGENTS.md/", "assets/logo.png"],
+      }),
+    ).toEqual({
+      findings: [],
+      droppedAsUnknownFile: [basenameFinding],
+      droppedAsExcludedFile: [excludedFinding],
+      unescapedFileRewrites: [],
+    })
+  })
+
+  it("buckets a finding as excluded when its &quot; spelling decodes to an excluded path, without rewriting it", () => {
+    const escapedFinding = makeFinding({ file: "docs/a&quot;b.md", line: 1 })
+    const unknownFinding = makeFinding({ file: "docs/a&quot;c.md", line: 2 })
+
+    expect(
+      filterUnknownFileFindings({
+        findings: [escapedFinding, unknownFinding],
+        knownPaths: ["src/greeter.ts"],
+        excludedPaths: ['docs/a"b.md'],
+      }),
+    ).toEqual({
+      findings: [],
+      droppedAsUnknownFile: [unknownFinding],
+      droppedAsExcludedFile: [escapedFinding],
+      unescapedFileRewrites: [],
+    })
+  })
+
+  it("keeps a finding on a path that is both known and excluded", () => {
+    const knownFinding = makeFinding({ file: "AGENTS.md", line: 1 })
+    const excludedFinding = makeFinding({ file: "assets/logo.png", line: 2 })
+
+    expect(
+      filterUnknownFileFindings({
+        findings: [knownFinding, excludedFinding],
+        knownPaths: ["AGENTS.md"],
+        excludedPaths: ["AGENTS.md", "assets/logo.png"],
+      }),
+    ).toEqual({
+      findings: [knownFinding],
+      droppedAsUnknownFile: [],
+      droppedAsExcludedFile: [excludedFinding],
       unescapedFileRewrites: [],
     })
   })
@@ -358,7 +472,13 @@ describe("filterUnknownFileFindings", () => {
       filterUnknownFileFindings({
         findings: [],
         knownPaths: ["src/greeter.ts"],
+        excludedPaths: [],
       }),
-    ).toEqual({ findings: [], droppedAsUnknownFile: [], unescapedFileRewrites: [] })
+    ).toEqual({
+      findings: [],
+      droppedAsUnknownFile: [],
+      droppedAsExcludedFile: [],
+      unescapedFileRewrites: [],
+    })
   })
 })

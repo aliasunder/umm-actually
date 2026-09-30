@@ -140,7 +140,7 @@ inputs:
 
 outputs:
   findings_count:
-    description: Number of new findings posted this run. Non-findings, findings on files the model never saw, duplicates, findings already posted on an earlier run, and findings below `severity_threshold` are removed before `max_findings` applies; a finding whose post failed is not counted
+    description: Number of new findings posted this run. Non-findings, findings on files the model never saw or that diff exclusion removed, duplicates, findings already posted on an earlier run, and findings below `severity_threshold` are removed before `max_findings` applies; a finding whose post failed is not counted
   review_url:
     description: URL of the submitted review; empty when no review was posted
   model_used:

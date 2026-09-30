@@ -56,7 +56,10 @@ import {
   type PromptFile,
 } from "./review/prompt.js"
 import { filterNonFindings } from "./review/filter-non-findings.js"
-import { filterUnknownFileFindings } from "./review/filter-unknown-file-findings.js"
+import {
+  filterUnknownFileFindings,
+  type UnknownFileFilterResult,
+} from "./review/filter-unknown-file-findings.js"
 import { mergePhaseFindings } from "./review/merge-phase-findings.js"
 import { renderReviewSummary } from "./review/review-summary.js"
 import {
@@ -431,13 +434,20 @@ type FilteredPhaseFindings = {
   findings: AttributedFinding[]
   droppedAsNonFinding: number
   droppedAsUnknownFile: number
+  droppedAsExcludedFile: number
 }
 
 /** Drops non-findings and findings on files the model never saw. A kept
  *  finding whose `file` matched only once `&quot;` was decoded comes back
  *  with the decoded `file`. */
 const filterPhaseFindings = (
-  { outcome, knownPaths }: { outcome: CompletedPhase; knownPaths: string[] },
+  {
+    outcome,
+    filterFindingFiles,
+  }: {
+    outcome: CompletedPhase
+    filterFindingFiles: (findings: Finding[]) => UnknownFileFilterResult
+  },
   logger: Logger,
 ): FilteredPhaseFindings => {
   const { findings: realFindings, droppedAsNonFinding } = filterNonFindings(
@@ -446,17 +456,27 @@ const filterPhaseFindings = (
   const {
     findings,
     droppedAsUnknownFile: unknownFileFindings,
+    droppedAsExcludedFile: excludedFileFindings,
     unescapedFileRewrites,
-  } = filterUnknownFileFindings({
-    findings: realFindings,
-    knownPaths,
-  })
+  } = filterFindingFiles(realFindings)
 
   // Each drop warns on its own because it is a model-quality event, not loop
   // chatter. The title is left out because the model wrote it about a file it
   // was never given, so it is unverified text.
   for (const finding of unknownFileFindings) {
     logger.warn("dropping finding: file not in prompt context", {
+      phase: outcome.phase.id,
+      file: finding.file,
+      line: finding.line,
+      category: finding.category,
+    })
+  }
+
+  // An excluded file's path is in the excluded-files note, and an excluded
+  // conventions file's content is in the prompt. A separate message points
+  // the operator at the exclusion rule, not at context assembly.
+  for (const finding of excludedFileFindings) {
+    logger.warn("dropping finding: file excluded from the review diff", {
       phase: outcome.phase.id,
       file: finding.file,
       line: finding.line,
@@ -483,6 +503,7 @@ const filterPhaseFindings = (
     })),
     droppedAsNonFinding,
     droppedAsUnknownFile: unknownFileFindings.length,
+    droppedAsExcludedFile: excludedFileFindings.length,
   }
 }
 
@@ -1015,12 +1036,20 @@ const runReviewPipeline = async (
   // Each phase drops non-findings and findings on files the model never saw,
   // then cross-phase duplicates collapse. All of it runs before selection so
   // cap slots aren't wasted
+  const filterFindingFiles = (findings: Finding[]): UnknownFileFilterResult => {
+    return filterUnknownFileFindings({
+      findings,
+      knownPaths: promptFilePaths,
+      excludedPaths: diffExcludedPaths,
+    })
+  }
   const filteredPhases = completedPhases.map((outcome) => {
-    return filterPhaseFindings({ outcome, knownPaths: promptFilePaths }, logger)
+    return filterPhaseFindings({ outcome, filterFindingFiles }, logger)
   })
   const totalFromModel = sumBy(completedPhases, (outcome) => outcome.result.review.findings.length)
   const droppedAsNonFinding = sumBy(filteredPhases, (filtered) => filtered.droppedAsNonFinding)
   const droppedAsUnknownFile = sumBy(filteredPhases, (filtered) => filtered.droppedAsUnknownFile)
+  const droppedAsExcludedFile = sumBy(filteredPhases, (filtered) => filtered.droppedAsExcludedFile)
   const { findings: realFindings, duplicatesAcrossPhases } = mergePhaseFindings(
     filteredPhases.map((filtered) => filtered.findings),
   )
@@ -1029,6 +1058,7 @@ const runReviewPipeline = async (
     kept: realFindings.length,
     droppedAsNonFinding,
     droppedAsUnknownFile,
+    droppedAsExcludedFile,
     duplicatesAcrossPhases,
   })
 
@@ -1194,6 +1224,7 @@ const runReviewPipeline = async (
     totalFromModel,
     droppedAsNonFinding,
     droppedAsUnknownFile,
+    droppedAsExcludedFile,
     duplicatesAcrossPhases,
     duplicatesRemoved: realFindings.length - newFindings.length,
     droppedBelowThreshold,

@@ -137,6 +137,7 @@ const expectedReviewSummary = (overrides: Partial<ReviewSummaryStats> = {}): str
     totalFromModel: fixtureReviewResponse.findings.length,
     droppedAsNonFinding: 0,
     droppedAsUnknownFile: 0,
+    droppedAsExcludedFile: 0,
     duplicatesAcrossPhases: 0,
     duplicatesRemoved: 0,
     droppedBelowThreshold: 0,
@@ -802,7 +803,7 @@ describe("orchestrate", () => {
       expect(stubs.generateFindingsCalls).toHaveLength(1)
     })
 
-    it("drops a finding naming an excluded file via the unknown-file filter", async () => {
+    it("drops a finding naming an excluded file and reports it as an excluded-file drop", async () => {
       const excludedFileFinding = makeFinding({
         file: "assets/logo.png",
         line: 1,
@@ -824,10 +825,12 @@ describe("orchestrate", () => {
 
       expect(result.findingsCount).toBe(0)
       expect(stubs.postFindingsReviewCalls).toHaveLength(0)
-      expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([
+      expect(
+        logsWithMessage(logger, "dropping finding: file excluded from the review diff"),
+      ).toEqual([
         {
           level: "warn",
-          message: "dropping finding: file not in prompt context",
+          message: "dropping finding: file excluded from the review diff",
           data: {
             phase: "combined",
             file: "assets/logo.png",
@@ -836,6 +839,24 @@ describe("orchestrate", () => {
           },
         },
       ])
+      expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([])
+      expect(logsWithMessage(logger, "per-phase finding filters applied to model output")).toEqual([
+        {
+          level: "info",
+          message: "per-phase finding filters applied to model output",
+          data: {
+            totalFromModel: 1,
+            kept: 0,
+            droppedAsNonFinding: 0,
+            droppedAsUnknownFile: 0,
+            droppedAsExcludedFile: 1,
+            duplicatesAcrossPhases: 0,
+          },
+        },
+      ])
+      expect(result.reviewSummaryMarkdown).toContain(
+        "| Dropped as unknown file | 0 |\n| Dropped as excluded file | 1 |",
+      )
     })
 
     describe("findings on a changed conventions file", () => {
@@ -890,10 +911,12 @@ describe("orchestrate", () => {
         expect(result.findingsCount).toBe(0)
         expect(stubs.postFindingsReviewCalls).toEqual([])
         expect(stubs.postIssueCommentCalls).toEqual([])
-        expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([
+        expect(
+          logsWithMessage(logger, "dropping finding: file excluded from the review diff"),
+        ).toEqual([
           {
             level: "warn",
-            message: "dropping finding: file not in prompt context",
+            message: "dropping finding: file excluded from the review diff",
             data: {
               phase: "combined",
               file: "AGENTS.md",
@@ -902,6 +925,7 @@ describe("orchestrate", () => {
             },
           },
         ])
+        expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([])
         // The nonce is random per call; the backreference pins both tags to the same one
         expect(userPrompts).toEqual([
           expect.stringMatching(
@@ -922,10 +946,12 @@ describe("orchestrate", () => {
         expect(result.findingsCount).toBe(0)
         expect(stubs.postFindingsReviewCalls).toEqual([])
         expect(stubs.postIssueCommentCalls).toEqual([])
-        expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([
+        expect(
+          logsWithMessage(logger, "dropping finding: file excluded from the review diff"),
+        ).toEqual([
           {
             level: "warn",
-            message: "dropping finding: file not in prompt context",
+            message: "dropping finding: file excluded from the review diff",
             data: {
               phase: "combined",
               file: "AGENTS.md",
@@ -934,6 +960,7 @@ describe("orchestrate", () => {
             },
           },
         ])
+        expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([])
       })
 
       it("keeps a finding on a conventions file that stays in the review diff", async () => {
@@ -2837,6 +2864,7 @@ describe("orchestrate", () => {
             kept: 1,
             droppedAsNonFinding: 0,
             droppedAsUnknownFile: 1,
+            droppedAsExcludedFile: 0,
             duplicatesAcrossPhases: 0,
           },
         },
@@ -3085,6 +3113,7 @@ describe("orchestrate", () => {
             kept: 1,
             droppedAsNonFinding: 1,
             droppedAsUnknownFile: 0,
+            droppedAsExcludedFile: 0,
             duplicatesAcrossPhases: 0,
           },
         },
@@ -3209,6 +3238,7 @@ describe("orchestrate", () => {
             kept: 1,
             droppedAsNonFinding: 0,
             droppedAsUnknownFile: 1,
+            droppedAsExcludedFile: 0,
             duplicatesAcrossPhases: 0,
           },
         },
