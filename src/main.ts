@@ -18,8 +18,8 @@ process.on("unhandledRejection", (error) => {
   })
 })
 
-// Cleanups to run when the job is cancelled, registered while a check run
-// is open — typically one entry, the open check run's completion call.
+// Cleanups to run when the job is cancelled. It holds at most one entry, the
+// open check run's completion call, registered only while that run is open.
 // Mutable on purpose — signal handlers can only reach shared state
 const cancellationCleanups = new Set<() => Promise<void>>()
 
@@ -35,14 +35,19 @@ let cancellationExitStarted = false
 const exitOnCancellationSignal = (signalName: NodeJS.Signals): void => {
   if (cancellationExitStarted) return
   cancellationExitStarted = true
-  // Observed, not awaited — a signal handler cannot await. The only registered
-  // cleanup is completeCheckRunSafely, which catches its own errors
+  // Observed, not awaited — a signal handler cannot await. The one cleanup that
+  // can be registered is completeCheckRunSafely, which catches its own errors
   void (async () => {
-    logger.warn("cancellation signal received — closing the check run", {
-      signal: signalName,
-    })
     const pendingCleanups = [...cancellationCleanups]
     cancellationCleanups.clear()
+
+    // A signal can arrive before the check run exists, so the line states
+    // whether there is one to close
+    logger.warn("cancellation signal received — closing any open check run before exit", {
+      signal: signalName,
+      checkRunOpen: pendingCleanups.length > 0,
+    })
+
     for (const pendingCleanup of pendingCleanups) {
       await pendingCleanup()
     }
@@ -59,8 +64,9 @@ process.on("SIGTERM", exitOnCancellationSignal)
  *   1.2 core-schema values (true|True|TRUE / false|False|FALSE) and throws on
  *   anything else, an empty value included. So for an empty boolean input,
  *   collectRawInputs skips getBooleanInput and passes undefined.
- * - The runner fills in the action.yml default for an omitted input;
- *   parseConfig applies it for an explicitly empty one.
+ * - The runner fills in the action.yml default for an omitted input. For an
+ *   explicitly empty one, parseConfig applies the same default, except for
+ *   priority_docs, where empty disables priority docs.
  */
 const collectRawInputs = (): RawInputs => ({
   githubToken: core.getInput("github_token", { required: true }),

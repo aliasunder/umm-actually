@@ -61,6 +61,8 @@ export type OpenRouterLike = {
       },
     ): Promise<unknown>
   }
+  /** The real SDK always has this. It is optional so a test stub can leave it
+   *  out, and the cost lookup then returns null. */
   generations?: {
     getGeneration(
       request: { id: string },
@@ -354,29 +356,28 @@ type SingleAttempt =
  *  attempt, failed ones included. */
 export class ReviewRequestError extends Error {
   readonly attempts: ModelAttempt[]
-  /** An auth or credit error (401/402/403) stopped the ladder. The key fails
-   *  for every model, so callers skip the remaining work. Unrelated to the
-   *  AbortSignal that cancels a single HTTP call. */
-  readonly aborted: boolean
-  /** The review deadline ran out. That deadline is the whole run's time
-   *  budget, which `remainingReviewMs` counts down. */
+  /** An auth or credit status (401/402/403) stopped the ladder. The key fails
+   *  for every model, so the stage runner skips the stages after this one. */
+  readonly keyRejected: boolean
+  /** The whole review's time budget ran out, as reported by the
+   *  `remainingReviewMs` that createOpenRouterClient takes. */
   readonly deadlineExceeded: boolean
 
   constructor({
     message,
     attempts,
-    aborted,
+    keyRejected,
     deadlineExceeded = false,
   }: {
     message: string
     attempts: ModelAttempt[]
-    aborted: boolean
+    keyRejected: boolean
     deadlineExceeded?: boolean
   }) {
     super(message)
     this.name = "ReviewRequestError"
     this.attempts = attempts
-    this.aborted = aborted
+    this.keyRejected = keyRejected
     this.deadlineExceeded = deadlineExceeded
   }
 }
@@ -412,9 +413,10 @@ export const createOpenRouterClient = ({
 }): OpenRouterClient => {
   const requestTimeoutSummary = `no response within ${Math.round(requestTimeoutMs / 1000)}s`
 
-  /** How long the next bounded call may run, and the summary a timeout gets.
-   *  The review deadline takes the blame when it is the nearer of the two. */
-  const getCallDeadline = (remainingMs: number): { timeoutMs: number; timeoutSummary: string } => {
+  /** How long the next bounded call may run, and the error summary if it
+   *  times out. When remainingMs is at or below requestTimeoutMs, the review
+   *  deadline ends the call first, so the summary blames it. */
+  const getCallTimeout = (remainingMs: number): { timeoutMs: number; timeoutSummary: string } => {
     const reviewDeadlineIsBinding = remainingMs <= requestTimeoutMs
 
     return {
@@ -430,14 +432,17 @@ export const createOpenRouterClient = ({
     logger: Logger,
   ): Promise<SingleAttempt> => {
     const { model } = chatRequest
-    const callDeadline = getCallDeadline(remainingReviewMs())
+
+    // No remaining-time guard here. requestReview calls ensureReviewTimeRemaining
+    // before every attempt, so some review time is always left
+    const callTimeout = getCallTimeout(remainingReviewMs())
 
     const sendResult = await withDeadline(
       {
         start: (signal) => {
           return sdk.chat.send({ chatRequest }, { retries: { strategy: "none" }, signal })
         },
-        timeoutMs: callDeadline.timeoutMs,
+        timeoutMs: callTimeout.timeoutMs,
       },
       logger.child({ operation: "chat request", model }),
     )
@@ -453,7 +458,7 @@ export const createOpenRouterClient = ({
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
-          errorSummary: callDeadline.timeoutSummary,
+          errorSummary: callTimeout.timeoutSummary,
         },
         retryable: true,
         keyRejected: false,
@@ -582,7 +587,7 @@ export const createOpenRouterClient = ({
       return null
     }
 
-    const callDeadline = getCallDeadline(remainingMs)
+    const callTimeout = getCallTimeout(remainingMs)
 
     const lookup = await withDeadline(
       {
@@ -592,13 +597,13 @@ export const createOpenRouterClient = ({
             { retries: { strategy: "none" }, signal },
           )
         },
-        timeoutMs: callDeadline.timeoutMs,
+        timeoutMs: callTimeout.timeoutMs,
       },
       lookupLogger,
     )
 
     if (lookup.status === "timed_out") {
-      lookupLogger.warn("generation cost lookup failed", { error: callDeadline.timeoutSummary })
+      lookupLogger.warn("generation cost lookup failed", { error: callTimeout.timeoutSummary })
       return null
     }
     if (lookup.status === "rejected") {
@@ -630,7 +635,7 @@ export const createOpenRouterClient = ({
       throw new ReviewRequestError({
         message: "review deadline exceeded",
         attempts,
-        aborted: false,
+        keyRejected: false,
         deadlineExceeded: true,
       })
     }
@@ -660,7 +665,7 @@ export const createOpenRouterClient = ({
             model: ladderModel,
             routedModel: attemptResult.routedModel,
             generationId: attemptResult.generationId,
-            attemptCount: attempts.length,
+            totalAttemptCount: attempts.length,
           })
           return {
             review: attemptResult.review,
@@ -681,7 +686,7 @@ export const createOpenRouterClient = ({
           throw new ReviewRequestError({
             message: `OpenRouter auth/credit error — aborting without fallback: ${summarizeAttempts(attempts)}`,
             attempts,
-            aborted: true,
+            keyRejected: true,
           })
         }
 
@@ -734,7 +739,7 @@ export const createOpenRouterClient = ({
     throw new ReviewRequestError({
       message: `review request failed after ${attempts.length} attempt(s): ${summarizeAttempts(attempts)}`,
       attempts,
-      aborted: false,
+      keyRejected: false,
     })
   }
 

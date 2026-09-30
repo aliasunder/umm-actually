@@ -176,12 +176,12 @@ describe("requestReview", () => {
     expect({
       message: error.message,
       attempts: error.attempts,
-      aborted: error.aborted,
+      keyRejected: error.keyRejected,
       deadlineExceeded: error.deadlineExceeded,
     }).toEqual({
       message: "review deadline exceeded",
       attempts: [],
-      aborted: false,
+      keyRejected: false,
       deadlineExceeded: true,
     })
     expect(stub.sendCalls).toEqual([])
@@ -237,12 +237,12 @@ describe("requestReview", () => {
         expect({
           message: error.message,
           attempts: error.attempts,
-          aborted: error.aborted,
+          keyRejected: error.keyRejected,
           deadlineExceeded: error.deadlineExceeded,
         }).toEqual({
           message: "review deadline exceeded",
           attempts: expectedAttempts,
-          aborted: false,
+          keyRejected: false,
           deadlineExceeded: true,
         })
         expect(
@@ -1528,7 +1528,7 @@ describe("requestReview", () => {
     if (!(failure instanceof ReviewRequestError)) {
       throw new Error("expected a ReviewRequestError")
     }
-    expect(failure.aborted).toBe(false)
+    expect(failure.keyRejected).toBe(false)
     expect(failure.attempts).toEqual([
       {
         model: "openai/gpt-5-mini",
@@ -1549,7 +1549,7 @@ describe("requestReview", () => {
     ])
   })
 
-  it("marks the error as aborted on an auth/credit failure", async () => {
+  it("marks the error as key-rejected on an auth/credit failure", async () => {
     const stub = makeSdkStub({
       sendResponses: [{ error: makeStatusError(402) }],
     })
@@ -1560,7 +1560,7 @@ describe("requestReview", () => {
     if (!(failure instanceof ReviewRequestError)) {
       throw new Error("expected a ReviewRequestError")
     }
-    expect(failure.aborted).toBe(true)
+    expect(failure.keyRejected).toBe(true)
     expect(failure.attempts).toEqual([
       {
         model: "openai/gpt-5-mini",

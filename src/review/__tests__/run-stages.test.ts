@@ -237,7 +237,7 @@ describe("runStages", () => {
 
   it("skips later stages after an auth/credit abort and reports their phases as not attempted", async () => {
     const resultA = makeResult()
-    const abort = Object.assign(new Error("HTTP 401"), { aborted: true })
+    const abort = Object.assign(new Error("HTTP 401"), { keyRejected: true })
     const { runPhase, calls } = makeRunPhase({
       a: () => resultA,
       b: () => Promise.reject(abort),
@@ -321,7 +321,7 @@ describe("runStages", () => {
         data: {
           phase: "a",
           modelUsed: "model/a",
-          attemptCount: 1,
+          totalAttemptCount: 1,
           findingsCount: 1,
         },
       },

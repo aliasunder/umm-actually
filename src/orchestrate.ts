@@ -177,8 +177,8 @@ type IssueCommentState = {
 
 /** The bot's issue comments carry the rest of the cross-run state: the
  *  status comment's presence (the first-run signal) and dedup anchors from
- *  beyond-diff finding comments (anchor-line positions — issue comments
- *  aren't line-tracked). Fails open to a first run. */
+ *  finding issue comments (anchor-line positions — issue comments aren't
+ *  line-tracked). Fails open to a first run. */
 const fetchIssueCommentState = async (
   { githubClient, prNumber }: { githubClient: GithubClient; prNumber: number },
   logger: Logger,
@@ -599,12 +599,14 @@ const runReviewPipeline = async (
     ? `${annotateDiff(reviewableFiles)}\n\n${excludedFilesNote}`
     : annotateDiff(reviewableFiles)
   const diffTokens = estimateTokens(annotatedDiff)
-  // The diff gets half the budget; the other half is for context files.
-  const budgetHalf = Math.floor(config.contextBudgetTokens / 2)
 
-  if (diffTokens > budgetHalf) {
+  // The diff may use at most half the context budget. Context files get
+  // whatever the diff leaves (fileBudgetTokens below)
+  const diffTokenLimit = Math.floor(config.contextBudgetTokens / 2)
+
+  if (diffTokens > diffTokenLimit) {
     return postSkipReview({
-      reason: `diff too large for context budget (${diffTokens} tokens, limit ${budgetHalf} of ${config.contextBudgetTokens})`,
+      reason: `diff too large for context budget (${diffTokens} tokens, limit ${diffTokenLimit} of ${config.contextBudgetTokens})`,
     })
   }
 
@@ -623,19 +625,20 @@ const runReviewPipeline = async (
 
   // A rename contributes its old path too, so the import scanner finds
   // callers that still reference the pre-rename path
-  const changedPaths = reviewableFiles
-    .flatMap((file) => {
-      const toPath = newFilePath(file)
-      const fromPath = file.from
+  const changedPaths = reviewableFiles.flatMap((file) => {
+    const toPath = newFilePath(file)
+    const fromPath = file.from
 
-      // parse-diff: from can be undefined for a binary file and is "/dev/null"
-      // for an added file (binary or not) — neither is a pre-rename path worth tracing
-      if (toPath === null || !fromPath || fromPath === "/dev/null" || fromPath === file.to) {
-        return [toPath]
-      }
-      return [toPath, fromPath]
-    })
-    .filter((path) => path !== null)
+    // A deleted file has no new path. Its old path joins the prompt's file
+    // paths through deletedPaths below
+    if (toPath === null) return []
+
+    // parse-diff: from can be undefined for a binary file and is "/dev/null"
+    // for an added file (binary or not) — neither is a pre-rename path worth tracing
+    if (!fromPath || fromPath === "/dev/null" || fromPath === toPath) return [toPath]
+
+    return [toPath, fromPath]
+  })
 
   const conventions = await contextReader.readConventions({
     conventionsFile: config.conventionsFile,
@@ -988,10 +991,10 @@ const runReviewPipeline = async (
     duplicatesAcrossPhases,
   })
 
-  // Cross-run dedup runs on every run, and a first run is the case where no bot
-  // comments exist yet. It compares against the bot's inline comments (live
-  // positions) and its beyond-diff issue comments (anchor lines), before the
-  // cap so duplicates don't consume slots.
+  // Cross-run dedup drops findings the bot already posted. A first run needs no
+  // special case because it simply finds no anchors. The anchors come from the
+  // bot's inline comments (live positions) and its finding issue comments
+  // (anchor lines). Dedup runs before the cap so duplicates don't consume slots.
   const existingAnchors = [...inlineState.anchors, ...issueState.anchors]
   const newFindings: AttributedFinding[] = []
   const dedupCounts = { positional: 0, content: 0, title: 0 }
@@ -1045,7 +1048,6 @@ const runReviewPipeline = async (
   // - The rest post as individual issue comments, so every new finding is a
   //   visible event.
   // Unposted findings carry no anchor and re-report next run.
-  const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
   const { comments, standaloneFindings: unanchoredFindings } = mapFindingsToReview({
     findings: selected,
     commentableByPath,
@@ -1066,33 +1068,36 @@ const runReviewPipeline = async (
     logger,
   )
 
-  const standaloneFindings = [...unanchoredFindings, ...inlineOutcome.rerouted]
-  // Sequential posting with per-comment fallback is inherently stateful —
-  // each failure drops only its own finding from the posted tally.
-  let postedStandalone = 0
-  for (const finding of standaloneFindings) {
+  // Beyond-diff findings, plus in-diff findings whose anchors GitHub rejected
+  const issueCommentFindings = [...unanchoredFindings, ...inlineOutcome.rerouted]
+
+  // Each finding posts as its own issue comment. A failed post is logged and
+  // skipped without stopping the loop, and the let counts only the posts that landed
+  let postedAsIssueComments = 0
+  for (const finding of issueCommentFindings) {
     try {
       await githubClient.postIssueComment({
         prNumber: prContext.prNumber,
         body: renderStandaloneFinding(finding),
       })
-      postedStandalone += 1
+      postedAsIssueComments += 1
     } catch (postError) {
-      logger.warn("failed to post beyond-diff finding — it will re-report next run", {
+      logger.warn("failed to post finding as an issue comment — it will re-report next run", {
         error: describeError(postError),
         file: finding.file,
         line: finding.line,
       })
     }
   }
-  if (postedStandalone > 0) {
-    logger.info("beyond-diff findings posted", { count: postedStandalone })
+
+  if (postedAsIssueComments > 0) {
+    logger.info("findings posted as issue comments", { count: postedAsIssueComments })
   }
 
   // The status comment is the always-updated run receipt. Counts report
   // what actually landed; unposted findings self-heal next run and the
   // comment says so rather than claiming they were posted.
-  const postedCount = inlineOutcome.postedCount + postedStandalone
+  const postedCount = inlineOutcome.postedCount + postedAsIssueComments
   const statusBody = buildStatusComment({
     sha: prContext.headSha,
     isFirstRun: !issueState.statusCommentExists,
@@ -1149,6 +1154,8 @@ const runReviewPipeline = async (
     droppedByCap: droppedByCap.length,
     posted: postedCount,
   })
+
+  const costSummaryMarkdown = renderCostSummary({ attempts, modelUsed })
 
   return {
     findingsCount: postedCount,

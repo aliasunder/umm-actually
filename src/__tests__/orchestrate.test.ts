@@ -2684,11 +2684,14 @@ describe("orchestrate", () => {
         }),
       ])
       expect(
-        logsWithMessage(logger, "failed to post beyond-diff finding — it will re-report next run"),
+        logsWithMessage(
+          logger,
+          "failed to post finding as an issue comment — it will re-report next run",
+        ),
       ).toEqual([
         {
           level: "warn",
-          message: "failed to post beyond-diff finding — it will re-report next run",
+          message: "failed to post finding as an issue comment — it will re-report next run",
           data: {
             error: "[Error]: boom",
             file: "src/untouched.ts",
@@ -4160,7 +4163,7 @@ describe("staged phases", () => {
     const acceptedByPhase = logsWithMessage(generateLogger, "review response accepted").toSorted(
       (left, right) => String(left.data.phase).localeCompare(String(right.data.phase)),
     )
-    const acceptedEntry = (phase: string, attemptCount: number) => ({
+    const acceptedEntry = (phase: string, totalAttemptCount: number) => ({
       level: "info",
       message: "review response accepted",
       data: {
@@ -4168,7 +4171,7 @@ describe("staged phases", () => {
         model: "test/model",
         routedModel: "test/model",
         generationId: "completed",
-        attemptCount,
+        totalAttemptCount,
       },
     })
 
@@ -4215,7 +4218,7 @@ describe("staged phases", () => {
           throw new ReviewRequestError({
             message: "review request failed after 1 attempt(s)",
             attempts: [timeoutAttempt],
-            aborted: false,
+            keyRejected: false,
           })
         }
         return {
@@ -4361,7 +4364,7 @@ describe("staged phases", () => {
         throw new ReviewRequestError({
           message: "OpenRouter auth/credit error — aborting without fallback",
           attempts: [billedAttempt],
-          aborted: true,
+          keyRejected: true,
         })
       },
     })
@@ -4402,7 +4405,7 @@ describe("staged phases", () => {
         throw new ReviewRequestError({
           message: "review request failed after 1 attempt(s)",
           attempts: [timeoutAttempt],
-          aborted: false,
+          keyRejected: false,
         })
       },
     })
@@ -4444,7 +4447,7 @@ describe("staged phases", () => {
         throw new ReviewRequestError({
           message: "review request failed after 3 attempt(s)",
           attempts,
-          aborted: false,
+          keyRejected: false,
         })
       },
     })

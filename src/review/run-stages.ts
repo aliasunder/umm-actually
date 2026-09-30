@@ -52,10 +52,15 @@ export class AllPhasesFailedError extends Error {
 // instanceof: review/ is a pure layer and may import openrouter/ only as types,
 // so the class itself is not available here at runtime.
 
-/** The client marks an auth/credit failure as aborted. The key is bad for
+/** The client marks an auth/credit failure as keyRejected. The key is bad for
  *  every model, so no later stage can succeed either. */
-const isAbortedRequest = (error: unknown): boolean => {
-  return typeof error === "object" && error !== null && "aborted" in error && error.aborted === true
+const isKeyRejected = (error: unknown): boolean => {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "keyRejected" in error &&
+    error.keyRejected === true
+  )
 }
 
 const isDeadlineExceeded = (error: unknown): boolean => {
@@ -88,7 +93,7 @@ const runStage = async (
         logger.info("review phase completed", {
           phase: phase.id,
           modelUsed: result.modelUsed,
-          attemptCount: result.attempts.length,
+          totalAttemptCount: result.attempts.length,
           findingsCount: result.review.findings.length,
         })
         logger.debug("review phase analysis", {
@@ -184,12 +189,12 @@ export const runStages = async (
     )
     outcomes = [...outcomes, ...stageOutcomes]
 
-    const aborted = stageOutcomes.some(
-      (outcome) => outcome.status === "failed" && isAbortedRequest(outcome.error),
+    const keyRejected = stageOutcomes.some(
+      (outcome) => outcome.status === "failed" && isKeyRejected(outcome.error),
     )
     const remainingStages = stages.slice(stageIndex + 1)
 
-    if (aborted && remainingStages.length > 0) {
+    if (keyRejected && remainingStages.length > 0) {
       const skippedPhases = remainingStages.flat()
       logger.warn("skipping remaining review stages after an auth/credit abort", {
         skippedPhases: skippedPhases.map((phase) => phase.id),
