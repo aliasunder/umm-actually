@@ -1076,7 +1076,7 @@ index 1111111..2222222 100644
     })
 
     it("posts a finding on a rejected quoted path as a standalone comment and keeps the rest inline", async () => {
-      const escapedPath = String.raw`a\tb.ts`
+      const escapedPath = String.raw`a\rb.ts`
       const mixedPathDiff = String.raw`diff --git a/src/app.ts b/src/app.ts
 index 1111111..2222222 100644
 --- a/src/app.ts
@@ -1084,16 +1084,20 @@ index 1111111..2222222 100644
 @@ -1 +1 @@
 -old app line
 +new app line
-diff --git "a/a\tb.ts" "b/a\tb.ts"
+diff --git "a/a\rb.ts" "b/a\rb.ts"
 index 3333333..4444444 100644
---- "a/a\tb.ts"
-+++ "b/a\tb.ts"
+--- "a/a\rb.ts"
++++ "b/a\rb.ts"
 @@ -1 +1 @@
--old tab line
-+new tab line
+-old carriage-return line
++new carriage-return line
 `
       const normalFinding = makeFinding({ file: "src/app.ts", line: 1, title: "App line bug" })
-      const rejectedPathFinding = makeFinding({ file: escapedPath, line: 1, title: "Tab bug" })
+      const rejectedPathFinding = makeFinding({
+        file: escapedPath,
+        line: 1,
+        title: "Carriage-return bug",
+      })
       const stubs = makeOrchestrateDeps({
         githubClient: {
           fetchDiff: async () => ({ kind: "ok" as const, diff: mixedPathDiff }),

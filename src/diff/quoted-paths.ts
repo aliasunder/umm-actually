@@ -34,8 +34,9 @@ const CHARACTER_ESCAPE_BYTES = new Map([
   ["\\\\", 0x5c],
 ])
 
-/** A control character (C0, DEL, C1) or a Unicode line or paragraph separator. */
-const CONTROL_OR_SEPARATOR_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u
+/** A character that ends a line: LF, VT, FF, CR, NEL (U+0085), or a Unicode
+ *  line or paragraph separator (U+2028, U+2029). */
+const LINE_BREAK_CHARACTER = /[\n\v\f\r\u0085\u2028\u2029]/u
 
 /** The bytes one token stands for, or null for an escape git never writes. */
 const getTokenBytes = (match: RegExpExecArray): Buffer | null => {
@@ -58,15 +59,34 @@ const getTokenBytes = (match: RegExpExecArray): Buffer | null => {
   return Buffer.of(escapeByte)
 }
 
+/**
+ * A rejection naming the path's first line break, or null when it has none.
+ * - The path is PR-author-controlled. It is rendered raw in markdown and in the
+ *   "=== path ===" line annotateDiff writes above each file's hunks. A line
+ *   break would let a filename forge such a line or split a markdown row.
+ * - Other control characters, such as tab, NUL, ESC, and DEL, break no line,
+ *   so they decode. The logger's JSON escapes every C0 character, and DEL
+ *   prints as an invisible byte. Markdown and the prompt keep each one inside
+ *   its line. A workspace read the filesystem refuses falls back to the diff.
+ */
+const getLineBreakRejection = (path: string): QuotedPathDecoding | null => {
+  const lineBreak = LINE_BREAK_CHARACTER.exec(path)?.[0]
+
+  if (!lineBreak) return null
+
+  const codePointHex = lineBreak.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")
+  return { kind: "rejected", reason: `path contains line-break character U+${codePointHex}` }
+}
+
 /** Decodes a path parse-diff returned with git's quotes removed but its
  *  escapes kept. Escaped bytes decode as UTF-8. */
 export const decodeQuotedPath = (path: string): QuotedPathDecoding => {
   // Git quotes any path containing a backslash, whatever core.quotePath says,
   // and every character it quotes becomes an escape that starts with one. So
   // a backslash is present exactly when the path was quoted. GitHub's diff
-  // also quotes every control and non-ASCII character, so an unquoted path
-  // holds none of the characters the check below rejects.
-  if (!path.includes("\\")) return { kind: "unquoted" }
+  // quotes every line break too, but the check still runs on an unquoted path
+  // so the guard does not depend on that quoting.
+  if (!path.includes("\\")) return getLineBreakRejection(path) ?? { kind: "unquoted" }
 
   const byteChunks = Array.from(path.matchAll(QUOTED_PATH_TOKEN), getTokenBytes)
 
@@ -79,27 +99,17 @@ export const decodeQuotedPath = (path: string): QuotedPathDecoding => {
   if (!isUtf8(bytes)) return { kind: "rejected", reason: "escaped bytes are not valid UTF-8" }
 
   const decodedPath = bytes.toString("utf8")
-  const unsafeCharacter = CONTROL_OR_SEPARATOR_CHARACTER.exec(decodedPath)?.[0]
 
-  // The path is PR-author-controlled and is rendered raw in markdown and in
-  // the "=== path ===" line annotateDiff writes above each file's hunks. A
-  // decoded newline would let a filename forge such a line, while the escaped
-  // form breaks no line.
-  if (unsafeCharacter) {
-    const codePointHex = unsafeCharacter.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")
-    return {
-      kind: "rejected",
-      reason: `decoded path contains control or separator character U+${codePointHex}`,
-    }
-  }
-
-  return { kind: "decoded", path: decodedPath }
+  // The escaped form of a line break breaks no line, so a rejected path stays
+  // escaped
+  return getLineBreakRejection(decodedPath) ?? { kind: "decoded", path: decodedPath }
 }
 
 export type DecodedDiffFiles = {
   files: File[]
-  /** Paths whose decoding was rejected. Each stays in its escaped spelling and
-   *  names no file in the checkout or on GitHub. */
+  /** Paths whose decoding was rejected. Each stays as the diff spelled it. A
+   *  quoted one keeps its escapes and names no file in the checkout or on
+   *  GitHub. */
   rejectedPaths: ReadonlySet<string>
 }
 
@@ -119,9 +129,9 @@ export const decodeQuotedFilePaths = (
 
     // A guessed decoding would name a file that does not exist, and the escaped
     // form breaks no line, so the path stays as GitHub's diff shows it. The
-    // checkout has no file at that path, so the file is reviewed from its diff
-    // alone. GitHub rejects a whole review when one inline comment names that
-    // path, so the caller keeps the file out of inline comments.
+    // checkout has no file at an escaped path, so the file is reviewed from its
+    // diff alone. GitHub rejects a whole review when one inline comment names
+    // such a path, so the caller keeps the file out of inline comments.
     if (decoding.kind === "rejected") {
       logger.warn("quoted diff path rejected — kept as received", {
         path: rawPath,

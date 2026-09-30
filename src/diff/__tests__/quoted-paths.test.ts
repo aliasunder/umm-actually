@@ -66,6 +66,17 @@ describe("decodeQuotedPath", () => {
   })
 
   it.each([
+    { label: "a tab escape", path: String.raw`notes\told.md`, expected: "notes\told.md" },
+    { label: "a bell escape", path: String.raw`bel\ax.md`, expected: "bel\x07x.md" },
+    { label: "a backspace escape", path: String.raw`bs\bx.md`, expected: "bs\x08x.md" },
+    { label: "an octal NUL escape", path: String.raw`nul\000x.md`, expected: "nul\x00x.md" },
+    { label: "an octal ESC escape", path: String.raw`esc\033x.md`, expected: "esc\x1bx.md" },
+    { label: "an octal DEL escape", path: String.raw`del\177x.md`, expected: "del\x7fx.md" },
+  ])("decodes $label, a control character that breaks no line", ({ path, expected }) => {
+    expect(decodeQuotedPath(path)).toEqual({ kind: "decoded", path: expected })
+  })
+
+  it.each([
     { label: "a plain path", path: "src/app.ts" },
     { label: "a path with spaces", path: "docs/plain space.md" },
     { label: "the /dev/null placeholder", path: "/dev/null" },
@@ -101,14 +112,8 @@ describe("decodeQuotedPath", () => {
   it.each([
     { label: "a newline escape", path: String.raw`nl\n=== forged.ts ===.md`, codePoint: "000A" },
     { label: "a carriage-return escape", path: String.raw`cr\rx.md`, codePoint: "000D" },
-    { label: "a tab escape", path: String.raw`tab\there.md`, codePoint: "0009" },
-    { label: "a bell escape", path: String.raw`bel\ax.md`, codePoint: "0007" },
-    { label: "a backspace escape", path: String.raw`bs\bx.md`, codePoint: "0008" },
     { label: "a vertical-tab escape", path: String.raw`vt\vx.md`, codePoint: "000B" },
     { label: "a form-feed escape", path: String.raw`ff\fx.md`, codePoint: "000C" },
-    { label: "an octal NUL escape", path: String.raw`nul\000x.md`, codePoint: "0000" },
-    { label: "an octal C0 escape", path: String.raw`soh\001x.md`, codePoint: "0001" },
-    { label: "an octal DEL escape", path: String.raw`del\177x.md`, codePoint: "007F" },
     { label: "an escaped NEL (U+0085)", path: String.raw`nel\302\205x.md`, codePoint: "0085" },
     {
       label: "an escaped line separator (U+2028)",
@@ -120,15 +125,19 @@ describe("decodeQuotedPath", () => {
       path: String.raw`ps\342\200\251x.md`,
       codePoint: "2029",
     },
-  ])(
-    "rejects $label that would decode to a control or separator character",
-    ({ path, codePoint }) => {
-      expect(decodeQuotedPath(path)).toEqual({
-        kind: "rejected",
-        reason: `decoded path contains control or separator character U+${codePoint}`,
-      })
-    },
-  )
+  ])("rejects $label that would decode to a line break", ({ path, codePoint }) => {
+    expect(decodeQuotedPath(path)).toEqual({
+      kind: "rejected",
+      reason: `path contains line-break character U+${codePoint}`,
+    })
+  })
+
+  it("rejects an unquoted path that holds a raw line separator (U+2028)", () => {
+    expect(decodeQuotedPath("ls\u2028x.md")).toEqual({
+      kind: "rejected",
+      reason: "path contains line-break character U+2028",
+    })
+  })
 })
 
 describe("decodeQuotedFilePaths", () => {
@@ -196,6 +205,15 @@ rename to "docs/\341\213\265-new.md"`
 
     expect(decodeQuotedFilePaths([file], createTestLogger())).toStrictEqual({
       files: [{ chunks: [], additions: 0, deletions: 0, to: "å.png" }],
+      rejectedPaths: new Set(),
+    })
+  })
+
+  it("leaves an absent new path absent", () => {
+    const file: File = { chunks: [], additions: 0, deletions: 0, from: String.raw`\303\245.png` }
+
+    expect(decodeQuotedFilePaths([file], createTestLogger())).toStrictEqual({
+      files: [{ chunks: [], additions: 0, deletions: 0, from: "å.png" }],
       rejectedPaths: new Set(),
     })
   })
@@ -270,14 +288,14 @@ rename to "docs/\341\213\265-new.md"`
         message: "quoted diff path rejected — kept as received",
         data: {
           path: escapedPath,
-          reason: "decoded path contains control or separator character U+000A",
+          reason: "path contains line-break character U+000A",
         },
       },
     ])
   })
 
   it("reports only the rejected path of a rename whose new path decodes", () => {
-    const rejectedOldPath = String.raw`old\tname.md`
+    const rejectedOldPath = String.raw`old\rname.md`
     const file = makeFile({ from: rejectedOldPath, to: String.raw`\303\245.md` })
 
     expect(decodeQuotedFilePaths([file], createTestLogger())).toEqual({

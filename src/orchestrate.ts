@@ -622,10 +622,10 @@ const runReviewPipeline = async (
     })
   }
 
-  // A rejected path keeps git's escapes, so it names no file GitHub knows.
-  // GitHub fails the whole review when one inline comment names such a path,
-  // so the file gets no commentable lines and its findings post as standalone
-  // comments.
+  // A rejected path stays as the diff spelled it. A quoted one keeps git's
+  // escapes, so it names no file GitHub knows. GitHub fails the whole review
+  // when one inline comment names such a path, so the file gets no
+  // commentable lines and its findings post as standalone comments.
   const diffCommentableByPath = computeCommentableLines(reviewableFiles)
   const commentableByPath = new Map(
     Array.from(diffCommentableByPath).filter(([path]) => !rejectedPaths.has(path)),
