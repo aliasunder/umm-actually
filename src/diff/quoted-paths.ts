@@ -36,7 +36,7 @@ const CHARACTER_ESCAPE_BYTES = new Map([
 
 /** A character that ends a line: LF, VT, FF, CR, NEL (U+0085), or a Unicode
  *  line or paragraph separator (U+2028, U+2029). */
-const LINE_BREAK_CHARACTER = /[\n\v\f\r\u0085\u2028\u2029]/u
+const LINE_BREAK_CHARACTERS = /[\n\v\f\r\u0085\u2028\u2029]/gu
 
 /** The bytes one token stands for, or null for an escape git never writes. */
 const getTokenBytes = (match: RegExpExecArray): Buffer | null => {
@@ -70,12 +70,23 @@ const getTokenBytes = (match: RegExpExecArray): Buffer | null => {
  *   its line. A workspace read the filesystem refuses falls back to the diff.
  */
 const getLineBreakRejection = (path: string): QuotedPathDecoding | null => {
-  const lineBreak = LINE_BREAK_CHARACTER.exec(path)?.[0]
+  const lineBreak = path.match(LINE_BREAK_CHARACTERS)?.[0]
 
   if (!lineBreak) return null
 
   const codePointHex = lineBreak.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")
   return { kind: "rejected", reason: `path contains line-break character U+${codePointHex}` }
+}
+
+/** The path with each line break written as git's octal escapes of its UTF-8
+ *  bytes, so the path breaks no line. */
+const escapeLineBreaks = (path: string): string => {
+  return path.replaceAll(LINE_BREAK_CHARACTERS, (lineBreak) => {
+    const octalEscapes = Array.from(Buffer.from(lineBreak, "utf8"), (byte) => {
+      return `\\${byte.toString(8).padStart(3, "0")}`
+    })
+    return octalEscapes.join("")
+  })
 }
 
 /** Decodes a path parse-diff returned with git's quotes removed but its
@@ -107,9 +118,9 @@ export const decodeQuotedPath = (path: string): QuotedPathDecoding => {
 
 export type DecodedDiffFiles = {
   files: File[]
-  /** Paths whose decoding was rejected. Each stays as the diff spelled it. A
-   *  quoted one keeps its escapes and names no file in the checkout or on
-   *  GitHub. */
+  /** Paths whose decoding was rejected. Each stays as the diff spelled it,
+   *  except that a raw line break becomes an octal escape. A quoted one keeps
+   *  its escapes and names no file in the checkout or on GitHub. */
   rejectedPaths: ReadonlySet<string>
 }
 
@@ -127,11 +138,12 @@ export const decodeQuotedFilePaths = (
   const decodePath = (rawPath: string): QuotedPathDecoding => {
     const decoding = decodeQuotedPath(rawPath)
 
-    // A guessed decoding would name a file that does not exist, and the escaped
-    // form breaks no line, so the path stays as GitHub's diff shows it. The
-    // checkout has no file at an escaped path, so the file is reviewed from its
-    // diff alone. GitHub rejects a whole review when one inline comment names
-    // such a path, so the caller keeps the file out of inline comments.
+    // A rejected path stays as GitHub's diff shows it, with any raw line break
+    // escaped, because a guessed decoding would name a file that does not exist.
+    // - The checkout has no file at that path, so the file is reviewed from its
+    //   diff alone.
+    // - GitHub rejects a whole review when one inline comment names such a
+    //   path, so the caller keeps the file out of inline comments.
     if (decoding.kind === "rejected") {
       logger.warn("diff path rejected — kept as received", {
         path: rawPath,
@@ -155,10 +167,12 @@ export const decodeQuotedFilePaths = (
     rawPaths.map((rawPath): [string, QuotedPathDecoding] => [rawPath, decodePath(rawPath)]),
   )
 
-  /** The decoded path, or the path as received when it was unquoted or rejected. */
   const getResolvedPath = (rawPath: string): string => {
     const decoding = decodingByRawPath.get(rawPath)
-    return decoding?.kind === "decoded" ? decoding.path : rawPath
+
+    if (decoding?.kind === "decoded") return decoding.path
+    if (decoding?.kind === "rejected") return escapeLineBreaks(rawPath)
+    return rawPath
   }
 
   const isRejectedPath = (rawPath: string): boolean => {
@@ -171,6 +185,6 @@ export const decodeQuotedFilePaths = (
       ...(file.from && { from: getResolvedPath(file.from) }),
       ...(file.to && { to: getResolvedPath(file.to) }),
     })),
-    rejectedPaths: new Set(rawPaths.filter(isRejectedPath)),
+    rejectedPaths: new Set(rawPaths.filter(isRejectedPath).map(getResolvedPath)),
   }
 }

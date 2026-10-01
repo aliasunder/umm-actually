@@ -289,6 +289,25 @@ rename to "docs/\341\213\265-new.md"`
     ])
   })
 
+  it("escapes the raw line break in a rejected unquoted path and warns with the raw path", () => {
+    const rawPath = "ls\u2028x.md"
+    const escapedPath = String.raw`ls\342\200\250x.md`
+    const file = makeFile({ new: true, from: "/dev/null", to: rawPath })
+    const logger = createTestLogger()
+
+    expect(decodeQuotedFilePaths([file], logger)).toEqual({
+      files: [{ ...file, to: escapedPath }],
+      rejectedPaths: new Set([escapedPath]),
+    })
+    expect(logger.messages).toEqual([
+      {
+        level: "warn",
+        message: "diff path rejected — kept as received",
+        data: { path: rawPath, reason: "path contains line-break character U+2028" },
+      },
+    ])
+  })
+
   it("reports only the rejected path of a rename whose new path decodes", () => {
     const rejectedOldPath = String.raw`old\rname.md`
     const file = makeFile({ from: rejectedOldPath, to: String.raw`\303\245.md` })
