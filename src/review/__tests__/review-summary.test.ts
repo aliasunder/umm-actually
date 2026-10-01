@@ -29,6 +29,7 @@ const baseStats: ReviewSummaryStats = {
   totalFromModel: 3,
   droppedAsNonFinding: 0,
   droppedAsUnknownFile: 0,
+  droppedAsExcludedFile: 0,
   duplicatesAcrossPhases: 0,
   duplicatesRemoved: 0,
   droppedBelowThreshold: 0,
@@ -73,6 +74,7 @@ describe("renderReviewSummary", () => {
         "| Raw from model | 3 |",
         "| Dropped as non-findings | 0 |",
         "| Dropped as unknown file | 0 |",
+        "| Dropped as excluded file | 0 |",
         "| Duplicates (cross-phase) | 0 |",
         "| Duplicates (cross-run) | 0 |",
         "| Dropped below threshold | 0 |",
@@ -128,6 +130,7 @@ describe("renderReviewSummary", () => {
         "| Raw from model | 3 |",
         "| Dropped as non-findings | 0 |",
         "| Dropped as unknown file | 0 |",
+        "| Dropped as excluded file | 0 |",
         "| Duplicates (cross-phase) | 0 |",
         "| Duplicates (cross-run) | 0 |",
         "| Dropped below threshold | 0 |",
@@ -184,11 +187,41 @@ describe("renderReviewSummary", () => {
         "| Raw from model | 11 |",
         "| Dropped as non-findings | 2 |",
         "| Dropped as unknown file | 1 |",
+        "| Dropped as excluded file | 0 |",
         "| Duplicates (cross-phase) | 2 |",
         "| Duplicates (cross-run) | 3 |",
         "| Dropped below threshold | 1 |",
         "| Dropped as overlapping | 0 |",
         "| Dropped by cap | 1 |",
+        "| **Posted** | **3** |",
+      ].join("\n"),
+    )
+  })
+
+  it("reports excluded-file drops on their own row next to unknown-file drops", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      totalFromModel: 6,
+      droppedAsUnknownFile: 1,
+      droppedAsExcludedFile: 2,
+      posted: 3,
+    })
+
+    expect(summary).toContain(
+      [
+        "#### Findings pipeline",
+        "",
+        "| stage | count |",
+        "| --- | --- |",
+        "| Raw from model | 6 |",
+        "| Dropped as non-findings | 0 |",
+        "| Dropped as unknown file | 1 |",
+        "| Dropped as excluded file | 2 |",
+        "| Duplicates (cross-phase) | 0 |",
+        "| Duplicates (cross-run) | 0 |",
+        "| Dropped below threshold | 0 |",
+        "| Dropped as overlapping | 0 |",
+        "| Dropped by cap | 0 |",
         "| **Posted** | **3** |",
       ].join("\n"),
     )
@@ -239,6 +272,7 @@ describe("renderReviewSummary", () => {
           "| Raw from model | 3 |",
           "| Dropped as non-findings | 0 |",
           "| Dropped as unknown file | 0 |",
+          "| Dropped as excluded file | 0 |",
           "| Duplicates (cross-phase) | 0 |",
           "| Duplicates (cross-run) | 0 |",
           "| Dropped below threshold | 0 |",

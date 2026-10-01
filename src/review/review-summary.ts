@@ -32,6 +32,8 @@ export type ReviewSummaryStats = {
   droppedAsNonFinding: number
   /** Findings naming a file the model was never given. */
   droppedAsUnknownFile: number
+  /** Findings on a changed file diff exclusion removed from the review. */
+  droppedAsExcludedFile: number
   /** Findings two phases reported on overlapping lines of one file. */
   duplicatesAcrossPhases: number
   /** Findings dropped because an earlier run already posted them. */
@@ -139,6 +141,7 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
     `| Raw from model | ${stats.totalFromModel} |`,
     `| Dropped as non-findings | ${stats.droppedAsNonFinding} |`,
     `| Dropped as unknown file | ${stats.droppedAsUnknownFile} |`,
+    `| Dropped as excluded file | ${stats.droppedAsExcludedFile} |`,
     `| Duplicates (cross-phase) | ${stats.duplicatesAcrossPhases} |`,
     `| Duplicates (cross-run) | ${stats.duplicatesRemoved} |`,
     `| Dropped below threshold | ${stats.droppedBelowThreshold} |`,

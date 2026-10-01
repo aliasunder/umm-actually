@@ -58,7 +58,10 @@ import {
   type PromptFile,
 } from "./review/prompt.js"
 import { filterNonFindings } from "./review/filter-non-findings.js"
-import { filterUnknownFileFindings } from "./review/filter-unknown-file-findings.js"
+import {
+  filterUnknownFileFindings,
+  type UnknownFileFilterResult,
+} from "./review/filter-unknown-file-findings.js"
 import { mergePhaseFindings } from "./review/merge-phase-findings.js"
 import { renderReviewSummary } from "./review/review-summary.js"
 import {
@@ -434,24 +437,36 @@ type FilteredPhaseFindings = {
   findings: AttributedFinding[]
   droppedAsNonFinding: number
   droppedAsUnknownFile: number
+  droppedAsExcludedFile: number
 }
 
-/** Drops non-findings and findings on files the model never saw. */
+/** Drops non-findings and findings on files the model never saw. A kept
+ *  finding whose `file` matched only once `&quot;` was decoded comes back
+ *  with the decoded `file`. */
 const filterPhaseFindings = (
-  { outcome, knownPaths }: { outcome: CompletedPhase; knownPaths: string[] },
+  {
+    outcome,
+    filterFindingFiles,
+  }: {
+    outcome: CompletedPhase
+    filterFindingFiles: (findings: Finding[]) => UnknownFileFilterResult
+  },
   logger: Logger,
 ): FilteredPhaseFindings => {
-  const { findings: nonFindingFiltered, droppedAsNonFinding } = filterNonFindings(
+  const { findings: realFindings, droppedAsNonFinding } = filterNonFindings(
     outcome.result.review.findings,
   )
-  const { findings, droppedAsUnknownFile } = filterUnknownFileFindings({
-    findings: nonFindingFiltered,
-    knownPaths,
-  })
+  const {
+    findings,
+    droppedAsUnknownFile: unknownFileFindings,
+    droppedAsExcludedFile: excludedFileFindings,
+    unescapedFileRewrites,
+  } = filterFindingFiles(realFindings)
 
   // Each drop warns on its own because it is a model-quality event, not loop
-  // chatter. The title is omitted because it may be garbage.
-  for (const finding of droppedAsUnknownFile) {
+  // chatter. The title is left out because the model wrote it about a file it
+  // was never given, so it is unverified text.
+  for (const finding of unknownFileFindings) {
     logger.warn("dropping finding: file not in prompt context", {
       phase: outcome.phase.id,
       file: finding.file,
@@ -459,13 +474,39 @@ const filterPhaseFindings = (
       category: finding.category,
     })
   }
+
+  // An excluded file's path is in the excluded-files note, and an excluded
+  // conventions file's content is in the prompt. A separate message points
+  // the operator at the exclusion rule, not at context assembly.
+  for (const finding of excludedFileFindings) {
+    logger.warn("dropping finding: file excluded from the review diff", {
+      phase: outcome.phase.id,
+      file: finding.file,
+      line: finding.line,
+      category: finding.category,
+    })
+  }
+
+  // A rewritten file changes where the finding posts and its dedup anchor, so
+  // the log keeps both spellings. It logs at debug, not warn, because the
+  // finding still posts, on the path the prompt gave.
+  for (const { writtenFile, finding } of unescapedFileRewrites) {
+    logger.debug("resolved escaped finding file to a prompt path", {
+      phase: outcome.phase.id,
+      writtenFile,
+      resolvedFile: finding.file,
+      line: finding.line,
+    })
+  }
+
   return {
     findings: findings.map((finding) => ({
       ...finding,
       modelUsed: outcome.result.modelUsed,
     })),
     droppedAsNonFinding,
-    droppedAsUnknownFile: droppedAsUnknownFile.length,
+    droppedAsUnknownFile: unknownFileFindings.length,
+    droppedAsExcludedFile: excludedFileFindings.length,
   }
 }
 
@@ -753,9 +794,9 @@ const runReviewPipeline = async (
       .map((file) => posix.normalize(file.path)),
     ...conventionsFullCopyPaths.map((conventionsPath) => posix.normalize(conventionsPath)),
   ])
-  const needsPriorityDocFloor =
-    reviewablePriorityDocs.length > 0 &&
-    reviewablePriorityDocs.some((docPath) => !preFloorInContext.has(posix.normalize(docPath)))
+  const needsPriorityDocFloor = reviewablePriorityDocs.some(
+    (docPath) => !preFloorInContext.has(posix.normalize(docPath)),
+  )
   const remainingPriorityDocFloor = needsPriorityDocFloor
     ? Math.min(priorityDocFloorLimit - earlyPriorityDocTokens, remainingTokens)
     : 0
@@ -902,19 +943,34 @@ const runReviewPipeline = async (
 
   const relatedDocs = [...priorityDocFiles, ...mentionMatchedDocsResult.files]
 
-  // Every path the model can see: diff headers (deleted files render a
-  // header but have no new path, so they are added here), file blocks, and
-  // the conventions section when the file was found.
+  // Every path the model can see:
+  // - Diff headers. changedPaths holds each new path and a rename's old path,
+  //   which the header prints as "renamed from". A deleted file's header
+  //   names a path changedPaths lacks, so it is added here.
+  // - File blocks, and the conventions section when the file was found and
+  //   diff exclusion did not remove it.
+  // These paths go in as written: filterUnknownFileFindings normalizes both
+  // sides with normalizeWorkspacePath, which also strips a leading or
+  // trailing "/" that the posix.normalize sets above keep.
   const deletedPaths = reviewableFiles.flatMap((file) => {
     return file.deleted && file.from ? [file.from] : []
   })
+
+  // A PR can change the conventions file while diff exclusion removes it from
+  // the review. The excluded-files note then tells the model the file's
+  // content was not shown, though the conventions section still sends it as
+  // the rubric. Leaving its path out here drops findings on it like findings
+  // on any other excluded file. Without this check, those findings would post.
+  const acceptsConventionsFindings =
+    conventions !== null && !diffExcludedPathSet.has(posix.normalize(config.conventionsFile))
+
   const promptFilePaths = [
     ...changedPaths,
     ...deletedPaths,
     ...changedFiles.map((file) => file.path),
     ...relatedFiles.map((file) => file.path),
     ...relatedDocs.map((file) => file.path),
-    ...(conventions !== null ? [config.conventionsFile] : []),
+    ...(acceptsConventionsFindings ? [config.conventionsFile] : []),
   ]
 
   logger.info("context sent to model", {
@@ -997,7 +1053,9 @@ const runReviewPipeline = async (
   )
   const completedPhases = phaseOutcomes.filter((outcome) => outcome.status === "completed")
   const phases = phaseOutcomes.map(describePhaseOutcome)
-  /** Cost lookup expiry alone does not lose review coverage. */
+
+  // Only a phase that failed on the deadline lost coverage. A completed phase
+  // whose cost lookup the deadline skipped still delivered its findings.
   const coverageLostToReviewDeadline = phaseOutcomes.some(
     (outcome) => outcome.status === "failed" && outcome.deadlineExceeded,
   )
@@ -1013,20 +1071,29 @@ const runReviewPipeline = async (
   // Each phase drops non-findings and findings on files the model never saw,
   // then cross-phase duplicates collapse. All of it runs before selection so
   // cap slots aren't wasted
+  const filterFindingFiles = (findings: Finding[]): UnknownFileFilterResult => {
+    return filterUnknownFileFindings({
+      findings,
+      knownPaths: promptFilePaths,
+      excludedPaths: diffExcludedPaths,
+    })
+  }
   const filteredPhases = completedPhases.map((outcome) => {
-    return filterPhaseFindings({ outcome, knownPaths: promptFilePaths }, logger)
+    return filterPhaseFindings({ outcome, filterFindingFiles }, logger)
   })
   const totalFromModel = sumBy(completedPhases, (outcome) => outcome.result.review.findings.length)
   const droppedAsNonFinding = sumBy(filteredPhases, (filtered) => filtered.droppedAsNonFinding)
   const droppedAsUnknownFile = sumBy(filteredPhases, (filtered) => filtered.droppedAsUnknownFile)
+  const droppedAsExcludedFile = sumBy(filteredPhases, (filtered) => filtered.droppedAsExcludedFile)
   const { findings: realFindings, duplicatesAcrossPhases } = mergePhaseFindings(
     filteredPhases.map((filtered) => filtered.findings),
   )
-  logger.info("non-finding filter applied to model output", {
+  logger.info("per-phase finding filters applied to model output", {
     totalFromModel,
     kept: realFindings.length,
     droppedAsNonFinding,
     droppedAsUnknownFile,
+    droppedAsExcludedFile,
     duplicatesAcrossPhases,
   })
 
@@ -1203,6 +1270,7 @@ const runReviewPipeline = async (
     totalFromModel,
     droppedAsNonFinding,
     droppedAsUnknownFile,
+    droppedAsExcludedFile,
     duplicatesAcrossPhases,
     duplicatesRemoved: realFindings.length - newFindings.length,
     droppedBelowThreshold,

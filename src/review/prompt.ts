@@ -29,8 +29,8 @@ export const conventionsCharacterCap = (conventionsBudgetTokens: number): number
 
 /**
  * Whether the conventions section will carry the file's complete text rather
- * than a truncated head. The orchestrator uses it to send one full copy of the
- * conventions file:
+ * than a truncated head. The orchestrator uses it to send no more than one
+ * full copy of the conventions file:
  * - true: the section is the full copy. readPriorityDocs and the related-file
  *   scan get the path as an exclusion and skip the file, and a changed
  *   conventions file's block is sent diff-only.
@@ -142,6 +142,10 @@ move on — do not emit a finding for it.`
  * renderExcludedFilesNote (exclusion.ts) writes the "changed file(s) excluded
  * from review" trailer. A wording change there must update this text.
  *
+ * File anchoring asks the model to copy a path attribute verbatim, and
+ * escapeAttributeValue writes each `"` in that attribute as `&quot;`, so the
+ * copied `file` can carry `&quot;`. filterUnknownFileFindings decodes it.
+ *
  * The File attribution paragraph covers three cases:
  * - A finding inside the annotated diff needs no quote line. The paragraph's
  *   first "Boundary:" states this case.
@@ -228,9 +232,17 @@ const truncateConventions = (conventions: string, conventionsBudgetTokens: numbe
  */
 export const generateDelimiterNonce = (): string => randomBytes(6).toString("hex")
 
-/** A double quote would terminate the surrounding attribute — nothing else is
- *  structural inside a quoted attribute value. */
+/** A double quote would terminate the surrounding attribute. Nothing else,
+ *  `&` included, is structural inside a quoted attribute value, so nothing
+ *  else is escaped. Change it together with unescapeAttributeValue, which
+ *  decodes it. */
 const escapeAttributeValue = (value: string): string => value.replaceAll('"', "&quot;")
+
+/** Decodes the one entity escapeAttributeValue writes, never general HTML
+ *  entities. It is not a true inverse. The encoder leaves "&" alone, so a path
+ *  holding a literal "&quot;" decodes to a different path, and callers must try
+ *  the written spelling first. */
+export const unescapeAttributeValue = (value: string): string => value.replaceAll("&quot;", '"')
 
 const renderFileBlock = (file: PromptFile, delimiterNonce: string): string => {
   const fileTag = `file-${delimiterNonce}`
