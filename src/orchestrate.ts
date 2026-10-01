@@ -10,6 +10,7 @@ import {
   renderExcludedFilesNote,
   summarizeExclusionSources,
 } from "./diff/exclusion.js"
+import { decodeQuotedFilePaths } from "./diff/quoted-paths.js"
 import { describeError, type Logger } from "./logger.js"
 import type { CheckRunConclusion, CheckRunOutput, GithubClient } from "./github/client.js"
 import { resolvePullRequestEvent, type PrContext } from "./github/event.js"
@@ -27,6 +28,7 @@ import {
   classifyDuplicate,
   mapFindingsToReview,
   renderBeyondDiffFinding,
+  renderRejectedPathFinding,
   renderReroutedFinding,
   REVIEW_MARKER,
   STATUS_ANCHOR,
@@ -69,6 +71,7 @@ import {
   type RunPhase,
 } from "./review/run-stages.js"
 import { selectFindings } from "./review/select-findings.js"
+import { normalizeWorkspacePath } from "./review/workspace-path.js"
 
 /** Priority docs use this share before full changed-file reads. */
 const PRIORITY_DOCS_BUDGET_FLOOR_RATIO = 0.1
@@ -601,7 +604,9 @@ const runReviewPipeline = async (
     return postSkipReview({ reason: "diff exceeds GitHub's diff API limits" })
   }
 
-  const files = parseDiff(diffResult.diff)
+  // parse-diff keeps git's escapes in quoted paths. Decoding them once here
+  // gives every later step, from exclusion to inline comments, the real path.
+  const { files, rejectedPaths } = decodeQuotedFilePaths(parseDiff(diffResult.diff), logger)
 
   if (files.length === 0) {
     return postSkipReview({ reason: "empty diff" })
@@ -617,6 +622,10 @@ const runReviewPipeline = async (
     { ...config.diffExcludePaths, gitAttributesContent },
     logger,
   )
+
+  // Each excluded entry is a summary rather than a parse-diff file. Its path is
+  // the new path, or the old path for a deleted file, already posix-normalized
+  // with no leading "/". Its source names the rule that excluded it.
   const { kept: reviewableFiles, excluded: excludedDiffFiles } = partitionExcludedFiles({
     files,
     matcher: exclusionMatcher,
@@ -628,6 +637,7 @@ const runReviewPipeline = async (
       excludedPaths: excludedDiffFiles.map((file) => `${file.path} (${file.source})`).join(", "),
     })
   }
+
   if (reviewableFiles.length === 0) {
     // Reason names the layers that actually excluded (an operator on default
     // inputs never set diff_exclude_paths); the body names every file.
@@ -655,15 +665,30 @@ const runReviewPipeline = async (
     })
   }
 
-  const commentableByPath = computeCommentableLines(reviewableFiles)
+  // A rejected path keeps git's escapes, and any raw line break in it is
+  // escaped too, so it names no file GitHub knows. GitHub fails the whole
+  // review when one inline comment names such a path, so the file gets no
+  // commentable lines and its findings post as standalone comments.
+  const diffCommentableByPath = computeCommentableLines(reviewableFiles)
+  const commentableByPath = new Map(
+    Array.from(diffCommentableByPath).filter(([path]) => !rejectedPaths.has(path)),
+  )
+
+  for (const path of diffCommentableByPath.keys()) {
+    if (rejectedPaths.has(path)) {
+      logger.debug("file left out of inline comments because its diff path was rejected", {
+        path,
+      })
+    }
+  }
 
   // Diff-excluded files must stay out of every context channel: the trailer
   // told the model their content is not shown, so neither the related-file
   // and doc scans nor the priority-doc read may pull that content back in.
+  // Excluded paths arrive normalized, so only the configured doc paths are
+  // normalized here.
   const diffExcludedPaths = excludedDiffFiles.map((file) => file.path)
-  const diffExcludedPathSet = new Set(
-    diffExcludedPaths.map((excludedPath) => posix.normalize(excludedPath)),
-  )
+  const diffExcludedPathSet = new Set(diffExcludedPaths)
   const reviewablePriorityDocs = config.priorityDocs.filter(
     (docPath) => !diffExcludedPathSet.has(posix.normalize(docPath)),
   )
@@ -674,12 +699,14 @@ const runReviewPipeline = async (
     const toPath = newFilePath(file)
     const fromPath = file.from
 
-    // A deleted file has no new path. Its old path joins the prompt's file
-    // paths through deletedPaths below
-    if (toPath === null) return []
+    // A deleted file has no new path, because parse-diff sets `to` to
+    // "/dev/null" whenever it sets `deleted`. Its old path joins the prompt's
+    // file paths through deletedPaths below
+    if (!toPath) return []
 
-    // parse-diff: from can be undefined for a binary file and is "/dev/null"
-    // for an added file (binary or not) — neither is a pre-rename path worth tracing
+    // parse-diff sets `from` to "/dev/null" for an added file, as it sets `to`
+    // for a deleted one. `from` is undefined only when parse-diff cannot read
+    // the file's diff header. Neither value is a pre-rename path worth tracing
     if (!fromPath || fromPath === "/dev/null" || fromPath === toPath) return [toPath]
 
     return [toPath, fromPath]
@@ -832,10 +859,14 @@ const runReviewPipeline = async (
   // diff has no hunks, so it carries nothing.
   const conventionsAddedInDiff = reviewableFiles.some((file) => {
     const toPath = newFilePath(file)
+
+    // Every added file has a new path, so this check skips no added file. It
+    // narrows toPath's type for the comparison below.
+    if (!toPath) return false
+
     return (
       Boolean(file.new) &&
       file.chunks.length > 0 &&
-      toPath !== null &&
       posix.normalize(toPath) === posix.normalize(config.conventionsFile)
     )
   })
@@ -1143,11 +1174,22 @@ const runReviewPipeline = async (
     logger,
   )
 
-  // Beyond-diff findings, plus every in-diff finding when GitHub rejected the
-  // inline review, since one bad anchor fails the whole review. Each keeps a
-  // location note that matches where it sits.
+  // The unknown-file filter keeps a finding whose path matches a changed file
+  // only after normalizing, such as `./a\rb.ts`. The rejected-path check
+  // compares normalized paths too, so such a finding still gets its note.
+  const normalizedRejectedPaths = new Set(Array.from(rejectedPaths, normalizeWorkspacePath))
+
+  // Beyond-diff findings and findings on a rejected diff path, plus every
+  // in-diff finding when GitHub rejected the inline review, since one bad
+  // anchor fails the whole review. Each keeps a location note that matches
+  // where it sits.
   const issueCommentPosts = [
-    ...unanchoredFindings.map((finding) => ({ finding, body: renderBeyondDiffFinding(finding) })),
+    ...unanchoredFindings.map((finding) => ({
+      finding,
+      body: normalizedRejectedPaths.has(normalizeWorkspacePath(finding.file))
+        ? renderRejectedPathFinding(finding)
+        : renderBeyondDiffFinding(finding),
+    })),
     ...inlineOutcome.rerouted.map((finding) => ({ finding, body: renderReroutedFinding(finding) })),
   ]
 

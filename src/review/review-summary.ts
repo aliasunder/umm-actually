@@ -1,5 +1,7 @@
+import { escapeLineBreaks } from "../diff/quoted-paths.js"
 import type { PrContext } from "../github/event.js"
 import type { ConventionsCoverage, ConventionsFullCopyChannel } from "./context-notes.js"
+import { renderCodeSpan } from "./markdown.js"
 
 export type ReviewSummaryStats = {
   prContext: PrContext
@@ -23,6 +25,8 @@ export type ReviewSummaryStats = {
   docsExcludedPaths: string[]
   tokenBudgetTotal: number
   tokenBudgetUsedByDiff: number
+  /** Tokens reserved for priority docs: what the early priority-doc read spent
+   *  plus what was held back from related files. */
   tokenBudgetPriorityDocFloor: number
   tokenBudgetRemainingForDocs: number
   totalFromModel: number
@@ -33,6 +37,7 @@ export type ReviewSummaryStats = {
   droppedAsExcludedFile: number
   /** Findings two phases reported on overlapping lines of one file. */
   duplicatesAcrossPhases: number
+  /** Findings dropped because an earlier run already posted them. */
   duplicatesRemoved: number
   droppedBelowThreshold: number
   droppedAsOverlapping: number
@@ -41,11 +46,27 @@ export type ReviewSummaryStats = {
 }
 
 /** Comma-joined items for one markdown line or table cell — em-dash when
- *  empty so cells are never blank. Pipes are escaped so an item can't break
- *  a table row. */
+ *  empty so cells are never blank. Line breaks, backslashes, backticks, and
+ *  pipes are escaped, so no item can split the row or format its text. */
 const renderCommaList = (items: string[]): string => {
   if (items.length === 0) return "—"
-  return items.map((item) => item.replaceAll("|", "\\|")).join(", ")
+
+  // 1. Line breaks become octal escapes first. Workspace-scan paths never pass
+  //    the diff decoder's line-break check, so a raw one would split the row.
+  // 2. Backslashes are escaped next, including the ones step 1 wrote, so each
+  //    renders as written.
+  // 3. Backticks and pipes are escaped last. Git never quotes a backtick, and
+  //    two in one cell would open a code span. Escaping either before
+  //    backslashes would double its escape's own backslash and leave it bare.
+  //    For example, `a\|b` renders as `a\\\|b`.
+  return items
+    .map((item) => {
+      return escapeLineBreaks(item)
+        .replaceAll("\\", "\\\\")
+        .replaceAll("`", "\\`")
+        .replaceAll("|", "\\|")
+    })
+    .join(", ")
 }
 
 /** The conventions file and how much of it reached the model. */
@@ -54,12 +75,14 @@ const renderConventionsCoverage = ({
   conventionsCoverage,
 }: Pick<ReviewSummaryStats, "conventionsFile" | "conventionsCoverage">): string => {
   if (conventionsCoverage.status === "not-found") return "none"
+
   // The size against the cap shows how close a fitting file is to truncating
   if (conventionsCoverage.status === "full") {
     const { characterCap, totalCharacters } = conventionsCoverage
     return `${conventionsFile} (${totalCharacters} characters, within the ${characterCap}-character cap)`
   }
 
+  // Only the truncated status remains
   const { fullCopyChannel, characterCap, totalCharacters } = conventionsCoverage
 
   // A priority-doc copy replaces the truncated section, so no head was sent
@@ -94,7 +117,7 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
   return [
     "### umm-actually review summary",
     "",
-    `PR #${stats.prContext.prNumber} · \`${stats.prContext.headRef}\` → \`${stats.prContext.baseRef}\` · \`${sha}\``,
+    `PR #${stats.prContext.prNumber} · ${renderCodeSpan(stats.prContext.headRef)} → ${renderCodeSpan(stats.prContext.baseRef)} · \`${sha}\``,
     "",
     `**Conventions:** ${renderConventionsCoverage(stats)}`,
     "",

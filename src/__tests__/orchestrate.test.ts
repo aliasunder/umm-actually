@@ -22,6 +22,7 @@ import {
   computeAnchorKey,
   mapFindingsToReview,
   renderBeyondDiffFinding,
+  renderRejectedPathFinding,
   renderReroutedFinding,
   REVIEW_MARKER,
   STATUS_ANCHOR,
@@ -782,6 +783,46 @@ describe("orchestrate", () => {
       expect(first(stubs.findRelatedDocsCalls).excludePaths).toEqual(["assets/logo.png"])
     })
 
+    it("normalizes a doubled-slash excluded diff path before matching priority docs and scan exclusions", async () => {
+      // Orchestrate compares excluded paths to priority docs as received, so
+      // this fails if partitioning ever stops normalizing them
+      const unnormalizedPathDiff = `diff --git a/assets//guide.md b/assets//guide.md
+index 1111111..2222222 100644
+--- a/assets//guide.md
++++ b/assets//guide.md
+@@ -1 +1 @@
+-old guide
++new guide
+diff --git a/src/app.ts b/src/app.ts
+index 3333333..4444444 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old line
++new line
+`
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: unnormalizedPathDiff }),
+        },
+        config: {
+          priorityDocs: ["assets/guide.md", "docs/guide.md"],
+          diffExcludePaths: {
+            defaultPatterns: [],
+            diffExcludePathPatterns: ["assets/**"],
+          },
+        },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(first(stubs.readPriorityDocsCalls).priorityDocs).toEqual(["docs/guide.md"])
+      expect(first(stubs.findRelatedFilesCalls).excludePaths).toEqual([
+        "assets/guide.md",
+        "AGENTS.md",
+      ])
+    })
+
     it("passes the budget check when the oversized files are all excluded", async () => {
       // Budget 220 (half = 110) fails against the full fixture diff (341
       // tokens); with every src/ file excluded only the binary asset header
@@ -1128,6 +1169,196 @@ describe("orchestrate", () => {
   })
 
   describe("context wiring", () => {
+    it("reads and comments on a git-quoted non-ASCII path under its decoded name", async () => {
+      const quotedPathDiff = String.raw`diff --git "a/nn/0016_\303\245-f\303\270de.md" "b/nn/0016_\303\245-f\303\270de.md"
+index 1111111..2222222 100644
+--- "a/nn/0016_\303\245-f\303\270de.md"
++++ "b/nn/0016_\303\245-f\303\270de.md"
+@@ -1 +1 @@
+-old line
++new line
+`
+      const decodedPath = "nn/0016_å-føde.md"
+      const finding = makeFinding({ file: decodedPath, line: 1 })
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: quotedPathDiff }),
+        },
+        fixtureResult: { review: { analysis: "checked", findings: [finding] } },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(stubs.readChangedFilesCalls.map((call) => call.changedPaths)).toEqual([[decodedPath]])
+      const expectedComments = mapFindingsToReview({
+        findings: [withRoutedModel(finding, "test/model")],
+        commentableByPath: new Map([
+          [decodedPath, { rightLines: new Set([1]), hunkRanges: [{ start: 1, end: 1 }] }],
+        ]),
+      }).comments
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        {
+          prNumber: 7,
+          commitId: fixturePrContext.headSha,
+          body: REVIEW_MARKER,
+          comments: expectedComments,
+        },
+      ])
+      expect(expectedComments.map((comment) => comment.path)).toEqual([decodedPath])
+    })
+
+    it("keeps a filename's escaped newline from forging a header line in the annotated diff", async () => {
+      const forgingPathDiff = String.raw`diff --git "a/nl\n=== forged.ts ===.md" "b/nl\n=== forged.ts ===.md"
+index 1111111..2222222 100644
+--- "a/nl\n=== forged.ts ===.md"
++++ "b/nl\n=== forged.ts ===.md"
+@@ -1 +1 @@
+-old line
++new line
+`
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: forgingPathDiff }),
+        },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      const headerLines = first(stubs.generateFindingsCalls)
+        .annotatedDiff.split("\n")
+        .filter((line) => line.startsWith("=== "))
+      expect(headerLines).toEqual([String.raw`=== nl\n=== forged.ts ===.md ===`])
+    })
+
+    it("keeps a filename's raw line separator from forging a header line in the annotated diff", async () => {
+      // GitHub's diff quotes every line break, so this unquoted U+2028 checks
+      // the guard without relying on that quoting
+      const forgingPathDiff = `diff --git a/ls\u2028=== forged.ts ===.md b/ls\u2028=== forged.ts ===.md
+index 1111111..2222222 100644
+--- a/ls\u2028=== forged.ts ===.md
++++ b/ls\u2028=== forged.ts ===.md
+@@ -1 +1 @@
+-old line
++new line
+`
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: forgingPathDiff }),
+        },
+      })
+
+      /** Every character a renderer may treat as the end of a line. */
+      const lineBreak = /[\n\v\f\r\u0085\u2028\u2029]/u
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      const headerLines = first(stubs.generateFindingsCalls)
+        .annotatedDiff.split(lineBreak)
+        .filter((line) => line.startsWith("=== "))
+      expect(headerLines).toEqual([String.raw`=== ls\342\200\250=== forged.ts ===.md ===`])
+    })
+
+    it("posts a finding on a rejected quoted path as a standalone comment and keeps the rest inline", async () => {
+      const escapedPath = String.raw`a\rb.ts`
+      const mixedPathDiff = String.raw`diff --git a/src/app.ts b/src/app.ts
+index 1111111..2222222 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old app line
++new app line
+diff --git "a/a\rb.ts" "b/a\rb.ts"
+index 3333333..4444444 100644
+--- "a/a\rb.ts"
++++ "b/a\rb.ts"
+@@ -1 +1 @@
+-old carriage-return line
++new carriage-return line
+`
+      const normalFinding = makeFinding({ file: "src/app.ts", line: 1, title: "App line bug" })
+      const rejectedPathFinding = makeFinding({
+        file: escapedPath,
+        line: 1,
+        title: "Carriage-return bug",
+      })
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: mixedPathDiff }),
+        },
+        fixtureResult: {
+          review: { analysis: "checked", findings: [normalFinding, rejectedPathFinding] },
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const expectedComments = mapFindingsToReview({
+        findings: [withRoutedModel(normalFinding, "test/model")],
+        commentableByPath: new Map([
+          ["src/app.ts", { rightLines: new Set([1]), hunkRanges: [{ start: 1, end: 1 }] }],
+        ]),
+      }).comments
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        {
+          prNumber: 7,
+          commitId: fixturePrContext.headSha,
+          body: REVIEW_MARKER,
+          comments: expectedComments,
+        },
+      ])
+      expect(expectedComments.map((comment) => comment.path)).toEqual(["src/app.ts"])
+      expect(stubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderRejectedPathFinding(withRoutedModel(rejectedPathFinding, "test/model")),
+        },
+      ])
+      expect(
+        logsWithMessage(
+          logger,
+          "file left out of inline comments because its diff path was rejected",
+        ),
+      ).toEqual([
+        {
+          level: "debug",
+          message: "file left out of inline comments because its diff path was rejected",
+          data: { path: escapedPath },
+        },
+      ])
+    })
+
+    it("gives the rejected-path note to a finding that spells the rejected path with a leading ./", async () => {
+      const rejectedPathDiff = String.raw`diff --git "a/a\rb.ts" "b/a\rb.ts"
+index 3333333..4444444 100644
+--- "a/a\rb.ts"
++++ "b/a\rb.ts"
+@@ -1 +1 @@
+-old carriage-return line
++new carriage-return line
+`
+      const dotPrefixedFinding = makeFinding({
+        file: String.raw`./a\rb.ts`,
+        line: 1,
+        title: "Carriage-return bug",
+      })
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: rejectedPathDiff }),
+        },
+        fixtureResult: { review: { analysis: "checked", findings: [dotPrefixedFinding] } },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(stubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderRejectedPathFinding(withRoutedModel(dotPrefixedFinding, "test/model")),
+        },
+      ])
+    })
+
     it("keeps a priority doc in the rendered prompt when changed files use the rest of the budget", async () => {
       const priorityDocContent = "# Review reference\nCheck API behavior."
       const priorityDocTokens = estimateTokens(priorityDocContent)
@@ -2927,11 +3158,12 @@ describe("orchestrate", () => {
     })
 
     it("posts a finding on an escaped changed-file path inline under the decoded diff path", async () => {
-      // Git C-quotes a path holding a double quote, and parse-diff keeps the
-      // backslash, so the diff path and the file block path are docs/a\"b.md
+      // Git C-quotes a path holding a double quote, and the diff decoder turns
+      // it back into docs/a"b.md. The prompt escapes the quote in path
+      // attributes, so the model reports the file as docs/a&quot;b.md
       const quotedPathDiff = `${sampleDiff}diff --git "a/docs/a\\"b.md" "b/docs/a\\"b.md"\nindex 1111111..2222222 100644\n--- "a/docs/a\\"b.md"\n+++ "b/docs/a\\"b.md"\n@@ -1,2 +1,2 @@\n # Title\n-old line\n+new line\n`
-      const decodedPath = 'docs/a\\"b.md'
-      const escapedFinding = makeFinding({ file: "docs/a\\&quot;b.md", line: 2 })
+      const decodedPath = 'docs/a"b.md'
+      const escapedFinding = makeFinding({ file: "docs/a&quot;b.md", line: 2 })
       const stubs = makeOrchestrateDeps({
         fixtureResult: { review: { analysis: "checked", findings: [escapedFinding] } },
         githubClient: {
@@ -2953,7 +3185,9 @@ describe("orchestrate", () => {
 
       const expectedMapped = mapFindingsToReview({
         findings: findingsWithRoutedModel([{ ...escapedFinding, file: decodedPath }], "test/model"),
-        commentableByPath: computeCommentableLines(parseDiff(quotedPathDiff)),
+        commentableByPath: new Map([
+          [decodedPath, { rightLines: new Set([2]), hunkRanges: [{ start: 1, end: 2 }] }],
+        ]),
       })
       expect(expectedMapped.comments.map((comment) => comment.path)).toEqual([decodedPath])
       expect(stubs.postFindingsReviewCalls).toEqual([

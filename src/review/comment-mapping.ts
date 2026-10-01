@@ -1,5 +1,6 @@
 import type { CommentableFile } from "../diff/commentable-lines.js"
 import type { AttributedFinding, Finding } from "./finding.js"
+import { renderCodeSpan } from "./markdown.js"
 import { normalizeTitle, titleSimilarity } from "./title-similarity.js"
 
 /** Wire shape for POST /pulls/{n}/reviews comments[] entries. */
@@ -395,7 +396,7 @@ const renderIssueCommentFinding = ({
 }): string => {
   return `${findingHeader(finding)}
 
-\`${finding.file}:${finding.line}\` — ${locationNote}
+${renderCodeSpan(`${finding.file}:${finding.line}`)} — ${locationNote}
 
 ${finding.description}
 
@@ -410,6 +411,15 @@ export const renderBeyondDiffFinding = (finding: AttributedFinding): string => {
   return renderIssueCommentFinding({
     finding,
     locationNote: "beyond the diff's line ranges, in code the changes touch or depend on.",
+  })
+}
+
+/** Renders a finding in a changed file whose diff path was rejected. That path
+ *  names no file GitHub knows, so the finding cannot post inline. */
+export const renderRejectedPathFinding = (finding: AttributedFinding): string => {
+  return renderIssueCommentFinding({
+    finding,
+    locationNote: "in a changed file whose path cannot take an inline comment.",
   })
 }
 
@@ -504,7 +514,7 @@ export const buildStatusComment = ({
   const capNote =
     droppedByCap.length === 0
       ? ""
-      : `_${droppedByCap.length} lower-severity finding(s) omitted by the max_findings cap: ${droppedByCap.map((finding) => `\`${finding.file}:${finding.line}\``).join(", ")}_`
+      : `_${droppedByCap.length} lower-severity finding(s) omitted by the max_findings cap: ${droppedByCap.map((finding) => renderCodeSpan(`${finding.file}:${finding.line}`)).join(", ")}_`
   const incompleteNote = [
     buildIncompleteNote(incompletePhases),
     ...(reviewDeadlineExceeded

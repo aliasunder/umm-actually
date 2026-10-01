@@ -362,6 +362,15 @@ describe("renderReviewSummary", () => {
     expect(summary).not.toContain(baseStats.prContext.headSha)
   })
 
+  it("keeps a branch name's code span whole when it contains a backtick", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      prContext: { ...baseStats.prContext, headRef: "chore/fix`doc" },
+    })
+
+    expect(summary.split("\n")[2]).toBe("PR #7 · ``chore/fix`doc`` → `main` · `abc123d`")
+  })
+
   it("escapes pipe characters in paths so they cannot break the markdown table", () => {
     const summary = renderReviewSummary({
       ...baseStats,
@@ -370,5 +379,36 @@ describe("renderReviewSummary", () => {
 
     expect(summary.split("\n")[12]).toBe("| Changed files | 1 | src/a\\|b.ts |")
     expect(summary).not.toContain("| src/a|b.ts |")
+  })
+
+  it("escapes a backslash before a pipe so the pipe stays escaped", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      changedFilePaths: [String.raw`src/a\|b.ts`],
+    })
+
+    expect(summary.split("\n")[12]).toBe(String.raw`| Changed files | 1 | src/a\\\|b.ts |`)
+  })
+
+  it("escapes backticks in paths so two in one cell cannot open a code span", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      changedFilePaths: ["src/a`b.ts", "src/c`d.ts"],
+    })
+
+    expect(summary.split("\n")[12]).toBe(
+      String.raw`| Changed files | 2 | src/a\`b.ts, src/c\`d.ts |`,
+    )
+  })
+
+  it("escapes a line break in a path so it cannot split the table row", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      changedFilePaths: ["src/x\n| injected |.ts"],
+    })
+
+    expect(summary.split("\n")[12]).toBe(
+      String.raw`| Changed files | 1 | src/x\\012\| injected \|.ts |`,
+    )
   })
 })

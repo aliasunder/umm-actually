@@ -184,6 +184,20 @@ describe("buildContextNotes", () => {
     ])
   })
 
+  it("keeps a diff-excluded path's code span whole when the path contains a backtick", () => {
+    const notes = buildContextNotes(
+      makeInput({
+        diffExcludedFiles: [
+          { path: "gen/a`b.json", additions: 1, deletions: 0, source: "diff_exclude_paths" },
+        ],
+      }),
+    )
+
+    expect(notes).toEqual([
+      "1 changed file(s) excluded from review: ``gen/a`b.json`` (diff_exclude_paths input)",
+    ])
+  })
+
   it("orders in-context before not-included before related files before related docs before diff exclusions", () => {
     const notes = buildContextNotes(
       makeInput({
