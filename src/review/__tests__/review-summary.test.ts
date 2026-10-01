@@ -362,6 +362,15 @@ describe("renderReviewSummary", () => {
     expect(summary).not.toContain(baseStats.prContext.headSha)
   })
 
+  it("keeps a branch name's code span whole when it contains a backtick", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      prContext: { ...baseStats.prContext, headRef: "chore/fix`doc" },
+    })
+
+    expect(summary.split("\n")[2]).toBe("PR #7 · ``chore/fix`doc`` → `main` · `abc123d`")
+  })
+
   it("escapes pipe characters in paths so they cannot break the markdown table", () => {
     const summary = renderReviewSummary({
       ...baseStats,

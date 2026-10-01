@@ -1,6 +1,7 @@
 import { escapeLineBreaks } from "../diff/quoted-paths.js"
 import type { PrContext } from "../github/event.js"
 import type { ConventionsCoverage, ConventionsFullCopyChannel } from "./context-notes.js"
+import { renderCodeSpan } from "./markdown.js"
 
 export type ReviewSummaryStats = {
   prContext: PrContext
@@ -110,7 +111,7 @@ export const renderReviewSummary = (stats: ReviewSummaryStats): string => {
   return [
     "### umm-actually review summary",
     "",
-    `PR #${stats.prContext.prNumber} · \`${stats.prContext.headRef}\` → \`${stats.prContext.baseRef}\` · \`${sha}\``,
+    `PR #${stats.prContext.prNumber} · ${renderCodeSpan(stats.prContext.headRef)} → ${renderCodeSpan(stats.prContext.baseRef)} · \`${sha}\``,
     "",
     `**Conventions:** ${renderConventionsCoverage(stats)}`,
     "",
