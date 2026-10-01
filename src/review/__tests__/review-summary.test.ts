@@ -346,4 +346,15 @@ describe("renderReviewSummary", () => {
 
     expect(summary.split("\n")[12]).toBe(String.raw`| Changed files | 1 | src/a\\\|b.ts |`)
   })
+
+  it("escapes a line break in a path so it cannot split the table row", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      changedFilePaths: ["src/x\n| injected |.ts"],
+    })
+
+    expect(summary.split("\n")[12]).toBe(
+      String.raw`| Changed files | 1 | src/x\\012\| injected \|.ts |`,
+    )
+  })
 })

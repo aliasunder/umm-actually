@@ -17,4 +17,8 @@ describe("renderCodeSpan", () => {
   ])("wraps $label so no backtick inside closes the span", ({ text, expected }) => {
     expect(renderCodeSpan(text)).toBe(expected)
   })
+
+  it("writes a line break as its octal escape so a blank line cannot end the span", () => {
+    expect(renderCodeSpan("docs/a\n\n# forged.md")).toBe("`docs/a\\012\\012# forged.md`")
+  })
 })

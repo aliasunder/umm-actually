@@ -80,7 +80,7 @@ const getLineBreakRejection = (path: string): QuotedPathDecoding | null => {
 
 /** The path with each line break written as git's octal escapes of its UTF-8
  *  bytes, so the path breaks no line. */
-const escapeLineBreaks = (path: string): string => {
+export const escapeLineBreaks = (path: string): string => {
   return path.replaceAll(LINE_BREAK_CHARACTERS, (lineBreak) => {
     const octalEscapes = Array.from(Buffer.from(lineBreak, "utf8"), (byte) => {
       return `\\${byte.toString(8).padStart(3, "0")}`

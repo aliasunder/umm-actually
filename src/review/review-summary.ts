@@ -1,3 +1,4 @@
+import { escapeLineBreaks } from "../diff/quoted-paths.js"
 import type { PrContext } from "../github/event.js"
 import type { ConventionsCoverage, ConventionsFullCopyChannel } from "./context-notes.js"
 
@@ -42,15 +43,21 @@ export type ReviewSummaryStats = {
 }
 
 /** Comma-joined items for one markdown line or table cell — em-dash when
- *  empty so cells are never blank. Backslashes and pipes are escaped, so an
- *  item's own backslash can't cancel a pipe's escape and break the row. */
+ *  empty so cells are never blank. Line breaks, backslashes, and pipes are
+ *  escaped, so no item can split or break the row. */
 const renderCommaList = (items: string[]): string => {
   if (items.length === 0) return "—"
 
-  // Backslashes are escaped first. Escaping pipes first would double each
-  // pipe escape's own backslash and leave the pipe bare. For example, `a\|b`
-  // renders as `a\\\|b`.
-  return items.map((item) => item.replaceAll("\\", "\\\\").replaceAll("|", "\\|")).join(", ")
+  // 1. Line breaks become octal escapes first. Workspace-scan paths never pass
+  //    the diff decoder's line-break check, so a raw one would split the row.
+  // 2. Backslashes are escaped next, including the ones step 1 wrote, so each
+  //    renders as written.
+  // 3. Pipes are escaped last. Escaping them before backslashes would double
+  //    each pipe escape's own backslash and leave the pipe bare. For example,
+  //    `a\|b` renders as `a\\\|b`.
+  return items
+    .map((item) => escapeLineBreaks(item).replaceAll("\\", "\\\\").replaceAll("|", "\\|"))
+    .join(", ")
 }
 
 /** The conventions file and how much of it reached the model. */
