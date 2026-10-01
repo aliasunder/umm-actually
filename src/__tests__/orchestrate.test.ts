@@ -137,6 +137,7 @@ const expectedReviewSummary = (overrides: Partial<ReviewSummaryStats> = {}): str
     totalFromModel: fixtureReviewResponse.findings.length,
     droppedAsNonFinding: 0,
     droppedAsUnknownFile: 0,
+    droppedAsExcludedFile: 0,
     duplicatesAcrossPhases: 0,
     duplicatesRemoved: 0,
     droppedBelowThreshold: 0,
@@ -805,7 +806,7 @@ describe("orchestrate", () => {
       expect(stubs.generateFindingsCalls).toHaveLength(1)
     })
 
-    it("drops a finding naming an excluded file via the unknown-file filter", async () => {
+    it("drops a finding naming an excluded file and reports it as an excluded-file drop", async () => {
       const excludedFileFinding = makeFinding({
         file: "assets/logo.png",
         line: 1,
@@ -827,10 +828,12 @@ describe("orchestrate", () => {
 
       expect(result.findingsCount).toBe(0)
       expect(stubs.postFindingsReviewCalls).toHaveLength(0)
-      expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([
+      expect(
+        logsWithMessage(logger, "dropping finding: file excluded from the review diff"),
+      ).toEqual([
         {
           level: "warn",
-          message: "dropping finding: file not in prompt context",
+          message: "dropping finding: file excluded from the review diff",
           data: {
             phase: "combined",
             file: "assets/logo.png",
@@ -839,6 +842,151 @@ describe("orchestrate", () => {
           },
         },
       ])
+      expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([])
+      expect(logsWithMessage(logger, "per-phase finding filters applied to model output")).toEqual([
+        {
+          level: "info",
+          message: "per-phase finding filters applied to model output",
+          data: {
+            totalFromModel: 1,
+            kept: 0,
+            droppedAsNonFinding: 0,
+            droppedAsUnknownFile: 0,
+            droppedAsExcludedFile: 1,
+            duplicatesAcrossPhases: 0,
+          },
+        },
+      ])
+      expect(result.reviewSummaryMarkdown).toContain(
+        "| Dropped as unknown file | 0 |\n| Dropped as excluded file | 1 |",
+      )
+    })
+
+    describe("findings on a changed conventions file", () => {
+      const conventionsChangeDiff = `${sampleDiff}diff --git a/AGENTS.md b/AGENTS.md\nindex 1111111..4444444 100644\n--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -1 +1 @@\n-# Old conventions\n+# Test conventions\n`
+      const conventionsFinding = makeFinding({ file: "AGENTS.md", line: 1 })
+
+      /** Wires the real prompt builder over a stub client that records each
+       *  user prompt and returns one finding on the conventions file. */
+      const makeConventionsFindingDeps = ({
+        diffExcludePathPatterns,
+        conventionsFile = "AGENTS.md",
+      }: {
+        diffExcludePathPatterns: string[]
+        conventionsFile?: string
+      }) => {
+        const userPrompts: string[] = []
+        const stubClient: OpenRouterClient = {
+          requestReview: async (params) => {
+            userPrompts.push(params.userPrompt)
+            return {
+              review: { analysis: "checked", findings: [conventionsFinding] },
+              modelUsed: "test/model",
+              attempts: [fixtureAttempt],
+            }
+          },
+        }
+        const stubs = makeOrchestrateDeps({
+          config: {
+            conventionsFile,
+            diffExcludePaths: { defaultPatterns: [], diffExcludePathPatterns },
+          },
+          githubClient: {
+            fetchDiff: async () => ({ kind: "ok" as const, diff: conventionsChangeDiff }),
+          },
+          generateFindings: createPromptedGenerateFindings(
+            { openrouterClient: stubClient, model: "test/model", fallbackModel: null },
+            createTestLogger(),
+          ),
+        })
+
+        return { stubs, userPrompts }
+      }
+
+      it("drops a finding on a diff-excluded conventions file and still sends its section", async () => {
+        const { stubs, userPrompts } = makeConventionsFindingDeps({
+          diffExcludePathPatterns: ["AGENTS.md"],
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(result.findingsCount).toBe(0)
+        expect(stubs.postFindingsReviewCalls).toEqual([])
+        expect(stubs.postIssueCommentCalls).toEqual([])
+        expect(
+          logsWithMessage(logger, "dropping finding: file excluded from the review diff"),
+        ).toEqual([
+          {
+            level: "warn",
+            message: "dropping finding: file excluded from the review diff",
+            data: {
+              phase: "combined",
+              file: "AGENTS.md",
+              line: 1,
+              category: conventionsFinding.category,
+            },
+          },
+        ])
+        expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([])
+        // The nonce is random per call; the backreference pins both tags to the same one
+        expect(userPrompts).toEqual([
+          expect.stringMatching(
+            /<conventions-([a-f0-9]{12}) path="AGENTS\.md">\n# Test conventions\n<\/conventions-\1 path="AGENTS\.md">/,
+          ),
+        ])
+      })
+
+      it("drops a finding on a diff-excluded conventions file configured with a ./ prefix", async () => {
+        const { stubs } = makeConventionsFindingDeps({
+          diffExcludePathPatterns: ["AGENTS.md"],
+          conventionsFile: "./AGENTS.md",
+        })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        expect(result.findingsCount).toBe(0)
+        expect(stubs.postFindingsReviewCalls).toEqual([])
+        expect(stubs.postIssueCommentCalls).toEqual([])
+        expect(
+          logsWithMessage(logger, "dropping finding: file excluded from the review diff"),
+        ).toEqual([
+          {
+            level: "warn",
+            message: "dropping finding: file excluded from the review diff",
+            data: {
+              phase: "combined",
+              file: "AGENTS.md",
+              line: 1,
+              category: conventionsFinding.category,
+            },
+          },
+        ])
+        expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([])
+      })
+
+      it("keeps a finding on a conventions file that stays in the review diff", async () => {
+        const { stubs } = makeConventionsFindingDeps({ diffExcludePathPatterns: [] })
+        const logger = createTestLogger()
+
+        const result = await orchestrate(stubs.deps, logger)
+
+        const expectedMapped = mapFindingsToReview({
+          findings: [withRoutedModel(conventionsFinding, "test/model")],
+          commentableByPath: computeCommentableLines(parseDiff(conventionsChangeDiff)),
+        })
+        expect(result.findingsCount).toBe(1)
+        expect(stubs.postFindingsReviewCalls).toEqual([
+          {
+            prNumber: 7,
+            commitId: fixturePrContext.headSha,
+            body: REVIEW_MARKER,
+            comments: expectedMapped.comments,
+          },
+        ])
+        expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([])
+      })
     })
 
     it("excludes files the repo marks linguist-generated", async () => {
@@ -2705,6 +2853,120 @@ describe("orchestrate", () => {
       ])
     })
 
+    it("keeps a finding on an escaped related-doc path under the decoded path and drops one no spelling matches", async () => {
+      const escapedFinding = makeFinding({ file: "docs/a&quot;b.md", line: 3 })
+      const unknownFinding = makeFinding({ file: "docs/c&quot;d.md", line: 5 })
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [escapedFinding, unknownFinding] },
+        },
+        contextReader: {
+          findRelatedDocs: async () => ({
+            files: [
+              {
+                path: 'docs/a"b.md',
+                content: "# Greeter\n\nCall greet() with a name.",
+                includedAs: "full",
+                reason: "mentions src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      expect(stubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderBeyondDiffFinding(
+            withRoutedModel({ ...escapedFinding, file: 'docs/a"b.md' }, "test/model"),
+          ),
+        },
+      ])
+      expect(logsWithMessage(logger, "resolved escaped finding file to a prompt path")).toEqual([
+        {
+          level: "debug",
+          message: "resolved escaped finding file to a prompt path",
+          data: {
+            phase: "combined",
+            writtenFile: "docs/a&quot;b.md",
+            resolvedFile: 'docs/a"b.md',
+            line: 3,
+          },
+        },
+      ])
+      expect(logsWithMessage(logger, "dropping finding: file not in prompt context")).toEqual([
+        {
+          level: "warn",
+          message: "dropping finding: file not in prompt context",
+          data: {
+            phase: "combined",
+            file: "docs/c&quot;d.md",
+            line: 5,
+            category: unknownFinding.category,
+          },
+        },
+      ])
+      expect(logsWithMessage(logger, "per-phase finding filters applied to model output")).toEqual([
+        {
+          level: "info",
+          message: "per-phase finding filters applied to model output",
+          data: {
+            totalFromModel: 2,
+            kept: 1,
+            droppedAsNonFinding: 0,
+            droppedAsUnknownFile: 1,
+            droppedAsExcludedFile: 0,
+            duplicatesAcrossPhases: 0,
+          },
+        },
+      ])
+    })
+
+    it("posts a finding on an escaped changed-file path inline under the decoded diff path", async () => {
+      // Git C-quotes a path holding a double quote, and parse-diff keeps the
+      // backslash, so the diff path and the file block path are docs/a\"b.md
+      const quotedPathDiff = `${sampleDiff}diff --git "a/docs/a\\"b.md" "b/docs/a\\"b.md"\nindex 1111111..2222222 100644\n--- "a/docs/a\\"b.md"\n+++ "b/docs/a\\"b.md"\n@@ -1,2 +1,2 @@\n # Title\n-old line\n+new line\n`
+      const decodedPath = 'docs/a\\"b.md'
+      const escapedFinding = makeFinding({ file: "docs/a\\&quot;b.md", line: 2 })
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: { review: { analysis: "checked", findings: [escapedFinding] } },
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: quotedPathDiff }),
+        },
+        contextReader: {
+          readChangedFiles: async () => ({
+            files: [
+              fixtureChangedFile,
+              { path: decodedPath, content: "# Title\nnew line", includedAs: "full" },
+            ],
+            remainingTokens: 40_000,
+          }),
+        },
+      })
+      const logger = createTestLogger()
+
+      await orchestrate(stubs.deps, logger)
+
+      const expectedMapped = mapFindingsToReview({
+        findings: findingsWithRoutedModel([{ ...escapedFinding, file: decodedPath }], "test/model"),
+        commentableByPath: computeCommentableLines(parseDiff(quotedPathDiff)),
+      })
+      expect(expectedMapped.comments.map((comment) => comment.path)).toEqual([decodedPath])
+      expect(stubs.postFindingsReviewCalls).toEqual([
+        {
+          prNumber: 7,
+          commitId: fixturePrContext.headSha,
+          body: REVIEW_MARKER,
+          comments: expectedMapped.comments,
+        },
+      ])
+      expect(stubs.postIssueCommentCalls).toEqual([])
+    })
+
     it("continues when the findings review post throws", async () => {
       const stubs = makeOrchestrateDeps({
         githubClient: {
@@ -2938,15 +3200,16 @@ describe("orchestrate", () => {
         },
       ])
 
-      expect(logsWithMessage(logger, "non-finding filter applied to model output")).toEqual([
+      expect(logsWithMessage(logger, "per-phase finding filters applied to model output")).toEqual([
         {
           level: "info",
-          message: "non-finding filter applied to model output",
+          message: "per-phase finding filters applied to model output",
           data: {
             totalFromModel: 2,
             kept: 1,
             droppedAsNonFinding: 1,
             droppedAsUnknownFile: 0,
+            droppedAsExcludedFile: 0,
             duplicatesAcrossPhases: 0,
           },
         },
@@ -3062,15 +3325,16 @@ describe("orchestrate", () => {
           },
         },
       ])
-      expect(logsWithMessage(logger, "non-finding filter applied to model output")).toEqual([
+      expect(logsWithMessage(logger, "per-phase finding filters applied to model output")).toEqual([
         {
           level: "info",
-          message: "non-finding filter applied to model output",
+          message: "per-phase finding filters applied to model output",
           data: {
             totalFromModel: 2,
             kept: 1,
             droppedAsNonFinding: 0,
             droppedAsUnknownFile: 1,
+            droppedAsExcludedFile: 0,
             duplicatesAcrossPhases: 0,
           },
         },
@@ -3359,6 +3623,54 @@ describe("orchestrate", () => {
 
       expect(result.findingsCount).toBe(findings.length - 1)
       expect(stubs.postFindingsReviewCalls).toEqual([expectedFindingsReview(findings.slice(1))])
+    })
+
+    it("dedups a finding filed on an escaped path against a prior anchor on the decoded path", async () => {
+      const escapedFinding = makeFinding({ file: "docs/a&quot;b.md", line: 3 })
+      const stubs = makeOrchestrateDeps({
+        fixtureResult: {
+          review: { analysis: "checked", findings: [escapedFinding] },
+        },
+        contextReader: {
+          findRelatedDocs: async () => ({
+            files: [
+              {
+                path: 'docs/a"b.md',
+                content: "# Greeter\n\nCall greet() with a name.",
+                includedAs: "full",
+                reason: "mentions src/greeter.ts",
+              },
+            ],
+            excludedByCapPaths: [],
+          }),
+        },
+        githubClient: {
+          fetchBotIssueComments: async () => [issueFinding('docs/a"b.md:correctness:3')],
+        },
+      })
+      const logger = createTestLogger()
+
+      const result = await orchestrate(stubs.deps, logger)
+
+      expect(result.findingsCount).toBe(0)
+      expect(stubs.postIssueCommentCalls).toEqual([])
+      expect(stubs.postFindingsReviewCalls).toEqual([])
+      expect(logsWithMessage(logger, "cross-run dedup against prior bot comments")).toEqual([
+        {
+          level: "info",
+          message: "cross-run dedup against prior bot comments",
+          data: {
+            statusCommentFound: false,
+            existingAnchorCount: 1,
+            priorBotCommentCount: 1,
+            findingsAfterFilter: 1,
+            findingsSurvivedDedup: 0,
+            droppedByPositional: 1,
+            droppedByContent: 0,
+            droppedByTitle: 0,
+          },
+        },
+      ])
     })
 
     it("dedups a finding whose reported line drifted within the window", async () => {
