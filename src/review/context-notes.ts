@@ -1,5 +1,6 @@
 import { posix } from "node:path"
 import { describeExclusionSource, type ExcludedDiffFile } from "../diff/exclusion.js"
+import { renderCodeSpan } from "./markdown.js"
 import { conventionsCharacterCap, conventionsRenderInFull, type PromptFile } from "./prompt.js"
 
 export type ContextNotesInput = {
@@ -22,11 +23,11 @@ export type ContextNotesInput = {
 const normalizePath = (filePath: string): string => posix.normalize(filePath)
 
 const renderCodePaths = (paths: string[]): string => {
-  return paths.map((filePath) => `\`${filePath}\``).join(", ")
+  return paths.map(renderCodeSpan).join(", ")
 }
 
 const renderExcludedFile = (file: ExcludedDiffFile): string => {
-  return `\`${file.path}\` (${describeExclusionSource(file.source)})`
+  return `${renderCodeSpan(file.path)} (${describeExclusionSource(file.source)})`
 }
 
 /** Priority docs satisfied by a higher-priority channel (changed files,
@@ -181,7 +182,7 @@ export const buildConventionsNote = ({
   if (conventionsCoverage.status !== "truncated") return null
 
   const { fullCopyChannel, characterCap, totalCharacters } = conventionsCoverage
-  const fileLabel = `\`${conventionsFile}\``
+  const fileLabel = renderCodeSpan(conventionsFile)
 
   // priority_docs retries a listed file on every PR, and a later PR that cannot
   // fit it gets its own no-copy note, so a listed file needs no warn-ahead
