@@ -9,6 +9,34 @@
 
 
 
+
+## [0.4.10] — 2026-10-01
+
+### Features
+
+- **openrouter:** Tag client log lines with the review phase (#120)
+
+### Bug Fixes
+
+- **diff:** Decode git-quoted paths from the PR diff (#125)
+- **review:** Resolve escaped finding paths and drop findings on an excluded conventions file (#124)
+- Describe both related-doc reasons and stop sending a full conventions file twice (#123)
+- **deps:** Bump brace-expansion to 5.0.12 (#119)
+- **deps:** Bump undici to 6.29.0 (#117)
+
+### Refactoring
+
+- Clear readability pauses in the client, orchestrator, and entrypoint (#121)
+
+### Documentation
+
+- **agents:** Refresh the code standards from the shared standards notes (#116)
+- Update CHANGELOG.md for v0.4.9
+
+### Maintenance
+
+- **hooks:** Install dependencies at session start and worktree entry (#118)
+
 ## [0.4.9] — 2026-09-29
 
 ### Features
