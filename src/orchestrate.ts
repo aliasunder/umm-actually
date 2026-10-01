@@ -68,6 +68,7 @@ import {
   type RunPhase,
 } from "./review/run-stages.js"
 import { selectFindings } from "./review/select-findings.js"
+import { normalizeWorkspacePath } from "./review/workspace-path.js"
 
 /** Priority docs use this share before full changed-file reads. */
 const PRIORITY_DOCS_BUDGET_FLOOR_RATIO = 0.1
@@ -1106,6 +1107,11 @@ const runReviewPipeline = async (
     logger,
   )
 
+  // The unknown-file filter keeps a finding whose path matches a changed file
+  // only after normalizing, such as `./a\rb.ts`. The rejected-path check
+  // compares normalized paths too, so such a finding still gets its note.
+  const normalizedRejectedPaths = new Set(Array.from(rejectedPaths, normalizeWorkspacePath))
+
   // Beyond-diff findings and findings on a rejected diff path, plus every
   // in-diff finding when GitHub rejected the inline review, since one bad
   // anchor fails the whole review. Each keeps a location note that matches
@@ -1113,7 +1119,7 @@ const runReviewPipeline = async (
   const issueCommentPosts = [
     ...unanchoredFindings.map((finding) => ({
       finding,
-      body: rejectedPaths.has(finding.file)
+      body: normalizedRejectedPaths.has(normalizeWorkspacePath(finding.file))
         ? renderRejectedPathFinding(finding)
         : renderBeyondDiffFinding(finding),
     })),

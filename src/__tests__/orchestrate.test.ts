@@ -1180,6 +1180,37 @@ index 3333333..4444444 100644
       ])
     })
 
+    it("gives the rejected-path note to a finding that spells the rejected path with a leading ./", async () => {
+      const rejectedPathDiff = String.raw`diff --git "a/a\rb.ts" "b/a\rb.ts"
+index 3333333..4444444 100644
+--- "a/a\rb.ts"
++++ "b/a\rb.ts"
+@@ -1 +1 @@
+-old carriage-return line
++new carriage-return line
+`
+      const dotPrefixedFinding = makeFinding({
+        file: String.raw`./a\rb.ts`,
+        line: 1,
+        title: "Carriage-return bug",
+      })
+      const stubs = makeOrchestrateDeps({
+        githubClient: {
+          fetchDiff: async () => ({ kind: "ok" as const, diff: rejectedPathDiff }),
+        },
+        fixtureResult: { review: { analysis: "checked", findings: [dotPrefixedFinding] } },
+      })
+
+      await orchestrate(stubs.deps, createTestLogger())
+
+      expect(stubs.postIssueCommentCalls).toEqual([
+        {
+          prNumber: 7,
+          body: renderRejectedPathFinding(withRoutedModel(dotPrefixedFinding, "test/model")),
+        },
+      ])
+    })
+
     it("keeps a priority doc in the rendered prompt when changed files use the rest of the budget", async () => {
       const priorityDocContent = "# Review reference\nCheck API behavior."
       const priorityDocTokens = estimateTokens(priorityDocContent)
