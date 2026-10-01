@@ -46,8 +46,8 @@ export type ReviewSummaryStats = {
 }
 
 /** Comma-joined items for one markdown line or table cell — em-dash when
- *  empty so cells are never blank. Line breaks, backslashes, and pipes are
- *  escaped, so no item can split or break the row. */
+ *  empty so cells are never blank. Line breaks, backslashes, backticks, and
+ *  pipes are escaped, so no item can split the row or format its text. */
 const renderCommaList = (items: string[]): string => {
   if (items.length === 0) return "—"
 
@@ -55,11 +55,17 @@ const renderCommaList = (items: string[]): string => {
   //    the diff decoder's line-break check, so a raw one would split the row.
   // 2. Backslashes are escaped next, including the ones step 1 wrote, so each
   //    renders as written.
-  // 3. Pipes are escaped last. Escaping them before backslashes would double
-  //    each pipe escape's own backslash and leave the pipe bare. For example,
-  //    `a\|b` renders as `a\\\|b`.
+  // 3. Backticks and pipes are escaped last. Git never quotes a backtick, and
+  //    two in one cell would open a code span. Escaping either before
+  //    backslashes would double its escape's own backslash and leave it bare.
+  //    For example, `a\|b` renders as `a\\\|b`.
   return items
-    .map((item) => escapeLineBreaks(item).replaceAll("\\", "\\\\").replaceAll("|", "\\|"))
+    .map((item) => {
+      return escapeLineBreaks(item)
+        .replaceAll("\\", "\\\\")
+        .replaceAll("`", "\\`")
+        .replaceAll("|", "\\|")
+    })
     .join(", ")
 }
 

@@ -10,7 +10,7 @@ LLM-powered pull request review as a GitHub Action. One consolidated review per 
 - Structured output end to end: every finding carries a category, severity, confidence, and a concrete failure scenario
 - **Drops non-findings before they post** — findings that conclude "no bug here" (an `N/A — …` title, a "no action needed" suggestion, a "…is correct" title) are filtered deterministically
 - Model-agnostic via OpenRouter — pick your model, see your per-call costs; every finding comment carries an `umm-actually · <model>` byline naming the model that produced that finding
-- Findings outside the diff on files the model was given (e.g. callers of changed code), and findings in a changed file whose diff path can't take an inline comment, are posted as standalone comments on the PR
+- Findings outside the diff on files the model was given (e.g. callers of changed code), findings in a changed file whose diff path can't take an inline comment, and every in-diff finding when GitHub rejects the inline review are posted as standalone comments on the PR
 - PRs with oversized diffs are skipped gracefully with a body-only review stating the reason
 - Reports as its **own branded check run** in the PR checks list — the App's avatar, the outcome as the check title (findings count, clean pass, or skip reason), and a details page carrying the summary and per-run cost
 - Surfaces the review context in the workflow job summary — files seen, how much of the conventions file reached the model, which `priority_docs` were included, the token budget breakdown, and how many findings each filter step dropped
@@ -119,7 +119,7 @@ An empty value, such as an unset repo variable, selects the input's default, so 
 6. Drops non-findings (see [Non-finding filter](#non-finding-filter)) and findings on files the model was never given or that diff exclusion removed (see [Unknown-file filter](#unknown-file-filter)), collapses findings that two phases reported on overlapping lines of the same file, then on re-runs deduplicates against previously posted bot comments (three-tier: positional match by hidden HTML anchor, content match by title similarity within 50 lines in the same file, or title-only match by high title similarity across any file)
 7. Filters remaining findings by severity threshold, drops the less severe of two same-category findings that overlap in the same file (on a tie, the one on the later line), and caps if configured
 8. Maps findings to inline PR review comments anchored to diff lines, with a snap-to-nearest-hunk fallback
-9. Posts one review with inline comments (its body is only a hidden marker); beyond-diff findings, and findings in a changed file whose diff path can't take an inline comment, post as standalone PR comments; every run upserts a status comment with cross-run totals
+9. Posts one review with inline comments (its body is only a hidden marker); beyond-diff findings, findings in a changed file whose diff path can't take an inline comment, and every in-diff finding when GitHub rejects the inline review post as standalone PR comments; every run upserts a status comment with cross-run totals
 10. Completes the check run with the outcome — the conclusion grades the run, not the code:
     - `success` for any completed review (with or without findings — the count is in the check title, and a review that lost a phase says so there too)
     - `neutral` for a skip

@@ -390,6 +390,17 @@ describe("renderReviewSummary", () => {
     expect(summary.split("\n")[12]).toBe(String.raw`| Changed files | 1 | src/a\\\|b.ts |`)
   })
 
+  it("escapes backticks in paths so two in one cell cannot open a code span", () => {
+    const summary = renderReviewSummary({
+      ...baseStats,
+      changedFilePaths: ["src/a`b.ts", "src/c`d.ts"],
+    })
+
+    expect(summary.split("\n")[12]).toBe(
+      String.raw`| Changed files | 2 | src/a\`b.ts, src/c\`d.ts |`,
+    )
+  })
+
   it("escapes a line break in a path so it cannot split the table row", () => {
     const summary = renderReviewSummary({
       ...baseStats,
