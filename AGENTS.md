@@ -127,6 +127,11 @@ files. Prefer SDK-provided types over redefining shapes.
   in workflow or action YAML (caps, timeouts) gets its why directly above it.
   Comment prose uses short complete sentences, with no colon-hinged labels
   and no verbless fragments.
+- A doc comment never opens with `This function` or `This helper`. It opens
+  with the noun the function returns or the constraint it enforces
+  (`/** The canonical workspace spelling of a path … */`, never
+  `/** This function normalizes a path … */`), because the opener is what a
+  reader scans and "This function" says nothing the signature does not.
 - Named constants over bare magic literals, with the one-line why at the
   definition. Scope constants to where they're used — module level
   overstates visibility when only one function needs the value.
