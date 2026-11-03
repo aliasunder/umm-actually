@@ -2,7 +2,9 @@
 
 <!-- distilled from vault Reference/code-standards-* on 2026-11-03; refresh (merges, keeps hand edits): run the sync-code-standards skill -->
 
-Project conventions for AI-assisted development on umm-actually.
+Conventions for everyone who changes umm-actually, agents and people alike.
+Edit this file by hand when a convention changes; the stamp above records the
+last refresh from the shared standards notes, and a refresh keeps hand edits.
 
 ## What this project is
 
@@ -26,20 +28,20 @@ src/
   config.ts                # action inputs → validated ActionConfig
   logger.ts                # structured JSON logger — levels, child contexts, lazy props
   github/                  # GitHub I/O: event payload → PrContext, octokit wrappers (diff fetch, review posting)
-  openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, per-attempt and shared review deadlines, retry and fallback ladder (HTTP errors, timeouts, invalid structured output), cost summary
-  diff/                    # pure transforms over parse-diff output: git-quoted path decoding, annotation, commentable lines, diff-level exclusion (patterns, gitattributes linguist rules, wildcard safety cap)
+  openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, per-attempt and shared review deadlines, retry ladder (up to two attempts per model, then the fallback_model input; on HTTP errors, timeouts, invalid structured output), cost summary
+  diff/                    # pure transforms over parse-diff output: git-quoted path decoding, annotation, commentable lines, diff-level exclusion (patterns, gitattributes linguist rules, wildcard cap: at most 2 "*" per path segment so matching cannot backtrack for minutes)
   context/                 # workspace I/O: conventions file, root .gitattributes, changed files, import-trace scan, doc-mention scan, priority docs
-  review/                  # pure review logic: finding schema, phases + stage dispatch, prompt, non-finding filter, unknown-file filter, cross-phase merge, path normalization, selection, comment mapping, markdown code spans, title similarity, context notes, summary
-  orchestrate.ts           # pipeline + createPromptedGenerateFindings — fully testable with stub clients
+  review/                  # pure review logic (the model call is a function the caller passes in): finding schema, phases + stage dispatch (defined under Review instruction authoring), prompt, non-finding filter and unknown-file filter (README sections of those names), cross-phase merge, path normalization, selection, comment mapping, markdown code spans, title similarity, context notes, summary
+  orchestrate.ts           # pipeline, plus createPromptedGenerateFindings, which builds the per-phase model call the stage dispatcher runs — fully testable with stub clients
 ```
 
 ## Module layering
 
 Pure leaves (`diff/`, `review/`) → I/O clients (`github/`, `openrouter/`,
-`context/`) → composition (`orchestrate.ts`). Only `main.ts` constructs SDK
-clients and touches real `process.env`, except that `logger.ts` reads
-`LOG_LEVEL`. A pure module importing an I/O module is a backwards
-dependency and a bug — enforced by a
+`context/`) → composition (`orchestrate.ts`) → entry point (`main.ts`). Only
+`main.ts` constructs SDK clients and touches real `process.env`, except that
+`logger.ts` reads `LOG_LEVEL`. A pure module importing an I/O module is a
+backwards dependency and a bug — enforced by a
 `@typescript-eslint/no-restricted-imports` block in `eslint.config.ts`
 (type-only imports are allowed; they're erased at compile time). Tests are
 the outermost layer, so only tests import from a `__tests__/` folder.
@@ -49,11 +51,11 @@ Use the official SDKs — don't hand-roll what `@actions/core`,
 Before writing any parsing or validation helper, check the SDK's utility
 surface first: `@actions/core` ships `getBooleanInput` (strict YAML 1.2
 booleans), which replaced a hand-rolled boolean-string Zod transform here.
-Values an SDK util already parses arrive in `RawInputs` pre-parsed from the
-collection boundary (main.ts) — "validation lives in config.ts" is about
-where _our_ rules live, not a reason to reimplement the platform's. Zod
-validates the things that are genuinely ours: LLM structured output and
-action config.
+Values an SDK util already parses arrive pre-parsed in `RawInputs` (the type
+in `config.ts`, built by `collectRawInputs` in `main.ts`). Our own validation
+rules live in `config.ts`; that is not a reason to reimplement the platform's
+parsing. Zod validates the things that are genuinely ours: LLM structured
+output and action config.
 
 Types are colocated with the code that uses them — no standalone types
 files. Prefer SDK-provided types over redefining shapes.
@@ -69,9 +71,9 @@ files. Prefer SDK-provided types over redefining shapes.
   export style.
 - Use `type` over `interface`, TypeScript strict mode, and the `node:`
   prefix for built-ins. Relative imports use explicit `.js` extensions. Every
-  `.ts` file under `src/` compiles in `npm run build`; a file that cannot
-  meet project strictness gets its own small tsconfig wired into the build,
-  never an exemption.
+  `.ts` file outside `fixtures/` compiles in `npm run build`; a file outside
+  `src/` gets its own small tsconfig wired into the build
+  (`tsconfig.eslint.json`), never an exemption.
 - Exports declare explicit return types. Never use `any`, `as` or `!`
   (`as const` exempt); narrow with runtime guards or schema validation.
   Prefer truthy/falsy checks (`if (value)`) over explicit `!== undefined`
@@ -346,7 +348,9 @@ files. Prefer SDK-provided types over redefining shapes.
   request context.
 - An I/O client never truncates its output or returns data that exists only
   for logging; presentation limits belong to the consumer, and the client
-  logs at the site.
+  logs at the site. A reason string or error summary the client composes
+  for display may cap its own length (`summarizeError` keeps 200
+  characters).
 - Levels are **error** (failed, needs attention), **warn** (degraded but
   handled — state the fallback taken), **info** (state changes an operator
   cares about), and **debug** (diagnostic detail, off by default). Per-item
@@ -371,7 +375,9 @@ files. Prefer SDK-provided types over redefining shapes.
   is needed. Code whose only effect is a clearer message for a rare,
   non-default misconfiguration earns no place when it prevents no failure.
 - Full detail stays in the run log; text posted to the PR never carries
-  internal paths, stack traces or implementation state.
+  internal paths, stack traces or implementation state. The check run's
+  failure summary is the exception: it carries `describeError` output so an
+  operator sees why a phase or the run failed.
 - Reject explicitly instead of normalizing silently when the normalized
   value would post or write the wrong thing. User-supplied identifiers that
   arrive in mixed case (URLs, headers) are compared case-insensitively,
@@ -433,9 +439,10 @@ files. Prefer SDK-provided types over redefining shapes.
 ## Review instruction authoring
 
 The bot's system-prompt instructions live in `src/review/phases.ts`
-(dimension constants, the per-phase pass-scope line, reporting rules, and
-the phase groups each `phases` mode dispatches) and `src/review/prompt.ts`
-(identity/scope, proof-of-work, severity rubric, output discipline).
+(the `DIMENSION_*` prompt constants, the per-phase pass-scope line, the
+reporting rules, and the phase groups each value of the `phases` input
+dispatches) and `src/review/prompt.ts` (identity/scope, proof-of-work,
+severity rubric, output discipline).
 
 **Phase/stage mechanics:** a phase is one model call carrying a set of
 review dimensions. A stage groups the phases that run concurrently; stages
@@ -461,10 +468,10 @@ element is here because its absence measurably cost findings in live runs:
   steers the model harder than a paragraph of prose. Budget them — the
   system prompt loads on every review call.
 - **Proof-of-work coupling for skippable checklists.** A check the model
-  can silently skip needs a required enumeration in the "analysis" field
-  (quote each doc sentence checked; name each changed it() and its
-  derivable exact value). Skipping must be visible in the output, not just
-  discouraged.
+  can silently skip needs a required enumeration in the finding schema's
+  `analysis` field (`src/review/finding.ts`): quote each doc sentence
+  checked, and name each changed it() and its derivable exact value.
+  Skipping must be visible in the output, not just discouraged.
 - **Single-call constraint.** Every check must be resolvable by reasoning
   over the prompt-provided files — no instruction may assume tools, test
   runs, grep, or repository access beyond the prompt context.
@@ -473,9 +480,10 @@ element is here because its absence measurably cost findings in live runs:
   (test-owned strings, whitespace-normalized) so accidental removal fails
   the suite.
 - **Validate live with a planted finding.** Before trusting a new check,
-  plant a violation it should catch on a PR (self-review builds from the
-  branch, so the PR's own instructions review it), verify the catch, then
-  revert the plant.
+  plant a violation it should catch on a PR (the Self Review workflow,
+  `.github/workflows/self_review.yml`, reviews each PR with the action built
+  from that branch, so the PR's own instructions review it), verify the
+  catch, then revert the plant.
 
 ## CI conventions
 
