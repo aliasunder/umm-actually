@@ -65,9 +65,9 @@ files. Prefer SDK-provided types over redefining shapes.
   config readers export named functions. One export style per module.
 - `type` over `interface`. TypeScript strict mode. `node:` prefix for
   built-ins. Relative imports use explicit `.js` extensions (ESM runtime
-  requirement). Every `.ts` file outside `fixtures/` compiles in
-  `npm run build`; a file that cannot meet project strictness gets its own
-  small tsconfig wired into the build, never an exemption.
+  requirement). Every `.ts` file under `src/` compiles in `npm run build`;
+  a file that cannot meet project strictness gets its own small tsconfig
+  wired into the build, never an exemption.
 - Explicit return types on exports. No `any`. No `as` or `!` (`as const`
   exempt) — use runtime guards or schema validation to narrow. TS ≥5.5
   infers `.filter()` predicates from bare null/undefined comparisons;
@@ -144,9 +144,11 @@ files. Prefer SDK-provided types over redefining shapes.
   hand-read those); remaining ambient environment (`GITHUB_WORKSPACE`, …)
   goes through the `env-var` package
   (`envVar.from(env).get("NAME").required().asString()`), with the env
-  record injectable for tests. A default-on input gets an explicit sentinel
-  off value (`none`), never an empty string; a list input extends its shipped
-  default list, and a leading `none` replaces it.
+  record injectable for tests. A new default-on input gets an explicit
+  sentinel off value (`none`), never an empty string, and a new list input
+  extends its shipped default list with a leading `none` replacing it, as
+  `diff_exclude_paths` does; `priority_docs` keeps its documented replace
+  semantics, where an empty value disables it.
 - Comment decision at write time (use `/** */`; only when earned):
   (1) Can a reader understand this from name + params + return type? → no
   comment — this is most functions. (2) Something non-obvious? → one-line
