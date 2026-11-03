@@ -374,9 +374,8 @@ files. Prefer SDK-provided types over redefining shapes.
   internal paths, stack traces or implementation state.
 - Reject explicitly instead of normalizing silently when the normalized
   value would post or write the wrong thing. User-supplied identifiers that
-  arrive in mixed case (URLs, extensions, headers) are compared
-  case-insensitively, normalized once at the boundary. That case-folding is
-  not auto-correction.
+  arrive in mixed case (URLs, headers) are compared case-insensitively,
+  normalized once at the boundary. That case-folding is not auto-correction.
 
 ## Docs
 
