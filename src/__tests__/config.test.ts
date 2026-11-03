@@ -263,7 +263,7 @@ describe("parseConfig", () => {
 
   it("rejects an empty github token", () => {
     expect(() => parseConfig(makeRawInputs({ githubToken: "" }))).toThrow(
-      "githubToken: github_token is required",
+      new Error("invalid action inputs — githubToken: github_token is required"),
     )
   })
 

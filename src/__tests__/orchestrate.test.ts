@@ -1692,7 +1692,14 @@ index 3333333..4444444 100644
       })
 
       await expect(orchestrate(stubs.deps, createTestLogger())).rejects.toThrow(
-        "every review phase failed: combined: [Error]: not attempted: review deadline exceeded",
+        new AllPhasesFailedError([
+          {
+            phase: COMBINED_PHASE,
+            status: "failed",
+            error: new Error("not attempted: review deadline exceeded"),
+            deadlineExceeded: true,
+          },
+        ]),
       )
 
       expect(operations.slice(0, 2)).toEqual(["read priority docs", "read changed files"])
@@ -5145,7 +5152,17 @@ describe("staged phases", () => {
     const logger = createTestLogger()
 
     await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
-      "every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+      new AllPhasesFailedError([
+        {
+          phase: COMBINED_PHASE,
+          status: "failed",
+          error: new ReviewRequestError({
+            message: "review request failed after 1 attempt(s)",
+            attempts: [timeoutAttempt],
+            keyRejected: false,
+          }),
+        },
+      ]),
     )
     expect(stubs.updateCheckRunCalls).toEqual([
       {
@@ -5186,7 +5203,17 @@ describe("staged phases", () => {
     const logger = createTestLogger()
 
     await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
-      "every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+      new AllPhasesFailedError([
+        {
+          phase: COMBINED_PHASE,
+          status: "failed",
+          error: new ReviewRequestError({
+            message: "review request failed after 1 attempt(s)",
+            attempts: [timeoutAttempt],
+            keyRejected: false,
+          }),
+        },
+      ]),
     )
     expect(stubs.updateCheckRunCalls).toEqual([
       {
@@ -5224,7 +5251,17 @@ describe("staged phases", () => {
     const logger = createTestLogger()
 
     await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
-      "every review phase failed: combined: [ReviewRequestError]: review request failed after 3 attempt(s)",
+      new AllPhasesFailedError([
+        {
+          phase: COMBINED_PHASE,
+          status: "failed",
+          error: new ReviewRequestError({
+            message: "review request failed after 3 attempt(s)",
+            attempts,
+            keyRejected: false,
+          }),
+        },
+      ]),
     )
     expect(stubs.updateCheckRunCalls).toEqual([
       {

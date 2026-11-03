@@ -198,7 +198,7 @@ describe("fetchPullRequest", () => {
     const { client } = makeClient(stub)
 
     await expect(client.fetchPullRequest({ prNumber: 7 })).rejects.toThrow(
-      "unexpected pull request response shape",
+      new Error("unexpected pull request response shape"),
     )
   })
 })
@@ -263,7 +263,7 @@ describe("fetchDiff", () => {
     const { client } = makeClient(stub)
 
     await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow(
-      "expected a unified diff string from the diff media type",
+      new Error("expected a unified diff string from the diff media type"),
     )
   })
 })
@@ -449,7 +449,7 @@ describe("postIssueComment", () => {
     const { client } = makeClient(stub)
 
     await expect(client.postIssueComment({ prNumber: 7, body: "finding" })).rejects.toThrow(
-      "unexpected issue comment response shape",
+      new Error("unexpected issue comment response shape"),
     )
   })
 
@@ -460,7 +460,7 @@ describe("postIssueComment", () => {
     const { client } = makeClient(stub)
 
     await expect(client.postIssueComment({ prNumber: 7, body: "finding" })).rejects.toThrow(
-      "HTTP 403",
+      makeStatusError(403),
     )
   })
 })
@@ -696,7 +696,7 @@ describe("fetchBotReviewComments", () => {
     const { client } = makeClient(stub)
 
     await expect(client.fetchBotReviewComments({ prNumber: 7 })).rejects.toThrow(
-      "unexpected review comments response shape",
+      new Error("unexpected review comments response shape"),
     )
   })
 })
@@ -897,7 +897,7 @@ describe("fetchBotIssueComments", () => {
     const { client } = makeClient(stub)
 
     await expect(client.fetchBotIssueComments({ prNumber: 7 })).rejects.toThrow(
-      "unexpected issue comments response shape",
+      new Error("unexpected issue comments response shape"),
     )
   })
 
@@ -1139,7 +1139,7 @@ describe("upsertSummaryComment", () => {
     const { client } = makeClient(stub)
 
     await expect(client.upsertSummaryComment({ prNumber: 7, body, anchor })).rejects.toThrow(
-      "unexpected issue comments response shape",
+      new Error("unexpected issue comments response shape"),
     )
   })
 
@@ -1152,7 +1152,7 @@ describe("upsertSummaryComment", () => {
     const { client } = makeClient(stub)
 
     await expect(client.upsertSummaryComment({ prNumber: 7, body, anchor })).rejects.toThrow(
-      "unexpected issue comment response shape",
+      new Error("unexpected issue comment response shape"),
     )
   })
 
@@ -1176,7 +1176,7 @@ describe("upsertSummaryComment", () => {
     const { client } = makeClient(stub)
 
     await expect(client.upsertSummaryComment({ prNumber: 7, body, anchor })).rejects.toThrow(
-      "unexpected issue comment response shape",
+      new Error("unexpected issue comment response shape"),
     )
   })
 

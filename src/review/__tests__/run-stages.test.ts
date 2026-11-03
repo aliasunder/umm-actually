@@ -317,7 +317,7 @@ describe("runStages", () => {
     const { runPhase, calls } = makeRunPhase({ a: () => makeResult() })
 
     await expect(runStages({ stages, runPhase }, createTestLogger())).rejects.toThrow(
-      "no review phases to run",
+      new Error("no review phases to run"),
     )
     expect(calls).toEqual([])
   })
