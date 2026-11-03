@@ -88,8 +88,8 @@ files. Prefer SDK-provided types over redefining shapes.
   converter. Branch on a union of outcomes with an exhaustive `switch` naming
   every member, never an `if` plus a ternary whose fallback catches the rest
   unnamed. A param read only for truthiness becomes a `boolean`, never a
-  value-or-`""` sentinel. Prefer type-only
-  imports over structural duplication, and never clone an interface.
+  value-or-`""` sentinel. Prefer type-only imports over structural
+  duplication, and never clone an interface.
 - Code is immutable by default; avoid `let`. A `reduce` must return a new
   accumulator each step. When mutation is genuinely needed, add a comment
   justifying it. Prefer the non-mutating array methods
@@ -338,14 +338,15 @@ files. Prefer SDK-provided types over redefining shapes.
 
 ## Logging & observability
 
-- Use `logger.ts`, never `console.log`. A function that logs takes
-  `(params, logger)`, and the logger is required. The logger stamps info,
-  warn and error entries with the caller's file and line (`source`), so never
-  add a hand-maintained module tag. An I/O client never truncates its output
-  or returns data that exists only for logging; presentation limits belong
-  to the consumer, and the client logs at the site.
-- Thread the caller's logger into domain functions so deep events inherit
+- Use `logger.ts`, never `console.log`. The logger stamps info, warn and
+  error entries with the caller's file and line (`source`), so never add a
+  hand-maintained module tag.
+- A function that logs takes `(params, logger)`, and the logger is required.
+  Thread the caller's logger into domain functions so deep events inherit
   request context.
+- An I/O client never truncates its output or returns data that exists only
+  for logging; presentation limits belong to the consumer, and the client
+  logs at the site.
 - Levels are **error** (failed, needs attention), **warn** (degraded but
   handled — state the fallback taken), **info** (state changes an operator
   cares about), and **debug** (diagnostic detail, off by default). Per-item
