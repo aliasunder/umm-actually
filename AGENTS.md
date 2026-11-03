@@ -1,6 +1,6 @@
 # AGENTS.md
 
-<!-- distilled from vault Reference/code-standards-* on 2026-09-28; refresh (merges, keeps hand edits): run the sync-code-standards skill -->
+<!-- distilled from vault Reference/code-standards-* on 2026-11-03; refresh (merges, keeps hand edits): run the sync-code-standards skill -->
 
 Project conventions for AI-assisted development on umm-actually.
 
@@ -58,20 +58,34 @@ files. Prefer SDK-provided types over redefining shapes.
 
 ## Code style
 
-- Functional over OOP. Arrow functions over `function` declarations.
+- Functional over OOP. Arrow functions over `function` declarations; leaf
+  helpers sit above their callers so a file reads top to bottom.
 - Factory/closure pattern for stateful modules; single namespace export for
-  cohesive service surfaces (`githubClient.submitReview(…)`).
-- `type` over `interface`. TypeScript strict mode. `node:` prefix for built-ins.
-- Explicit return types on exports. No `any`. No `as` or `!` — use runtime
-  guards or schema validation to narrow. Truthy/falsy checks over explicit
+  cohesive service surfaces (`githubClient.submitReview(…)`). Parsers and
+  config readers export named functions. One export style per module.
+- `type` over `interface`. TypeScript strict mode. `node:` prefix for
+  built-ins. Relative imports use explicit `.js` extensions (ESM runtime
+  requirement). Every `.ts` file compiles in `npm run build`; a file that
+  cannot meet project strictness gets its own small tsconfig wired into the
+  build, never an exemption.
+- Explicit return types on exports. No `any`. No `as` or `!` (`as const`
+  exempt) — use runtime guards or schema validation to narrow. TS ≥5.5
+  infers `.filter()` predicates from bare null/undefined comparisons;
+  `filter(Boolean)` does not narrow. Truthy/falsy checks over explicit
   `!== undefined` comparisons — use `if (value)` not `if (value !== undefined)`
   unless distinguishing `undefined` from other falsy values (`null`, `0`, `""`,
-  `false`) actually matters for correctness.
+  `false`) actually matters for correctness. `Boolean(x)` over `!!x`.
+  Optional chaining and nullish coalescing flatten guards
+  (`value?.prop ?? fallback` over guard-then-access).
 - Model states in the type system. A result with modes is a discriminated
   union with `never` exhaustiveness, not optional fields documented as
   "present only in mode X". One discriminant per fact, so a new case becomes
-  a union member, never a second result shape with a converter. A param read
-  only for truthiness is typed `boolean`.
+  a union member, never a second result shape with a converter. Branch on a
+  union of outcomes with an exhaustive `switch` naming every member, never an
+  `if` plus a ternary whose fallback catches the rest unnamed. A param read
+  only for truthiness is typed `boolean` and named for the action it
+  controls. Type-only imports over structural duplication — don't clone
+  interfaces for "module purity"; type imports are erased at compile time.
 - Immutable by default; avoid `let`. A `reduce` must return a new accumulator
   each step — never mutate-and-return. When mutation is genuinely needed,
   add a comment justifying it. Prefer the non-mutating array methods
@@ -80,16 +94,26 @@ files. Prefer SDK-provided types over redefining shapes.
   readonly views (`ReadonlyArray`, `ReadonlySet`). Readability gates any
   refactor toward a more functional shape.
 - Explicit names over abbreviations, everywhere — params, callbacks, locals.
-  Value-returning functions name what they return (`getX`, not `ensureX`);
-  side-effect functions say what they do. A generic destructured key keeps
-  its source (`const { on: modifiedOn } = filters.modified`).
+  A placeholder (`row`, `item`) fails whenever a domain noun exists, and a
+  pipeline intermediate keeps its domain prefix
+  (`statusInput → statusValues`). Value-returning functions name what they
+  return (`getX`, not `ensureX`); side-effect functions say what they do;
+  every name carries the noun it acts on, and a converter goes input noun →
+  output noun. No
+  trailing `Of` (`findLaneRecord`, not `laneRecordOf`); rename an existing
+  one only when a change already touches it. No terms coined during
+  planning. Booleans are named for the affirmative state; a guard boolean
+  names the action it controls. A generic destructured key keeps its source
+  (`const { on: modifiedOn } = filters.modified`). Modules and folders are
+  named for what the code does and everything it owns.
 - Wire names stay at the boundary. Action inputs are `snake_case` and
-  `ActionConfig` is `camelCase`; map once in `main.ts`/`config.ts`.
+  `ActionConfig` is `camelCase`; map once in `main.ts`/`config.ts`. An input
+  is named for the user's mental model of the switch, not for the
+  implementation's flag.
 - Early returns over nested `if/else`. When a function has a primary path and
   a secondary path (e.g. first-run vs re-run), return early from the simpler
   branch so the remaining code flows linearly without nesting. Extract
-  multi-clause conditionals into named booleans. Name booleans for the
-  affirmative state.
+  multi-clause conditionals into named booleans.
 - Never a chained ternary (a second `?` inside a ternary) or a `let`
   assigned through if/else branches — use one `if … return` per branch in a
   small helper, or one named const per decision step. `while (condition)`
@@ -102,9 +126,17 @@ files. Prefer SDK-provided types over redefining shapes.
   only for one-liners. A multi-clause boolean spanning lines gets
   `{ return (...) }`; guard chains get explicit early returns, never a
   chained `||`/ternary expression body.
-- Named params for functions with more than two args or adjacent same-typed
-  args.
+- Named params for functions with more than two args, adjacent same-typed
+  args, or one literal whose purpose is unclear at the call site. Split a
+  pure predicate from reporting when an input only labels the side effect.
+  Named records over positional tuples; index-aligned parallel arrays become
+  one record per item; destructure an object accessed twice or more; name a
+  cryptic sub-expression. Plain values over thunks: when every call site
+  passes `() => alreadyComputed`, accept the value.
 - Data-layer and I/O functions take `(params, logger)` — logger is required.
+  A data-layer function never truncates its output or returns observability
+  data; presentation limits belong to the consumer, and the function logs at
+  the site.
 - `process.env` is never read via raw property access. Action inputs
   (`INPUT_*`) go through `@actions/core` `getInput`/`getBooleanInput`; the
   event name and payload come from `@actions/github` `context` (it reads
@@ -112,21 +144,27 @@ files. Prefer SDK-provided types over redefining shapes.
   hand-read those); remaining ambient environment (`GITHUB_WORKSPACE`, …)
   goes through the `env-var` package
   (`envVar.from(env).get("NAME").required().asString()`), with the env
-  record injectable for tests.
+  record injectable for tests. A default-on input gets an explicit sentinel
+  off value (`none`), never an empty string; a list input extends its shipped
+  default list, and a leading `none` replaces it.
 - Comment decision at write time (use `/** */`; only when earned):
   (1) Can a reader understand this from name + params + return type? → no
   comment — this is most functions. (2) Something non-obvious? → one-line
   JSDoc stating the constraint the signature doesn't convey. (3) Does the
-  JSDoc restate the function name? → delete it. (4) More than 2 lines? →
+  JSDoc restate the function name? → delete it. (4) Does it explain what
+  instead of why? → rewrite as the constraint. (5) More than 2 lines? →
   pick the format the reader absorbs quickest (bullets, numbered steps),
   never multi-paragraph prose. Inline comments go directly above the
   relevant line — don't stuff implementation details into the docstring.
   Regex constants get doc comments. A guard's comment states the scenario,
-  the mechanism, and what breaks without it. Comments carry durable rationale
-  only, never transition history or decision narrative. Every chosen number
-  in workflow or action YAML (caps, timeouts) gets its why directly above it.
-  Comment prose uses short complete sentences, with no colon-hinged labels
-  and no verbless fragments.
+  the mechanism, and what breaks without it; a mechanism-only label or an
+  undefined term fails. A borrowed standard term gets a one-line gloss and a
+  link to its authoritative source. Comments carry durable rationale only,
+  never transition history, decision narrative or name-choice provenance; a
+  genuine risk of retracing an abandoned error is rationale, not history.
+  Every chosen number in workflow or action YAML (caps, timeouts) gets its
+  why directly above it. Comment prose uses short complete sentences, with
+  no colon-hinged labels and no verbless fragments.
 - Named constants over bare magic literals, with the one-line why at the
   definition. Scope constants to where they're used — module level
   overstates visibility when only one function needs the value.
@@ -143,42 +181,64 @@ files. Prefer SDK-provided types over redefining shapes.
   once into a factory/closure and pass the resulting collaborator, never
   thread config through layers that don't read it. One concern stays in
   one module: files that only ever import each other are fragmentation,
-  not separation — a module boundary needs an independent consumer.
-- Type-only imports over structural duplication — don't clone interfaces
-  for "module purity"; type imports are erased at compile time.
+  not separation — a module boundary needs an independent consumer. A
+  shared helper needs two gates before it goes under a generic folder: zero
+  domain knowledge, and either a decision several callers share or a
+  standalone primitive describable without naming a caller.
+- Multiplying config axes (phase groups, exclusion sources) get a
+  declarative registry plus an AND-composed predicate chain, never per-flag
+  branching; a new axis is one predicate.
 - Extract multi-step `.map()`/`.reduce()` callbacks into named functions
   when they nest chains or build intermediates. Conditional spreads and
   `.filter(Boolean)` are both fine — pick whichever reads clearer; don't
   convert mechanically. Name non-trivial `.filter()` predicates.
 - Per-operation try/catch — each catch encloses one operation with one
-  failure meaning. Broad catch-alls are banned. Every catch logs or
-  re-throws; a swallowed error is worse than an uncaught one.
+  failure meaning. Broad catch-alls are banned; a bare `try/finally` for
+  resource scoping is fine. `async/await` over `.catch()` chains. Every
+  catch logs or re-throws; a swallowed error is worse than an uncaught one.
 - Throw on an unreachable null instead of a `?? ""` sentinel that silently
   degrades data.
+- At the input boundary an invalid value is rejected and a machine-derived
+  value is auto-corrected and reported; a user-authored value is never
+  auto-corrected.
 - Required inputs enforced at every entry point — fail fast at boot/load.
   Making an already-expected value mandatory is a bug fix, not a breaking
-  change.
+  change. Breaking means a documented, supported input or output stops
+  working; accidental behaviour can change.
 - The declared contract and the runtime say the same thing. `action.yml` and
   the README never advertise a default or a rejection that `config.ts`
-  doesn't perform.
+  doesn't perform. A stricter contract is a runtime change first, then the
+  docs.
+- A guard that cannot engage fails closed: a conventions or config file
+  that is present but unparseable is refused with a logged reason, never
+  skipped silently; a missing one takes the defaults. A reader that affects
+  only reads or formatting falls back with a `warn`.
+- A misleading error that invites destructive recovery is a bug — detect the
+  real condition and refuse honestly at minimum.
 - For an external limit that varies per endpoint (a model's context
   window), parse the real limit from the rejection and retry to fit. A
   documented, uniform limit can be a constant.
 - LLM-facing contracts (prompt sections, the finding schema) omit an
   optional field whose absence is unambiguous — no always-present zero
   placeholders. Keep the field when `0`/`[]` is a legitimate value or it
-  carries structural attribution.
+  carries structural attribution. One meaning per result field: data from a
+  second source gets its own field, so a consumer can tell what it may act
+  on.
 - Platform built-ins before hand-rolled parsing (`URL.parse`, `node:path`);
   with none, exact-value comparison beats string surgery. Parse genuinely
   varying structured strings with a declarative, doc-commented regex (named
   groups), not index arithmetic.
-- `Boolean(x)` over `!!x`. TS ≥5.5 infers `.filter()` predicates from
-  bare comparisons — omit explicit type-guard annotations on `.filter()`
-  with a bare null/undefined check.
-- Relative imports use explicit `.js` extensions (ESM runtime requirement).
+- An internal byte cap on text (conventions sent to the model) cuts on whole
+  code points, never mid-UTF-16 unit.
+- Tests are the outermost layer: nothing imports from a `__tests__/` folder;
+  a helper a script also needs lives beside the script. Lint-enforce
+  mechanically checkable conventions; curated exceptions over blanket bans,
+  never a rule that fights an established idiom.
 - Vet a new dependency's maintainers, release history and downloads before
   adopting it; at negligible adoption with a small core, prefer a local
-  implementation. Pin dependency overrides to exact versions.
+  implementation. Pin dependency overrides to exact versions, and pin a dev
+  tool used locally and in CI to one version — never a package manager's
+  current version or an npm wrapper fetching an unverified binary.
 - Simple over clever: before settling, ask whether fewer moving parts do the
   job. A dead-code claim is proven by enumerating every trigger, not by log
   silence.
@@ -186,7 +246,8 @@ files. Prefer SDK-provided types over redefining shapes.
 ## Test conventions
 
 - Tests read as a behavioral spec: one focused `it()` per behavior, named so
-  a failure identifies the regression without reading the body.
+  a failure identifies the regression without reading the body, and the name
+  matches what is actually asserted.
 - `const` per test via factory helpers; `beforeEach` only when per-test
   creation is genuinely impractical.
 - Exact assertions over loose matchers; assert whole values over substrings
@@ -209,34 +270,53 @@ files. Prefer SDK-provided types over redefining shapes.
   exactly; `expect.any(String)` still matches `""`).
 - Deterministic error messages get exact assertions, ordered results get a
   positional `toEqual`, and objects are matched whole, not with
-  `objectContaining`. A looser neighboring test is never the standard; write
-  the new test to this bar and surface the older one as a fix candidate.
+  `objectContaining`. A string passed to `toThrow` matches any message that
+  contains it; pass `new Error(message)`, which Vitest compares whole. A
+  looser neighboring test is never the standard: write the new test to this
+  bar, fix loose siblings in a test file the PR already edits as a separate
+  test-only commit, and note loose tests in files the PR does not touch as
+  follow-up work.
 - A drift-catching test owns its expected value. Define the expected prompt
   text or default in the test file; importing the production constant makes
-  both sides drift together.
+  both sides drift together. Extract a shared test-file constant only when
+  several tests need the same expected value.
 - Assert stub interactions with `toHaveBeenCalledTimes(1)` +
   `toHaveBeenCalledWith(exactArgs)`, not `mock.calls[i][j]` readback. Derive
-  an expected value test-side; never read it back out of the call log.
+  an expected value test-side with the mechanism production uses; never read
+  it back out of the call log, because production must not be its own
+  oracle.
 - Register cleanup at creation (`onTestFinished`, `afterEach`), because
   cleanup at the end of a test body is skipped when an assertion throws. Use
   Vitest helpers (`vi.mocked`, `vi.restoreAllMocks`) over module-level `let`
   plumbing.
 - `it.each` is only for identical assertion shapes, with labeled case
-  objects and `$label` in the title. Structurally different checks get
+  objects and `$label` in the title (a bare `%i` placeholder is fine when the
+  primitive itself names the case). Structurally different checks get
   separate `it()` blocks.
 - Cover error paths and boundaries (zero, one, empty), not just the happy
   path. For every guard, ask what unrelated change could silently undo it,
-  and write the test that catches that erosion.
-- Test helpers and stubs earn their place by removing real duplication. A
-  stub must not allow a condition production can't produce, and must keep
-  the dimension under test (order, timing, size) varied.
+  and write the test that catches that erosion. Coverage percentage is not a
+  goal; a behavior without a failing-test story is the gap that matters.
+- Test helpers and stubs earn their place by removing real duplication, not
+  anticipated reuse. A stub must not allow a condition production can't
+  produce, and must keep the dimension under test (order, timing, size)
+  varied, with decoys where ranking or selection is the behavior.
 - For retry and deadline logic, prefer a controllable seam (an injected
-  timeout, stubbed client outcomes) over fake timers. When timing is the
-  contract, assert outcomes after advancing the clock, never the tick-by-tick
-  schedule.
+  timeout, stubbed client outcomes such as fail-once-then-succeed) over fake
+  timers; the policy itself (attempt count, backoff) is usually testable
+  pure. When timing is the contract, assert outcomes after advancing the
+  clock, never the tick-by-tick schedule.
 - Production code never carries test-serving structure (extra branches or
   cache keys that exist only to isolate tests); tests own isolation through
-  factories. Production type rules apply in tests: no `!`.
+  factories and `vi.resetModules`. A single `process.env.X ?? defaultUrl`
+  read at module scope is acceptable when it unlocks an otherwise impossible
+  test tier; anything more is test-serving structure. Production type rules
+  apply in tests: no `!` (guard or restructure instead), while `?.` array
+  access and `?? fallback` are legitimate narrowing, and callback params are
+  spelled out (`entry`, not `e`).
+- When the risky path touches an external system, a real integration with
+  blast-radius controls (a write path disabled, throwaway identifiers) beats
+  a structural check against a stand-in.
 - Test a workflow shell snippet under `bash -e` before committing — Actions
   runs `run:` steps with errexit, so use `if/then/fi` over `[ test ] && cmd`.
 - When unsure a test can fail for the right reason, mutate the production
@@ -249,13 +329,15 @@ files. Prefer SDK-provided types over redefining shapes.
 - Stub SDK clients are plain objects injected through factories — no HTTP
   mocking libraries.
 - Every test file maps to a real source module — don't spawn a standalone
-  test file to mock differently.
+  test file to mock differently; `vi.mock(path, { spy: true })` keeps the
+  real implementation while one test overrides an export and restores it.
 - Fixtures live in `fixtures/` and are shared across test files.
 
 ## Logging & observability
 
 - Use `logger.ts`, never `console.log` — logger params are required, not
-  optional.
+  optional. Source location comes from the logger, not a hand-maintained
+  module tag that drifts when loggers are passed down.
 - Thread the caller's logger into domain functions so deep events inherit
   request context.
 - Levels: **error** (failed, needs attention), **warn** (degraded but
@@ -267,16 +349,26 @@ files. Prefer SDK-provided types over redefining shapes.
 - Every catch logs the error AND enough context (path, operation) to
   diagnose from the log alone. Errors log as one self-contained
   `[ErrorName]: message` string; property names are spelled out (`message`,
-  not `msg`).
+  not `msg`). The catch does the logging; a helper that builds the message
+  the client sees only returns text and takes no logger.
 - Code that posts to GitHub logs its decision trail: the inputs it
   considered, what it posted (findings, anchors), and a stated reason
   whenever it skips. A bare count or "skipping" line can't be debugged.
 - Internal functions describe what went wrong in their own domain, using the
   module's own names — never name API surfaces or prescribe caller-level
   remediation. Input names (`max_related_files`) belong at the config
-  boundary.
+  boundary. Self-correction data (the list of valid values) is welcome in a
+  message; prescribed actions are not.
+- Prevent a failure rather than document its remedy: make an input
+  impossible to get wrong, or accept it, so no README troubleshooting entry
+  is needed. Code whose only effect is a clearer message for a rare,
+  non-default misconfiguration earns no place when it prevents no failure.
+- Full detail stays in the run log; text posted to the PR never carries
+  internal paths, stack traces or implementation state.
 - Reject explicitly instead of normalizing silently when the normalized
-  value would post or write the wrong thing.
+  value would post or write the wrong thing. User-supplied identifiers that
+  arrive in mixed case (paths, extensions, headers) are compared
+  case-insensitively, normalized once at the boundary.
 
 ## Docs
 
@@ -284,30 +376,48 @@ files. Prefer SDK-provided types over redefining shapes.
   inputs, and the AGENTS.md structure tree all update in the same PR that
   changes the feature surface.
 - Adding a concept (env var, input, file, feature) means sweeping every
-  doc that lists its peers.
+  doc that lists its peers, and verifying each candidate before deciding it
+  needs the change.
 - Write-time format decision: information gets structured format (table
   for lookups, bullets for parallel items, numbered steps for sequences);
   narrative goes in the PR description, not committed files. More than 3
-  sentences of prose → wrong format. Match sibling sections in length.
+  sentences of prose → wrong format. Match sibling sections in length. One
+  idea per sentence, one action per step; a new requirement bolted onto an
+  existing step becomes its own step.
 - Setting references (the README input table, `action.yml` descriptions,
   workflow comments) state the knob, its effect, and its limits. Put the
   valid values and the default on their own labelled lines (`Valid values:`
-  / `Default:`), never mid-sentence and never as the implementation's step
-  order.
+  / `Default:`), plus the literal value to enter when a value replaces a
+  default list, never mid-sentence and never as the implementation's step
+  order. Cut a sentence a neighboring row already carries.
 - Factual claims match the implementation. Mechanism words ("retries",
   "caches", "falls back") appear only when the code implements that
   mechanism, and conditional capabilities are stated conditionally.
+  Credential copy states the positive inventory — what the action reads and
+  what it keeps, anchored to the party the reader trusts — never bare
+  negatives.
 - Describe what a feature does, not why someone would use it. Use plain
   words, gloss a jargon term once, and name the concrete referent where the
-  reader is (the input's name, not "the setting above").
+  reader is (the input's name, not "the setting above"). A procedure opens
+  with the reader's motive ("To review only changed files, set…"), while a
+  feature description still states the mechanism.
+- No implicit contrasts or empty intensifiers: state the capability
+  affirmatively, and use the additive form when a contrast informs. Policing
+  language ("use at your own risk") enters a public doc only after the
+  problem it guards against has occurred.
 - A correction states the current design directly, with no walk-back
   parenthetical. Before cutting "redundant" reviewed copy, check why it
   exists; a behavior change replaces only the clause it made stale.
-- After editing a section, re-read the whole document, not just the diff. A
-  clarity pass keeps the README's value-proposition copy engaging: cut empty
-  intensifiers and keep vivid lines that are literally true.
+- After editing a section, re-read the whole document, not just the diff,
+  and walk it once as each reader the doc serves: a first-time installer, a
+  maintainer tuning inputs. Structural self-references ("shown below", "the
+  table above") must resolve against the current document. A clarity pass
+  keeps the README's value-proposition copy engaging: cut empty intensifiers
+  and keep vivid lines that are literally true.
 - A feature section that describes intrusive behavior states its opt-out
   inline, not only in the inputs table.
+- Marketplace and listing copy reuses the README's claims; it never gains
+  claims the README does not make.
 - No internal references in any public artifact — issue/PR numbers,
   task-board IDs, incident dates, deployment names, and investigation
   chronology never enter committed files, PR descriptions, or comments.
