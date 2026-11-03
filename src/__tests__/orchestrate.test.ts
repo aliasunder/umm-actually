@@ -2074,9 +2074,9 @@ index 3333333..4444444 100644
     })
 
     it("omits a priority doc already in context as a changed file", async () => {
-      // Reproduces vault-cortex PR #397: the doc budget is exhausted, so the
-      // priority-doc read returns nothing — but README.md is already in full
-      // context as a changed file and must not be reported as missing.
+      // The doc budget is exhausted, so the priority-doc read returns nothing,
+      // but README.md is already in full context as a changed file and must not
+      // be reported as missing.
       const stubs = makeOrchestrateDeps({
         config: { priorityDocs: ["README.md", "MISSING.md"] },
         contextReader: {
