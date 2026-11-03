@@ -65,9 +65,9 @@ files. Prefer SDK-provided types over redefining shapes.
   config readers export named functions. One export style per module.
 - `type` over `interface`. TypeScript strict mode. `node:` prefix for
   built-ins. Relative imports use explicit `.js` extensions (ESM runtime
-  requirement). Every `.ts` file compiles in `npm run build`; a file that
-  cannot meet project strictness gets its own small tsconfig wired into the
-  build, never an exemption.
+  requirement). Every `.ts` file outside `fixtures/` compiles in
+  `npm run build`; a file that cannot meet project strictness gets its own
+  small tsconfig wired into the build, never an exemption.
 - Explicit return types on exports. No `any`. No `as` or `!` (`as const`
   exempt) — use runtime guards or schema validation to narrow. TS ≥5.5
   infers `.filter()` predicates from bare null/undefined comparisons;
@@ -228,9 +228,9 @@ files. Prefer SDK-provided types over redefining shapes.
   with none, exact-value comparison beats string surgery. Parse genuinely
   varying structured strings with a declarative, doc-commented regex (named
   groups), not index arithmetic.
-- An internal byte cap on text (conventions sent to the model) cuts on whole
-  code points, never mid-UTF-16 unit.
-- Tests are the outermost layer: nothing imports from a `__tests__/` folder;
+- An internal cap on text (the conventions character cap) cuts on whole code
+  points, never leaving half a surrogate pair.
+- Tests are the outermost layer: only tests import from a `__tests__/` folder;
   a helper a script also needs lives beside the script. Lint-enforce
   mechanically checkable conventions; curated exceptions over blanket bans,
   never a rule that fights an established idiom.
@@ -308,8 +308,8 @@ files. Prefer SDK-provided types over redefining shapes.
   clock, never the tick-by-tick schedule.
 - Production code never carries test-serving structure (extra branches or
   cache keys that exist only to isolate tests); tests own isolation through
-  factories and `vi.resetModules`. A single `process.env.X ?? defaultUrl`
-  read at module scope is acceptable when it unlocks an otherwise impossible
+  factories and `vi.resetModules`. A single `env-var` read with a default at
+  module scope is acceptable when it unlocks an otherwise impossible
   test tier; anything more is test-serving structure. Production type rules
   apply in tests: no `!` (guard or restructure instead), while `?.` array
   access and `?? fallback` are legitimate narrowing, and callback params are
@@ -367,7 +367,7 @@ files. Prefer SDK-provided types over redefining shapes.
   internal paths, stack traces or implementation state.
 - Reject explicitly instead of normalizing silently when the normalized
   value would post or write the wrong thing. User-supplied identifiers that
-  arrive in mixed case (paths, extensions, headers) are compared
+  arrive in mixed case (URLs, extensions, headers) are compared
   case-insensitively, normalized once at the boundary.
 
 ## Docs
