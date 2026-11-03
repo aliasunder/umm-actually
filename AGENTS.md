@@ -99,10 +99,10 @@ files. Prefer SDK-provided types over redefining shapes.
   (`statusInput → statusValues`). Value-returning functions name what they
   return (`getX`, not `ensureX`); side-effect functions say what they do;
   every name carries the noun it acts on, and a converter goes input noun →
-  output noun. No
-  trailing `Of` (`findLaneRecord`, not `laneRecordOf`); rename an existing
-  one only when a change already touches it. No terms coined during
-  planning. Booleans are named for the affirmative state; a guard boolean
+  output noun. No trailing `Of` (`findLaneRecord`, not `laneRecordOf`);
+  rename an existing one only when a change already touches it. No terms
+  coined during planning. Booleans are named for the affirmative state; a
+  guard boolean
   names the action it controls. A generic destructured key keeps its source
   (`const { on: modifiedOn } = filters.modified`). Modules and folders are
   named for what the code does and everything it owns.
