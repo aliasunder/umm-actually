@@ -1,2 +1,3 @@
 npx tsc --noEmit
+npx tsc -p tsconfig.eslint.json
 npx lint-staged
