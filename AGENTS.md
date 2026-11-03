@@ -204,9 +204,9 @@ files. Prefer SDK-provided types over redefining shapes.
   catch-alls are banned; a bare `try/finally` for resource scoping is fine.
   Use `async/await` over `.catch()` chains.
 - Throw on an unreachable null instead of a `?? ""` sentinel.
-- At the input boundary an invalid value is rejected and a machine-derived
-  value is auto-corrected and reported; a user-authored value is never
-  auto-corrected.
+- At the action-input boundary (`config.ts`) an invalid value is rejected
+  and a machine-derived value is auto-corrected and reported; a user-authored
+  value is never auto-corrected.
 - Required inputs are enforced at every entry point — fail fast at
   boot/load. Making an already-expected value mandatory is a bug fix, not a
   breaking change. Breaking means a documented, supported input or output
@@ -427,7 +427,8 @@ files. Prefer SDK-provided types over redefining shapes.
 - No internal references in any public artifact — issue/PR numbers,
   task-board IDs, incident dates, deployment names, and investigation
   chronology never enter committed files, PR descriptions, or comments. The
-  sync stamp at the top of this file is exempt.
+  sync stamp at the top of this file and the generated `CHANGELOG.md` are
+  exempt.
 
 ## Review instruction authoring
 
