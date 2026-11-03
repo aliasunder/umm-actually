@@ -26,7 +26,7 @@ npm ci
 npm test              # vitest — the full unit suite
 npm run lint          # eslint (typescript-eslint strict)
 npm run prettier:check
-npm run build         # tsc
+npm run build         # tsc for src/, then tsc -p tsconfig.eslint.json for eslint.config.ts
 docker build .        # what CI's smoke step runs
 ```
 
