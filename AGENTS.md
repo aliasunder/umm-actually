@@ -148,7 +148,7 @@ files. Prefer SDK-provided types over redefining shapes.
   sentinel off value (`none`), never an empty string, and a new list input
   extends its shipped default list with a leading `none` replacing it, as
   `diff_exclude_paths` does; `priority_docs` keeps its documented replace
-  semantics, where an empty value disables it.
+  semantics.
 - Comment decision at write time (use `/** */`; only when earned):
   (1) Can a reader understand this from name + params + return type? → no
   comment — this is most functions. (2) Something non-obvious? → one-line
@@ -418,8 +418,7 @@ files. Prefer SDK-provided types over redefining shapes.
   and keep vivid lines that are literally true.
 - A feature section that describes intrusive behavior states its opt-out
   inline, not only in the inputs table.
-- Marketplace and listing copy reuses the README's claims; it never gains
-  claims the README does not make.
+- Marketplace and listing copy reuses the README's claims.
 - No internal references in any public artifact — issue/PR numbers,
   task-board IDs, incident dates, deployment names, and investigation
   chronology never enter committed files, PR descriptions, or comments.
