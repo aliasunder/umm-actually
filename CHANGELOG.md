@@ -10,6 +10,28 @@
 
 
 
+
+## [0.4.11] — 2026-11-03
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.10
+
+### Maintenance
+
+- **deps:** Bump undici from 6.29.0 to 6.29.1 (#137)
+- **deps:** Bump docker/login-action from 4.6.0 to 4.7.0 (#134)
+- **deps:** Bump the production group with 2 updates (#135)
+- **deps-dev:** Bump the development group with 5 updates (#136)
+- **deps:** Bump actions/create-github-app-token from 3.2.0 to 3.3.0 (#131)
+- **deps-dev:** Bump the development group across 1 directory with 8 updates (#128)
+- **deps:** Bump actions/setup-node from 7.0.0 to 7.1.0 (#132)
+- **deps:** Bump the production group across 1 directory with 2 updates (#133)
+
+### Other Changes
+
+- **deps:** Override minimatch to 11.0.4 to clear GHSA-g3hv-75wg-m249 (#138)
+
 ## [0.4.10] — 2026-10-01
 
 ### Features
