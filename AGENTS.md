@@ -398,11 +398,11 @@ files. Prefer SDK-provided types over redefining shapes.
   action per step; a new requirement bolted onto an existing step becomes
   its own step.
 - Setting references (the README input table, `action.yml` descriptions,
-  workflow comments) state the knob, its effect, and its limits. Put the
-  valid values and the default on their own labelled lines (`Valid values:`
-  / `Default:`), never mid-sentence. Give the literal value that replaces a
-  default list (`none, evals/**`). Never describe a setting by the order of
-  steps the code runs. Cut a sentence a neighboring row already carries.
+  workflow comments) state the knob, its effect, its limits and its valid
+  values, and end with the default in the form the README rows use
+  (`Empty = 900`). Give the literal value that replaces a default list
+  (`none, evals/**`). Never describe a setting by the order of steps the
+  code runs. Cut a sentence a neighboring row already carries.
 - Factual claims match the implementation. Mechanism words ("retries",
   "caches", "falls back") appear only when the code implements that
   mechanism, and conditional capabilities are stated conditionally.
