@@ -174,13 +174,17 @@ describe("parseConfig", () => {
 
   it.each(["0", "-1", "1.5", "never"])("rejects invalid review_timeout_seconds %s", (value) => {
     expect(() => parseConfig(makeRawInputs({ reviewTimeoutSeconds: value }))).toThrow(
-      `invalid action inputs — reviewTimeoutSeconds: "${value}" is not a positive integer`,
+      new Error(
+        `invalid action inputs — reviewTimeoutSeconds: "${value}" is not a positive integer`,
+      ),
     )
   })
 
   it("rejects a review timeout beyond the timer limit", () => {
     expect(() => parseConfig(makeRawInputs({ reviewTimeoutSeconds: "2147484" }))).toThrow(
-      'invalid action inputs — reviewTimeoutSeconds: "2147484" exceeds the 2147483-second cap (2^31−1 ms timer limit)',
+      new Error(
+        'invalid action inputs — reviewTimeoutSeconds: "2147484" exceeds the 2147483-second cap (2^31−1 ms timer limit)',
+      ),
     )
   })
 
@@ -200,13 +204,13 @@ describe("parseConfig", () => {
 
   it("rejects a zero max_findings", () => {
     expect(() => parseConfig(makeRawInputs({ maxFindings: "0" }))).toThrow(
-      'maxFindings: "0" is not a positive integer',
+      new Error('invalid action inputs — maxFindings: "0" is not a positive integer'),
     )
   })
 
   it("rejects a non-numeric max_findings", () => {
     expect(() => parseConfig(makeRawInputs({ maxFindings: "many" }))).toThrow(
-      'maxFindings: "many" is not a positive integer',
+      new Error('invalid action inputs — maxFindings: "many" is not a positive integer'),
     )
   })
 
@@ -239,7 +243,7 @@ describe("parseConfig", () => {
 
   it("rejects a zero request_timeout_seconds", () => {
     expect(() => parseConfig(makeRawInputs({ requestTimeoutSeconds: "0" }))).toThrow(
-      'requestTimeoutSeconds: "0" is not a positive integer',
+      new Error('invalid action inputs — requestTimeoutSeconds: "0" is not a positive integer'),
     )
   })
 
@@ -251,7 +255,9 @@ describe("parseConfig", () => {
 
   it("rejects a request_timeout_seconds whose milliseconds exceed the timer cap", () => {
     expect(() => parseConfig(makeRawInputs({ requestTimeoutSeconds: "2147484" }))).toThrow(
-      'requestTimeoutSeconds: "2147484" exceeds the 2147483-second cap (2^31−1 ms timer limit)',
+      new Error(
+        'invalid action inputs — requestTimeoutSeconds: "2147484" exceeds the 2147483-second cap (2^31−1 ms timer limit)',
+      ),
     )
   })
 
@@ -368,7 +374,9 @@ describe("parseConfig", () => {
 
   it("rejects a non-leading none in diff_exclude_paths", () => {
     expect(() => parseConfig(makeRawInputs({ diffExcludePaths: "evals/**, none" }))).toThrow(
-      'diffExcludePaths: "none" disables the default list only in leading position — move it first or remove it',
+      new Error(
+        'invalid action inputs — diffExcludePaths: "none" disables the default list only in leading position — move it first or remove it',
+      ),
     )
   })
 
@@ -386,7 +394,9 @@ describe("parseConfig", () => {
 
   it("rejects a diff_exclude_paths pattern over the wildcard cap", () => {
     expect(() => parseConfig(makeRawInputs({ diffExcludePaths: "*a*a*a*b" }))).toThrow(
-      'diffExcludePaths: pattern(s) exceed the wildcard cap (at most 2 "*" per path segment; "**" segments exempt): *a*a*a*b',
+      new Error(
+        'invalid action inputs — diffExcludePaths: pattern(s) exceed the wildcard cap (at most 2 "*" per path segment; "**" segments exempt): *a*a*a*b',
+      ),
     )
   })
 
@@ -398,13 +408,13 @@ describe("parseConfig", () => {
 
   it("rejects a zero max_related_files", () => {
     expect(() => parseConfig(makeRawInputs({ maxRelatedFiles: "0" }))).toThrow(
-      'maxRelatedFiles: "0" is not a positive integer',
+      new Error('invalid action inputs — maxRelatedFiles: "0" is not a positive integer'),
     )
   })
 
   it("rejects a zero max_related_docs", () => {
     expect(() => parseConfig(makeRawInputs({ maxRelatedDocs: "0" }))).toThrow(
-      'maxRelatedDocs: "0" is not a positive integer',
+      new Error('invalid action inputs — maxRelatedDocs: "0" is not a positive integer'),
     )
   })
 

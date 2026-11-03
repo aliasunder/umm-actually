@@ -1570,7 +1570,20 @@ describe("requestReview", () => {
       const { client, logger } = makeClient(stub)
 
       await expect(client.requestReview(requestParams, logger)).rejects.toThrow(
-        `OpenRouter auth/credit error — aborting without fallback: openai/gpt-5-mini: api_error (HTTP ${statusCode}: HTTP ${statusCode})`,
+        new ReviewRequestError({
+          message: `OpenRouter auth/credit error — aborting without fallback: openai/gpt-5-mini: api_error (HTTP ${statusCode}: HTTP ${statusCode})`,
+          attempts: [
+            {
+              model: "openai/gpt-5-mini",
+              outcome: "api_error",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: `HTTP ${statusCode}: HTTP ${statusCode}`,
+            },
+          ],
+          keyRejected: true,
+        }),
       )
       expect(stub.sendCalls).toHaveLength(1)
     },
