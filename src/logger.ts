@@ -147,5 +147,3 @@ export const createLogger = (
       }),
   }
 }
-
-export const logger = createLogger("umm-actually")
