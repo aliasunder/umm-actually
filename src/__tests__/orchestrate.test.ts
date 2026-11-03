@@ -5037,7 +5037,21 @@ describe("staged phases", () => {
 
     const expectedMessage =
       "every review phase failed: correctness-security: [Error]: correctness-security exploded; conventions-tests: [Error]: conventions-tests exploded; subtle-bugs: [Error]: subtle-bugs exploded"
-    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(expectedMessage)
+    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+      new AllPhasesFailedError([
+        {
+          phase: CORRECTNESS_SECURITY_PHASE,
+          status: "failed",
+          error: new Error("correctness-security exploded"),
+        },
+        {
+          phase: CONVENTIONS_TESTS_PHASE,
+          status: "failed",
+          error: new Error("conventions-tests exploded"),
+        },
+        { phase: SUBTLE_BUGS_PHASE, status: "failed", error: new Error("subtle-bugs exploded") },
+      ]),
+    )
     expect(stubs.postFindingsReviewCalls).toEqual([])
     expect(stubs.updateCheckRunCalls).toEqual([
       {
@@ -5112,7 +5126,29 @@ describe("staged phases", () => {
 
     const notAttempted = "[Error]: not attempted: an earlier phase aborted on an auth/credit error"
     const expectedMessage = `every review phase failed: correctness-security: [ReviewRequestError]: OpenRouter auth/credit error — aborting without fallback; conventions-tests: ${notAttempted}; subtle-bugs: ${notAttempted}`
-    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(expectedMessage)
+    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+      new AllPhasesFailedError([
+        {
+          phase: CORRECTNESS_SECURITY_PHASE,
+          status: "failed",
+          error: new ReviewRequestError({
+            message: "OpenRouter auth/credit error — aborting without fallback",
+            attempts: [billedAttempt],
+            keyRejected: true,
+          }),
+        },
+        {
+          phase: CONVENTIONS_TESTS_PHASE,
+          status: "failed",
+          error: new Error("not attempted: an earlier phase aborted on an auth/credit error"),
+        },
+        {
+          phase: SUBTLE_BUGS_PHASE,
+          status: "failed",
+          error: new Error("not attempted: an earlier phase aborted on an auth/credit error"),
+        },
+      ]),
+    )
     expect(stubs.generateFindingsCalls.map((call) => call.phase.id)).toEqual([
       "correctness-security",
     ])
