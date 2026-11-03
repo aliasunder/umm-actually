@@ -246,7 +246,7 @@ describe("fetchDiff", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow("HTTP 500")
+    await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow(makeStatusError(500))
   })
 
   it("rethrows an error that carries no status property", async () => {
@@ -255,7 +255,7 @@ describe("fetchDiff", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow("socket hang up")
+    await expect(client.fetchDiff({ prNumber: 7 })).rejects.toThrow(new Error("socket hang up"))
   })
 
   it("throws when the diff response is not a string", async () => {
@@ -309,7 +309,7 @@ describe("submitReview", () => {
         commitId: "abc123",
         body: "skip notice",
       }),
-    ).rejects.toThrow("HTTP 403")
+    ).rejects.toThrow(makeStatusError(403))
     expect(stub.createReviewCalls).toHaveLength(1)
   })
 
@@ -325,7 +325,7 @@ describe("submitReview", () => {
         commitId: "abc123",
         body: "skip notice",
       }),
-    ).rejects.toThrow("unexpected review response shape")
+    ).rejects.toThrow(new Error("unexpected review response shape"))
   })
 })
 
@@ -397,7 +397,7 @@ describe("postFindingsReview", () => {
         body: markerBody,
         comments: [inlineComment],
       }),
-    ).rejects.toThrow("HTTP 403")
+    ).rejects.toThrow(makeStatusError(403))
   })
 
   it("throws when the review response has no html_url", async () => {
@@ -413,7 +413,7 @@ describe("postFindingsReview", () => {
         body: markerBody,
         comments: [inlineComment],
       }),
-    ).rejects.toThrow("unexpected review response shape")
+    ).rejects.toThrow(new Error("unexpected review response shape"))
   })
 })
 
@@ -907,7 +907,9 @@ describe("fetchBotIssueComments", () => {
     })
     const { client } = makeClient(stub)
 
-    await expect(client.fetchBotIssueComments({ prNumber: 7 })).rejects.toThrow("token expired")
+    await expect(client.fetchBotIssueComments({ prNumber: 7 })).rejects.toThrow(
+      new Error("token expired"),
+    )
   })
 })
 
@@ -1257,7 +1259,7 @@ describe("createCheckRun", () => {
 
     await expect(
       client.createCheckRun({ headSha: "abc123def456", name: "umm-actually" }),
-    ).rejects.toThrow("unexpected check run response shape")
+    ).rejects.toThrow(new Error("unexpected check run response shape"))
   })
 
   it("propagates a permission rejection to the caller", async () => {
@@ -1268,7 +1270,7 @@ describe("createCheckRun", () => {
 
     await expect(
       client.createCheckRun({ headSha: "abc123def456", name: "umm-actually" }),
-    ).rejects.toThrow("HTTP 403")
+    ).rejects.toThrow(makeStatusError(403))
   })
 })
 
@@ -1310,6 +1312,6 @@ describe("updateCheckRun", () => {
         conclusion: "success",
         output: { title: "No findings above threshold", summary: "clean" },
       }),
-    ).rejects.toThrow("HTTP 403")
+    ).rejects.toThrow(makeStatusError(403))
   })
 })

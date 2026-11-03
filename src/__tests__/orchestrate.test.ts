@@ -35,6 +35,7 @@ import {
   CORRECTNESS_SECURITY_PHASE,
   SUBTLE_BUGS_PHASE,
 } from "../review/phases.js"
+import { AllPhasesFailedError } from "../review/run-stages.js"
 import { selectFindings } from "../review/select-findings.js"
 import { renderCostSummary } from "../openrouter/cost-summary.js"
 import { renderReviewSummary, type ReviewSummaryStats } from "../review/review-summary.js"
@@ -483,7 +484,9 @@ describe("orchestrate", () => {
       })
       const logger = createTestLogger()
 
-      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow("severity")
+      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+        new Error('unknown severity_threshold "invalid" — valid: critical | high | medium | low'),
+      )
       expect(stubs.fetchDiffCalls).toHaveLength(0)
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(0)
@@ -495,7 +498,9 @@ describe("orchestrate", () => {
       })
       const logger = createTestLogger()
 
-      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow("phases")
+      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+        new Error('unknown phases value "invalid" — valid: combined | parallel | sequential'),
+      )
       expect(stubs.fetchDiffCalls).toHaveLength(0)
       expect(stubs.generateFindingsCalls).toHaveLength(0)
     })
@@ -4382,7 +4387,9 @@ index 3333333..4444444 100644
       })
       const logger = createTestLogger()
 
-      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow("severity")
+      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+        new Error('unknown severity_threshold "invalid" — valid: critical | high | medium | low'),
+      )
       expect(stubs.createCheckRunCalls).toEqual([])
     })
 
@@ -4394,7 +4401,11 @@ index 3333333..4444444 100644
       })
       const logger = createTestLogger()
 
-      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow("model exploded")
+      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+        new AllPhasesFailedError([
+          { phase: COMBINED_PHASE, status: "failed", error: new Error("model exploded") },
+        ]),
+      )
       expect(stubs.updateCheckRunCalls).toEqual([
         {
           checkRunId: 555,
@@ -4490,7 +4501,11 @@ index 3333333..4444444 100644
           },
           logger,
         ),
-      ).rejects.toThrow("model exploded")
+      ).rejects.toThrow(
+        new AllPhasesFailedError([
+          { phase: COMBINED_PHASE, status: "failed", error: new Error("model exploded") },
+        ]),
+      )
 
       expect(updateCallCountsAtUnregister).toEqual([1])
     })

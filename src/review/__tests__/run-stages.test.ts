@@ -232,7 +232,12 @@ describe("runStages", () => {
 
     await expect(
       runStages({ stages: [[phaseA], [phaseB]], runPhase }, createTestLogger()),
-    ).rejects.toThrow("every review phase failed: a: [Error]: boom a; b: [Error]: boom b")
+    ).rejects.toThrow(
+      new AllPhasesFailedError([
+        { phase: phaseA, status: "failed", error: new Error("boom a") },
+        { phase: phaseB, status: "failed", error: new Error("boom b") },
+      ]),
+    )
   })
 
   it("skips later stages after an auth/credit abort and reports their phases as not attempted", async () => {

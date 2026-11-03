@@ -1230,7 +1230,31 @@ describe("requestReview", () => {
     try {
       await expect(
         client.requestReview({ ...requestParams, fallbackModel: null }, logger),
-      ).rejects.toThrow("review request failed")
+      ).rejects.toThrow(
+        new ReviewRequestError({
+          message:
+            "review request failed after 2 attempt(s): openai/gpt-5-mini: api_error (HTTP 429: HTTP 429); openai/gpt-5-mini: api_error (HTTP 429: HTTP 429)",
+          attempts: [
+            {
+              model: "openai/gpt-5-mini",
+              outcome: "api_error",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: "HTTP 429: HTTP 429",
+            },
+            {
+              model: "openai/gpt-5-mini",
+              outcome: "api_error",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: "HTTP 429: HTTP 429",
+            },
+          ],
+          keyRejected: false,
+        }),
+      )
 
       // retryDelayMs sleeps happen between retryable failures; the guard
       // `modelAttemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
