@@ -40,7 +40,8 @@ points:
 - Functional style, immutable by default; no `any`, no `as`, no `!` — runtime
   guards and Zod narrowing instead
 - Pure modules (`diff/`, `review/`) never import I/O modules; only `main.ts`
-  touches `process.env` and constructs SDK clients
+  touches `process.env` (`logger.ts` reads `LOG_LEVEL`) and constructs SDK
+  clients
 - Use the official SDKs (`@actions/core`, `@actions/github`,
   `@openrouter/sdk`, `parse-diff`) — don't hand-roll what they already do
 - Relative imports carry explicit `.js` extensions (ESM runtime requirement)

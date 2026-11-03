@@ -41,7 +41,8 @@ clients and touches real `process.env`, except that `logger.ts` reads
 `LOG_LEVEL`. A pure module importing an I/O module is a backwards
 dependency and a bug — enforced by a
 `@typescript-eslint/no-restricted-imports` block in `eslint.config.ts`
-(type-only imports are allowed; they're erased at compile time).
+(type-only imports are allowed; they're erased at compile time). Tests are
+the outermost layer, so only tests import from a `__tests__/` folder.
 
 Use the official SDKs — don't hand-roll what `@actions/core`,
 `@actions/github` (octokit), `@openrouter/sdk`, or `parse-diff` already do.
@@ -86,8 +87,8 @@ files. Prefer SDK-provided types over redefining shapes.
   becomes a member of that union, never a second result shape with a
   converter. Branch on a union of outcomes with an exhaustive `switch` naming
   every member, never an `if` plus a ternary whose fallback catches the rest
-  unnamed. A param read only for truthiness becomes a `boolean` named for
-  the action it controls, never a value-or-`""` sentinel. Prefer type-only
+  unnamed. A param read only for truthiness becomes a `boolean`, never a
+  value-or-`""` sentinel. Prefer type-only
   imports over structural duplication, and never clone an interface.
 - Code is immutable by default; avoid `let`. A `reduce` must return a new
   accumulator each step. When mutation is genuinely needed, add a comment
@@ -116,7 +117,8 @@ files. Prefer SDK-provided types over redefining shapes.
   implementation's flag.
 - When a function has a primary and a secondary path (first run vs re-run),
   return early from the simpler one so the rest flows without nested
-  `if/else`. Extract multi-clause conditionals into named booleans.
+  `if/else`. Extract multi-clause conditionals and cryptic sub-expressions
+  into named consts.
 - Never write a chained ternary (a second `?` inside a ternary) or assign a
   `let` through if/else branches; use one `if … return` per branch in a
   small helper, or one named const per decision step. Use `while (condition)`
@@ -134,13 +136,8 @@ files. Prefer SDK-provided types over redefining shapes.
   When a param only labels a log or report, keep the check a pure predicate
   and let the caller report. Use named records over positional tuples;
   index-aligned parallel arrays become one record per item; destructure an
-  object accessed twice or more; name a cryptic sub-expression. When every
-  call site passes `() => alreadyComputed`, accept the plain value instead
-  of a thunk.
-- A function that logs takes `(params, logger)`, and the logger is required.
-  An I/O client never truncates its output or returns data that exists only
-  for logging; presentation limits belong to the consumer, and the client
-  logs at the site.
+  object accessed twice or more. When every call site passes
+  `() => alreadyComputed`, accept the plain value instead of a thunk.
 - `process.env` is never read via raw property access. Action inputs
   (`INPUT_*`) go through `@actions/core` `getInput`/`getBooleanInput`, and
   the event name and payload come from `@actions/github` `context`; never
@@ -199,12 +196,13 @@ files. Prefer SDK-provided types over redefining shapes.
   in a declarative registry and combine one predicate per switch with AND,
   never per-flag branching. A new switch adds one predicate.
 - Extract multi-step `.map()`/`.reduce()` callbacks into named functions
-  when they nest chains or build intermediates. Conditional spreads and
-  `.filter(Boolean)` are both fine — pick whichever reads clearer; don't
-  convert mechanically. Name non-trivial `.filter()` predicates.
+  when they nest chains or build intermediates. For assembling an array,
+  conditional spreads and `.filter(Boolean)` are both fine — pick whichever
+  reads clearer; don't convert mechanically. Name non-trivial `.filter()`
+  predicates.
 - Each try/catch encloses one operation with one failure meaning. Broad
   catch-alls are banned; a bare `try/finally` for resource scoping is fine.
-  Use `async/await` over `.catch()` chains. Every catch logs or re-throws.
+  Use `async/await` over `.catch()` chains.
 - Throw on an unreachable null instead of a `?? ""` sentinel.
 - At the input boundary an invalid value is rejected and a machine-derived
   value is auto-corrected and reported; a user-authored value is never
@@ -237,10 +235,8 @@ files. Prefer SDK-provided types over redefining shapes.
   doc-commented regex (named groups), not index arithmetic.
 - An internal cap on text (`conventionsCharacterCap`) never leaves half a
   surrogate pair at the cut (`toWellFormed()`).
-- Tests are the outermost layer, so only tests import from a `__tests__/`
-  folder. Lint-enforce mechanically checkable conventions. Prefer curated
-  exceptions over blanket bans, and never adopt a rule that fights an
-  established idiom.
+- Lint-enforce mechanically checkable conventions. Prefer curated exceptions
+  over blanket bans, and never adopt a rule that fights an established idiom.
 - Vet a new dependency's maintainers, release history and downloads before
   adopting it; at negligible adoption with a small core, prefer a local
   implementation. Pin dependency overrides to exact versions, and pin a dev
@@ -342,9 +338,12 @@ files. Prefer SDK-provided types over redefining shapes.
 
 ## Logging & observability
 
-- Use `logger.ts`, never `console.log`; logger params are required. The
-  logger stamps info, warn and error entries with the caller's file and line
-  (`source`), so never add a hand-maintained module tag.
+- Use `logger.ts`, never `console.log`. A function that logs takes
+  `(params, logger)`, and the logger is required. The logger stamps info,
+  warn and error entries with the caller's file and line (`source`), so never
+  add a hand-maintained module tag. An I/O client never truncates its output
+  or returns data that exists only for logging; presentation limits belong
+  to the consumer, and the client logs at the site.
 - Thread the caller's logger into domain functions so deep events inherit
   request context.
 - Levels are **error** (failed, needs attention), **warn** (degraded but
@@ -353,8 +352,8 @@ files. Prefer SDK-provided types over redefining shapes.
   loops log debug; their summary logs info.
 - Never log PII, credentials, tokens, or secrets — log identifiers, not
   identity payloads. Redact via destructuring, not `delete` on copies.
-- Every catch logs the error AND enough context (path, operation) to
-  diagnose from the log alone. Errors log as one self-contained
+- A catch that does not re-throw logs the error AND enough context (path,
+  operation) to diagnose from the log alone. Errors log as one self-contained
   `[ErrorName]: message` string; property names are spelled out (`message`,
   not `msg`). The catch does the logging; a helper that builds text for the
   PR or the job summary only returns that text and takes no logger.
