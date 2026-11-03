@@ -102,8 +102,8 @@ files. Prefer SDK-provided types over redefining shapes.
   output noun. No trailing `Of` (`findLaneRecord`, not `laneRecordOf`);
   rename an existing one only when a change already touches it. No terms
   coined during planning. Booleans are named for the affirmative state; a
-  guard boolean
-  names the action it controls. A generic destructured key keeps its source
+  guard boolean names the action it controls. A generic destructured key
+  keeps its source
   (`const { on: modifiedOn } = filters.modified`). Modules and folders are
   named for what the code does and everything it owns.
 - Wire names stay at the boundary. Action inputs are `snake_case` and
