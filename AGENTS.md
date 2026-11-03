@@ -36,9 +36,10 @@ src/
 ## Module layering
 
 Pure leaves (`diff/`, `review/`) → I/O clients (`github/`, `openrouter/`,
-`context/`) → composition (`orchestrate.ts`). Only `main.ts` touches real
-`process.env` and constructs SDK clients. A pure module importing an I/O
-module is a backwards dependency and a bug — enforced by a
+`context/`) → composition (`orchestrate.ts`). Only `main.ts` constructs SDK
+clients and touches real `process.env`, except that `logger.ts` reads
+`LOG_LEVEL`. A pure module importing an I/O module is a backwards
+dependency and a bug — enforced by a
 `@typescript-eslint/no-restricted-imports` block in `eslint.config.ts`
 (type-only imports are allowed; they're erased at compile time).
 
@@ -136,10 +137,10 @@ files. Prefer SDK-provided types over redefining shapes.
   object accessed twice or more; name a cryptic sub-expression. When every
   call site passes `() => alreadyComputed`, accept the plain value instead
   of a thunk.
-- Functions in the pure leaves and I/O clients take `(params, logger)`, and
-  the logger is required. Such a function never truncates its output or
-  returns data that exists only for logging; presentation limits belong to
-  the consumer, and the function logs at the site.
+- A function that logs takes `(params, logger)`, and the logger is required.
+  An I/O client never truncates its output or returns data that exists only
+  for logging; presentation limits belong to the consumer, and the client
+  logs at the site.
 - `process.env` is never read via raw property access. Action inputs
   (`INPUT_*`) go through `@actions/core` `getInput`/`getBooleanInput`, and
   the event name and payload come from `@actions/github` `context`; never
@@ -147,11 +148,12 @@ files. Prefer SDK-provided types over redefining shapes.
   environment (`GITHUB_WORKSPACE`, …) goes through the `env-var` package
   (`envVar.from(env).get("NAME").required().asString()`), with the env
   record injectable.
-- A new default-on input gets an explicit sentinel off value (`none`), never
-  an empty string. A new list input extends its shipped default list, and a
-  leading `none` replaces it. In `diff_exclude_paths`, `evals/**` adds to
-  the defaults and `none, evals/**` replaces them. `priority_docs` is the
-  documented exception, where any value replaces the default.
+- A new default-on input gets an explicit off value (`false` for a boolean,
+  `none` otherwise), never an empty string. A new list input extends its
+  shipped default list, and a leading `none` replaces it. In
+  `diff_exclude_paths`, `evals/**` adds to the defaults and `none, evals/**`
+  replaces them. `priority_docs` is the documented exception, where any
+  value replaces the default.
 - Decide each comment at write time, and write one (`/** */`) only when it
   is earned:
   1. When the name, params and return type explain the function, write no
@@ -233,8 +235,8 @@ files. Prefer SDK-provided types over redefining shapes.
   hand-rolled parsing; with none, exact-value comparison beats string
   surgery. Parse genuinely varying structured strings with a declarative,
   doc-commented regex (named groups), not index arithmetic.
-- An internal cap on text (`conventionsCharacterCap`) cuts on whole code
-  points, never leaving half a surrogate pair.
+- An internal cap on text (`conventionsCharacterCap`) never leaves half a
+  surrogate pair at the cut (`toWellFormed()`).
 - Tests are the outermost layer, so only tests import from a `__tests__/`
   folder. Lint-enforce mechanically checkable conventions. Prefer curated
   exceptions over blanket bans, and never adopt a rule that fights an
@@ -334,7 +336,8 @@ files. Prefer SDK-provided types over redefining shapes.
 - Every test file maps to a real source module. Never create a second test
   file for one module only to mock it differently;
   `vi.mock(path, { spy: true })` keeps the real implementation while one
-  test overrides an export and restores it.
+  test overrides an export and restores it with `mockRestore()`, because
+  `vi.restoreAllMocks` skips automocked exports.
 - Fixtures live in `fixtures/` and are shared across test files.
 
 ## Logging & observability
@@ -419,9 +422,8 @@ files. Prefer SDK-provided types over redefining shapes.
   maintainer tuning inputs. Structural self-references ("shown below", "the
   table above") must resolve against the current document. A clarity pass
   keeps vivid, literally true lines in the README's value-proposition copy.
-- A feature section that describes intrusive default-on behavior, such as
-  the `cost_summary` report, states its opt-out inline, not only in the
-  inputs table.
+- A feature section that describes intrusive default-on behavior states its
+  opt-out inline, not only in the inputs table.
 - Marketplace and listing copy reuses the README's claims.
 - No internal references in any public artifact — issue/PR numbers,
   task-board IDs, incident dates, deployment names, and investigation
