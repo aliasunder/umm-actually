@@ -87,11 +87,11 @@ files. Prefer SDK-provided types over redefining shapes.
   union with `never` exhaustiveness, not optional fields documented as
   "present only in mode X". Each fact has one discriminant, so a new case
   becomes a member of that union, never a second result shape with a
-  converter. Branch on a union of outcomes with an exhaustive `switch` naming
-  every member, never an `if` plus a ternary whose fallback catches the rest
-  unnamed. A param read only for truthiness becomes a `boolean`, never a
-  value-or-`""` sentinel. Prefer type-only imports over structural
-  duplication, and never clone an interface.
+  converter. A new or changed branch on a union of outcomes uses an
+  exhaustive `switch` naming every member, never an `if` plus a ternary
+  whose fallback catches the rest unnamed. A param read only for truthiness
+  becomes a `boolean`, never a value-or-`""` sentinel. Prefer type-only
+  imports over structural duplication, and never clone an interface.
 - Code is immutable by default; avoid `let`. A `reduce` must return a new
   accumulator each step. When mutation is genuinely needed, add a comment
   justifying it. Prefer the non-mutating array methods
@@ -109,8 +109,7 @@ files. Prefer SDK-provided types over redefining shapes.
   a change already touches it. Every term in a name must make sense to a
   reader who never saw the change's planning. Booleans are named for the
   affirmative state, and a boolean that gates a step is named for that step
-  (`needsPriorityDocFloor`).
-  A generic destructured key keeps its source
+  (`needsPriorityDocFloor`). A generic destructured key keeps its source
   (`const { kept: reviewableFiles } = partitionExcludedFiles(…)`). Modules
   and folders are named for what the code does and everything it owns.
 - Wire names stay at the boundary. Action inputs are `snake_case` and
@@ -194,9 +193,9 @@ files. Prefer SDK-provided types over redefining shapes.
   moves into a shared folder such as `utils/`: zero domain knowledge, and
   either a decision several callers share or a standalone primitive
   describable without naming a caller.
-- When config switches multiply (phase groups, exclusion sources), list them
-  in a declarative registry and combine one predicate per switch with AND,
-  never per-flag branching. A new switch adds one predicate.
+- When config switches multiply, list them in a declarative registry and
+  combine one predicate per switch with AND, never per-flag branching. A
+  new switch adds one predicate.
 - Extract multi-step `.map()`/`.reduce()` callbacks into named functions
   when they nest chains or build intermediates. For assembling an array,
   conditional spreads and `.filter(Boolean)` are both fine — pick whichever
