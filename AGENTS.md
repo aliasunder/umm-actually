@@ -70,10 +70,11 @@ files. Prefer SDK-provided types over redefining shapes.
   Parsers and config readers export named functions. Each module keeps one
   export style.
 - Use `type` over `interface`, TypeScript strict mode, and the `node:`
-  prefix for built-ins. Relative imports use explicit `.js` extensions. Every
-  `.ts` file outside `fixtures/` compiles in `npm run build`; a file outside
-  `src/` gets its own small tsconfig wired into the build
-  (`tsconfig.eslint.json`), never an exemption.
+  prefix for built-ins. Relative imports use explicit `.js` extensions.
+  `tsconfig.json` includes the whole repository except `fixtures/`, so every
+  other `.ts` file, root config files included, compiles in `npm run build`.
+  A file that cannot meet the project's strictness gets its own small
+  tsconfig wired into the build, never an exemption.
 - Exports declare explicit return types. Never use `any`, `as` or `!`
   (`as const` exempt); narrow with runtime guards or schema validation.
   Prefer truthy/falsy checks (`if (value)`) over explicit `!== undefined`

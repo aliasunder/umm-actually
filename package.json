@@ -8,7 +8,7 @@
     "node": ">=24.0.0 <25.0.0"
   },
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.eslint.json",
+    "build": "tsc",
     "prettier": "prettier --write .",
     "prettier:check": "prettier --check .",
     "lint": "eslint .",
