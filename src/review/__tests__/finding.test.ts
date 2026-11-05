@@ -135,7 +135,7 @@ describe("resolveSeverityThreshold", () => {
 
   it("throws on an unknown severity_threshold, listing the valid values", () => {
     expect(() => resolveSeverityThreshold("extreme")).toThrow(
-      'unknown severity_threshold "extreme" — valid: critical | high | medium | low',
+      new Error('unknown severity_threshold "extreme" — valid: critical | high | medium | low'),
     )
   })
 })

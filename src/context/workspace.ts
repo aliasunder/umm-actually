@@ -331,7 +331,7 @@ export const createContextReader = (config: ContextReaderConfig, logger: Logger)
       }
       logger.warn("changed file unreadable — including as diff-only", {
         path: changedPath,
-        error: String(readError),
+        error: describeError(readError),
       })
       return null
     }
@@ -352,7 +352,7 @@ export const createContextReader = (config: ContextReaderConfig, logger: Logger)
       if (signal.aborted) return null
       logger.warn("scanned file unreadable — excluding from context", {
         path: scannedPath,
-        error: String(readError),
+        error: describeError(readError),
       })
       return null
     }
@@ -411,7 +411,7 @@ export const createContextReader = (config: ContextReaderConfig, logger: Logger)
       }
       logger.warn("priority doc unreadable — skipping", {
         path: docPath,
-        error: String(readError),
+        error: describeError(readError),
       })
       return null
     }

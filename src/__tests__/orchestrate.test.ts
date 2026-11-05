@@ -35,6 +35,7 @@ import {
   CORRECTNESS_SECURITY_PHASE,
   SUBTLE_BUGS_PHASE,
 } from "../review/phases.js"
+import { AllPhasesFailedError } from "../review/run-stages.js"
 import { selectFindings } from "../review/select-findings.js"
 import { renderCostSummary } from "../openrouter/cost-summary.js"
 import { renderReviewSummary, type ReviewSummaryStats } from "../review/review-summary.js"
@@ -483,7 +484,9 @@ describe("orchestrate", () => {
       })
       const logger = createTestLogger()
 
-      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow("severity")
+      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+        new Error('unknown severity_threshold "invalid" — valid: critical | high | medium | low'),
+      )
       expect(stubs.fetchDiffCalls).toHaveLength(0)
       expect(stubs.generateFindingsCalls).toHaveLength(0)
       expect(stubs.submitReviewCalls).toHaveLength(0)
@@ -495,7 +498,9 @@ describe("orchestrate", () => {
       })
       const logger = createTestLogger()
 
-      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow("phases")
+      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+        new Error('unknown phases value "invalid" — valid: combined | parallel | sequential'),
+      )
       expect(stubs.fetchDiffCalls).toHaveLength(0)
       expect(stubs.generateFindingsCalls).toHaveLength(0)
     })
@@ -1686,9 +1691,22 @@ index 3333333..4444444 100644
         },
       })
 
-      await expect(orchestrate(stubs.deps, createTestLogger())).rejects.toThrow(
-        "every review phase failed: combined: [Error]: not attempted: review deadline exceeded",
+      const pipelineFailure = orchestrate(stubs.deps, createTestLogger())
+      await expect(pipelineFailure).rejects.toThrow(
+        new AllPhasesFailedError([
+          {
+            phase: COMBINED_PHASE,
+            status: "failed",
+            error: new Error("not attempted: review deadline exceeded"),
+            deadlineExceeded: true,
+          },
+        ]),
       )
+      await expect(pipelineFailure).rejects.toMatchObject({
+        name: "AllPhasesFailedError",
+        message:
+          "every review phase failed: combined: [Error]: not attempted: review deadline exceeded",
+      })
 
       expect(operations.slice(0, 2)).toEqual(["read priority docs", "read changed files"])
       expect(stubs.generateFindingsCalls).toEqual([])
@@ -2062,9 +2080,9 @@ index 3333333..4444444 100644
     })
 
     it("omits a priority doc already in context as a changed file", async () => {
-      // Reproduces vault-cortex PR #397: the doc budget is exhausted, so the
-      // priority-doc read returns nothing — but README.md is already in full
-      // context as a changed file and must not be reported as missing.
+      // The doc budget is exhausted, so the priority-doc read returns nothing,
+      // but README.md is already in full context as a changed file and must not
+      // be reported as missing.
       const stubs = makeOrchestrateDeps({
         config: { priorityDocs: ["README.md", "MISSING.md"] },
         contextReader: {
@@ -4382,7 +4400,9 @@ index 3333333..4444444 100644
       })
       const logger = createTestLogger()
 
-      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow("severity")
+      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
+        new Error('unknown severity_threshold "invalid" — valid: critical | high | medium | low'),
+      )
       expect(stubs.createCheckRunCalls).toEqual([])
     })
 
@@ -4394,7 +4414,16 @@ index 3333333..4444444 100644
       })
       const logger = createTestLogger()
 
-      await expect(orchestrate(stubs.deps, logger)).rejects.toThrow("model exploded")
+      const pipelineFailure = orchestrate(stubs.deps, logger)
+      await expect(pipelineFailure).rejects.toThrow(
+        new AllPhasesFailedError([
+          { phase: COMBINED_PHASE, status: "failed", error: new Error("model exploded") },
+        ]),
+      )
+      await expect(pipelineFailure).rejects.toMatchObject({
+        name: "AllPhasesFailedError",
+        message: "every review phase failed: combined: [Error]: model exploded",
+      })
       expect(stubs.updateCheckRunCalls).toEqual([
         {
           checkRunId: 555,
@@ -4482,15 +4511,22 @@ index 3333333..4444444 100644
       })
       const logger = createTestLogger()
 
-      await expect(
-        orchestrate(
-          {
-            ...stubs.deps,
-            registerCancellationCleanup: () => unregister,
-          },
-          logger,
-        ),
-      ).rejects.toThrow("model exploded")
+      const pipelineFailure = orchestrate(
+        {
+          ...stubs.deps,
+          registerCancellationCleanup: () => unregister,
+        },
+        logger,
+      )
+      await expect(pipelineFailure).rejects.toThrow(
+        new AllPhasesFailedError([
+          { phase: COMBINED_PHASE, status: "failed", error: new Error("model exploded") },
+        ]),
+      )
+      await expect(pipelineFailure).rejects.toMatchObject({
+        name: "AllPhasesFailedError",
+        message: "every review phase failed: combined: [Error]: model exploded",
+      })
 
       expect(updateCallCountsAtUnregister).toEqual([1])
     })
@@ -5015,7 +5051,26 @@ describe("staged phases", () => {
 
     const expectedMessage =
       "every review phase failed: correctness-security: [Error]: correctness-security exploded; conventions-tests: [Error]: conventions-tests exploded; subtle-bugs: [Error]: subtle-bugs exploded"
-    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(expectedMessage)
+    const pipelineFailure = orchestrate(stubs.deps, logger)
+    await expect(pipelineFailure).rejects.toThrow(
+      new AllPhasesFailedError([
+        {
+          phase: CORRECTNESS_SECURITY_PHASE,
+          status: "failed",
+          error: new Error("correctness-security exploded"),
+        },
+        {
+          phase: CONVENTIONS_TESTS_PHASE,
+          status: "failed",
+          error: new Error("conventions-tests exploded"),
+        },
+        { phase: SUBTLE_BUGS_PHASE, status: "failed", error: new Error("subtle-bugs exploded") },
+      ]),
+    )
+    await expect(pipelineFailure).rejects.toMatchObject({
+      name: "AllPhasesFailedError",
+      message: expectedMessage,
+    })
     expect(stubs.postFindingsReviewCalls).toEqual([])
     expect(stubs.updateCheckRunCalls).toEqual([
       {
@@ -5090,7 +5145,34 @@ describe("staged phases", () => {
 
     const notAttempted = "[Error]: not attempted: an earlier phase aborted on an auth/credit error"
     const expectedMessage = `every review phase failed: correctness-security: [ReviewRequestError]: OpenRouter auth/credit error — aborting without fallback; conventions-tests: ${notAttempted}; subtle-bugs: ${notAttempted}`
-    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(expectedMessage)
+    const pipelineFailure = orchestrate(stubs.deps, logger)
+    await expect(pipelineFailure).rejects.toThrow(
+      new AllPhasesFailedError([
+        {
+          phase: CORRECTNESS_SECURITY_PHASE,
+          status: "failed",
+          error: new ReviewRequestError({
+            message: "OpenRouter auth/credit error — aborting without fallback",
+            attempts: [billedAttempt],
+            keyRejected: true,
+          }),
+        },
+        {
+          phase: CONVENTIONS_TESTS_PHASE,
+          status: "failed",
+          error: new Error("not attempted: an earlier phase aborted on an auth/credit error"),
+        },
+        {
+          phase: SUBTLE_BUGS_PHASE,
+          status: "failed",
+          error: new Error("not attempted: an earlier phase aborted on an auth/credit error"),
+        },
+      ]),
+    )
+    await expect(pipelineFailure).rejects.toMatchObject({
+      name: "AllPhasesFailedError",
+      message: expectedMessage,
+    })
     expect(stubs.generateFindingsCalls.map((call) => call.phase.id)).toEqual([
       "correctness-security",
     ])
@@ -5129,9 +5211,25 @@ describe("staged phases", () => {
     })
     const logger = createTestLogger()
 
-    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
-      "every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+    const pipelineFailure = orchestrate(stubs.deps, logger)
+    await expect(pipelineFailure).rejects.toThrow(
+      new AllPhasesFailedError([
+        {
+          phase: COMBINED_PHASE,
+          status: "failed",
+          error: new ReviewRequestError({
+            message: "review request failed after 1 attempt(s)",
+            attempts: [timeoutAttempt],
+            keyRejected: false,
+          }),
+        },
+      ]),
     )
+    await expect(pipelineFailure).rejects.toMatchObject({
+      name: "AllPhasesFailedError",
+      message:
+        "every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+    })
     expect(stubs.updateCheckRunCalls).toEqual([
       {
         checkRunId: 555,
@@ -5170,9 +5268,25 @@ describe("staged phases", () => {
     })
     const logger = createTestLogger()
 
-    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
-      "every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+    const pipelineFailure = orchestrate(stubs.deps, logger)
+    await expect(pipelineFailure).rejects.toThrow(
+      new AllPhasesFailedError([
+        {
+          phase: COMBINED_PHASE,
+          status: "failed",
+          error: new ReviewRequestError({
+            message: "review request failed after 1 attempt(s)",
+            attempts: [timeoutAttempt],
+            keyRejected: false,
+          }),
+        },
+      ]),
     )
+    await expect(pipelineFailure).rejects.toMatchObject({
+      name: "AllPhasesFailedError",
+      message:
+        "every review phase failed: combined: [ReviewRequestError]: review request failed after 1 attempt(s)",
+    })
     expect(stubs.updateCheckRunCalls).toEqual([
       {
         checkRunId: 555,
@@ -5208,9 +5322,25 @@ describe("staged phases", () => {
     })
     const logger = createTestLogger()
 
-    await expect(orchestrate(stubs.deps, logger)).rejects.toThrow(
-      "every review phase failed: combined: [ReviewRequestError]: review request failed after 3 attempt(s)",
+    const pipelineFailure = orchestrate(stubs.deps, logger)
+    await expect(pipelineFailure).rejects.toThrow(
+      new AllPhasesFailedError([
+        {
+          phase: COMBINED_PHASE,
+          status: "failed",
+          error: new ReviewRequestError({
+            message: "review request failed after 3 attempt(s)",
+            attempts,
+            keyRejected: false,
+          }),
+        },
+      ]),
     )
+    await expect(pipelineFailure).rejects.toMatchObject({
+      name: "AllPhasesFailedError",
+      message:
+        "every review phase failed: combined: [ReviewRequestError]: review request failed after 3 attempt(s)",
+    })
     expect(stubs.updateCheckRunCalls).toEqual([
       {
         checkRunId: 555,

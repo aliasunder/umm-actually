@@ -26,7 +26,7 @@ npm ci
 npm test              # vitest — the full unit suite
 npm run lint          # eslint (typescript-eslint strict)
 npm run prettier:check
-npm run build         # tsc
+npm run build         # tsc for every .ts file outside fixtures/, root config files included
 docker build .        # what CI's smoke step runs
 ```
 
@@ -40,7 +40,8 @@ points:
 - Functional style, immutable by default; no `any`, no `as`, no `!` — runtime
   guards and Zod narrowing instead
 - Pure modules (`diff/`, `review/`) never import I/O modules; only `main.ts`
-  touches `process.env` and constructs SDK clients
+  constructs SDK clients and touches `process.env`, except that `logger.ts`
+  reads `LOG_LEVEL`
 - Use the official SDKs (`@actions/core`, `@actions/github`,
   `@openrouter/sdk`, `parse-diff`) — don't hand-roll what they already do
 - Relative imports carry explicit `.js` extensions (ESM runtime requirement)

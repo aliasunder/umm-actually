@@ -514,7 +514,7 @@ describe("readChangedFiles", () => {
           data: {
             path: "src/locked.ts",
             // The read goes through the realpath, so the error names the resolved temp path
-            error: `Error: EACCES: permission denied, open '${path.join(await realpath(root), "src/locked.ts")}'`,
+            error: `[Error]: EACCES: permission denied, open '${path.join(await realpath(root), "src/locked.ts")}'`,
           },
         },
       ])
@@ -843,7 +843,7 @@ describe("findRelatedFiles", () => {
           data: {
             path: "locked.ts",
             // Scanned reads skip the realpath, so the error names the temp path as created
-            error: `Error: EACCES: permission denied, open '${path.join(root, "locked.ts")}'`,
+            error: `[Error]: EACCES: permission denied, open '${path.join(root, "locked.ts")}'`,
           },
         },
       ])
@@ -1554,7 +1554,7 @@ describe("readPriorityDocs", () => {
           data: {
             path: "README.md",
             // The read goes through the realpath, so the error names the resolved temp path
-            error: `Error: EACCES: permission denied, open '${path.join(await realpath(root), "README.md")}'`,
+            error: `[Error]: EACCES: permission denied, open '${path.join(await realpath(root), "README.md")}'`,
           },
         },
       ])

@@ -74,7 +74,9 @@ describe("resolveStages", () => {
 
   it("rejects an unknown phases value naming the valid modes", () => {
     expect(() => resolveStages("correctness,tests")).toThrow(
-      'unknown phases value "correctness,tests" — valid: combined | parallel | sequential',
+      new Error(
+        'unknown phases value "correctness,tests" — valid: combined | parallel | sequential',
+      ),
     )
   })
 })

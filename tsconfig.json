@@ -19,6 +19,8 @@
     "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["."],
+  // fixtures/workspace/ is a sample repository for the context-reader tests,
+  // written like user code (extensionless imports), so fixtures/ stays out.
+  "exclude": ["node_modules", "dist", "fixtures"]
 }

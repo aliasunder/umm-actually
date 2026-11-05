@@ -725,7 +725,29 @@ describe("requestReview", () => {
       await vi.advanceTimersByTimeAsync(90_000)
 
       await expect(reviewPromise).rejects.toThrow(
-        "review request failed after 2 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); openai/gpt-5-mini: timeout (no response within 45s)",
+        new ReviewRequestError({
+          message:
+            "review request failed after 2 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); openai/gpt-5-mini: timeout (no response within 45s)",
+          attempts: [
+            {
+              model: "openai/gpt-5-mini",
+              outcome: "timeout",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: "no response within 45s",
+            },
+            {
+              model: "openai/gpt-5-mini",
+              outcome: "timeout",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: "no response within 45s",
+            },
+          ],
+          keyRejected: false,
+        }),
       )
       expect(stub.sendCalls[0]?.options?.signal?.aborted).toBe(true)
 
@@ -1061,7 +1083,37 @@ describe("requestReview", () => {
       await vi.advanceTimersByTimeAsync(135_000)
 
       await expect(reviewPromise).rejects.toThrow(
-        "review request failed after 3 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); anthropic/claude-haiku-4.5: timeout (no response within 45s); anthropic/claude-haiku-4.5: timeout (no response within 45s)",
+        new ReviewRequestError({
+          message:
+            "review request failed after 3 attempt(s): openai/gpt-5-mini: timeout (no response within 45s); anthropic/claude-haiku-4.5: timeout (no response within 45s); anthropic/claude-haiku-4.5: timeout (no response within 45s)",
+          attempts: [
+            {
+              model: "openai/gpt-5-mini",
+              outcome: "timeout",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: "no response within 45s",
+            },
+            {
+              model: "anthropic/claude-haiku-4.5",
+              outcome: "timeout",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: "no response within 45s",
+            },
+            {
+              model: "anthropic/claude-haiku-4.5",
+              outcome: "timeout",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: "no response within 45s",
+            },
+          ],
+          keyRejected: false,
+        }),
       )
       expect(stub.sendCalls.map((sendCall) => sendCall.chatRequest.model)).toEqual([
         "openai/gpt-5-mini",
@@ -1230,7 +1282,31 @@ describe("requestReview", () => {
     try {
       await expect(
         client.requestReview({ ...requestParams, fallbackModel: null }, logger),
-      ).rejects.toThrow("review request failed")
+      ).rejects.toThrow(
+        new ReviewRequestError({
+          message:
+            "review request failed after 2 attempt(s): openai/gpt-5-mini: api_error (HTTP 429: HTTP 429); openai/gpt-5-mini: api_error (HTTP 429: HTTP 429)",
+          attempts: [
+            {
+              model: "openai/gpt-5-mini",
+              outcome: "api_error",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: "HTTP 429: HTTP 429",
+            },
+            {
+              model: "openai/gpt-5-mini",
+              outcome: "api_error",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: "HTTP 429: HTTP 429",
+            },
+          ],
+          keyRejected: false,
+        }),
+      )
 
       // retryDelayMs sleeps happen between retryable failures; the guard
       // `modelAttemptNumber <= MAX_ATTEMPTS_PER_MODEL` prevents an extra sleep
@@ -1494,7 +1570,20 @@ describe("requestReview", () => {
       const { client, logger } = makeClient(stub)
 
       await expect(client.requestReview(requestParams, logger)).rejects.toThrow(
-        `OpenRouter auth/credit error — aborting without fallback: openai/gpt-5-mini: api_error (HTTP ${statusCode}: HTTP ${statusCode})`,
+        new ReviewRequestError({
+          message: `OpenRouter auth/credit error — aborting without fallback: openai/gpt-5-mini: api_error (HTTP ${statusCode}: HTTP ${statusCode})`,
+          attempts: [
+            {
+              model: "openai/gpt-5-mini",
+              outcome: "api_error",
+              promptTokens: null,
+              completionTokens: null,
+              costUsd: null,
+              errorSummary: `HTTP ${statusCode}: HTTP ${statusCode}`,
+            },
+          ],
+          keyRejected: true,
+        }),
       )
       expect(stub.sendCalls).toHaveLength(1)
     },
@@ -1509,7 +1598,29 @@ describe("requestReview", () => {
     await expect(
       client.requestReview({ ...requestParams, fallbackModel: null }, logger),
     ).rejects.toThrow(
-      "review request failed after 2 attempt(s): openai/gpt-5-mini: api_error (HTTP 500: HTTP 500); openai/gpt-5-mini: api_error (HTTP 503: HTTP 503)",
+      new ReviewRequestError({
+        message:
+          "review request failed after 2 attempt(s): openai/gpt-5-mini: api_error (HTTP 500: HTTP 500); openai/gpt-5-mini: api_error (HTTP 503: HTTP 503)",
+        attempts: [
+          {
+            model: "openai/gpt-5-mini",
+            outcome: "api_error",
+            promptTokens: null,
+            completionTokens: null,
+            costUsd: null,
+            errorSummary: "HTTP 500: HTTP 500",
+          },
+          {
+            model: "openai/gpt-5-mini",
+            outcome: "api_error",
+            promptTokens: null,
+            completionTokens: null,
+            costUsd: null,
+            errorSummary: "HTTP 503: HTTP 503",
+          },
+        ],
+        keyRejected: false,
+      }),
     )
     expect(stub.sendCalls).toHaveLength(2)
   })
@@ -1584,7 +1695,45 @@ describe("requestReview", () => {
     const { client, logger } = makeClient(stub)
 
     await expect(client.requestReview(requestParams, logger)).rejects.toThrow(
-      "review request failed after 4 attempt(s)",
+      new ReviewRequestError({
+        message:
+          "review request failed after 4 attempt(s): openai/gpt-5-mini: invalid_json (response content is not valid JSON); openai/gpt-5-mini: invalid_json (response content is not valid JSON); anthropic/claude-haiku-4.5: invalid_json (response content is not valid JSON); anthropic/claude-haiku-4.5: invalid_json (response content is not valid JSON)",
+        attempts: [
+          {
+            model: "openai/gpt-5-mini",
+            outcome: "invalid_json",
+            promptTokens: 11800,
+            completionTokens: 42,
+            costUsd: null,
+            errorSummary: "response content is not valid JSON",
+          },
+          {
+            model: "openai/gpt-5-mini",
+            outcome: "invalid_json",
+            promptTokens: 11800,
+            completionTokens: 42,
+            costUsd: null,
+            errorSummary: "response content is not valid JSON",
+          },
+          {
+            model: "anthropic/claude-haiku-4.5",
+            outcome: "invalid_json",
+            promptTokens: 11800,
+            completionTokens: 42,
+            costUsd: null,
+            errorSummary: "response content is not valid JSON",
+          },
+          {
+            model: "anthropic/claude-haiku-4.5",
+            outcome: "invalid_json",
+            promptTokens: 11800,
+            completionTokens: 42,
+            costUsd: null,
+            errorSummary: "response content is not valid JSON",
+          },
+        ],
+        keyRejected: false,
+      }),
     )
     expect(stub.sendCalls).toHaveLength(4)
   })

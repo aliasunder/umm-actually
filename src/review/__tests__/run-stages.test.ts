@@ -230,9 +230,17 @@ describe("runStages", () => {
       b: () => Promise.reject(new Error("boom b")),
     })
 
-    await expect(
-      runStages({ stages: [[phaseA], [phaseB]], runPhase }, createTestLogger()),
-    ).rejects.toThrow("every review phase failed: a: [Error]: boom a; b: [Error]: boom b")
+    const stagesFailure = runStages({ stages: [[phaseA], [phaseB]], runPhase }, createTestLogger())
+    await expect(stagesFailure).rejects.toThrow(
+      new AllPhasesFailedError([
+        { phase: phaseA, status: "failed", error: new Error("boom a") },
+        { phase: phaseB, status: "failed", error: new Error("boom b") },
+      ]),
+    )
+    await expect(stagesFailure).rejects.toMatchObject({
+      name: "AllPhasesFailedError",
+      message: "every review phase failed: a: [Error]: boom a; b: [Error]: boom b",
+    })
   })
 
   it("skips later stages after an auth/credit abort and reports their phases as not attempted", async () => {
@@ -312,7 +320,7 @@ describe("runStages", () => {
     const { runPhase, calls } = makeRunPhase({ a: () => makeResult() })
 
     await expect(runStages({ stages, runPhase }, createTestLogger())).rejects.toThrow(
-      "no review phases to run",
+      new Error("no review phases to run"),
     )
     expect(calls).toEqual([])
   })
