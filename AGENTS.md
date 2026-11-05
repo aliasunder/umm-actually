@@ -467,10 +467,11 @@ element is here because its absence measurably cost findings in live runs:
   steers the model harder than a paragraph of prose. Budget them — the
   system prompt loads on every review call.
 - **Proof-of-work coupling for skippable checklists.** A check the model
-  can silently skip needs a required enumeration in the finding schema's
-  `analysis` field (`src/review/finding.ts`): quote each doc sentence
-  checked, and name each changed it() and its derivable exact value.
-  Skipping must be visible in the output, not just discouraged.
+  can silently skip needs a required enumeration in the `analysis` field of
+  the review response schema (`src/review/finding.ts`), which the model
+  fills once per phase beside `findings`. The enumeration quotes each doc
+  sentence checked and names each changed it() with its derivable exact
+  value. Skipping must be visible in the output, not just discouraged.
 - **Single-call constraint.** Every check must be resolvable by reasoning
   over the prompt-provided files — no instruction may assume tools, test
   runs, grep, or repository access beyond the prompt context.
