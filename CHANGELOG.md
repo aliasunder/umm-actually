@@ -11,6 +11,20 @@
 
 
 
+
+## [0.4.12] — 2026-11-07
+
+### Documentation
+
+- **agents:** Refresh code standards from the vault notes (#139)
+- Update CHANGELOG.md for v0.4.11
+
+### Maintenance
+
+- **deps:** Bump node from `0e0ff40` to `c86ecea` (#140)
+- **deps:** Bump @openrouter/sdk (#141)
+- **deps-dev:** Bump the development group with 3 updates (#142)
+
 ## [0.4.11] — 2026-11-03
 
 ### Documentation
