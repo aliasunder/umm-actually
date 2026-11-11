@@ -8,9 +8,9 @@ import type { ContextReader } from "../context/workspace.js"
 import {
   ReviewRequestError,
   createOpenRouterClient,
-  type ChatRequestSubset,
   type ModelAttempt,
   type OpenRouterClient,
+  type ReviewRequest,
   type StructuredReviewResult,
 } from "../openrouter/client.js"
 import { buildUserPrompt, estimateTokens, type PromptFile } from "../review/prompt.js"
@@ -60,6 +60,31 @@ const pullRequestPayload: Record<string, unknown> = JSON.parse(
 const fixtureReviewResponse: ReviewResponse = JSON.parse(
   readFileSync(new URL("../../fixtures/openrouter.response.json", import.meta.url), "utf8"),
 )
+
+/** The pair a `callModel` stub hands back once its request settles: the
+ *  materialized response the client parses and the text the SDK extracts. */
+type ModelCallResult = { response: unknown; text: string }
+
+/** A `callModel` result that settles with the given promise. Both reads await
+ *  the one promise, the way the SDK's reads share one materialized stream. */
+const makePendingModelResultStub = (
+  settled: Promise<ModelCallResult>,
+): { getResponse(): Promise<unknown>; getText(): Promise<string> } => ({
+  getResponse: async () => (await settled).response,
+  getText: async () => (await settled).text,
+})
+
+/** A `callModel` result that resolves at once with an accepted-shaped response
+ *  carrying the fixture review as its text. */
+const makeModelResultStub = (response: {
+  id: string
+  model: string
+  usage: { inputTokens: number; outputTokens: number; cost?: number }
+}): { getResponse(): Promise<unknown>; getText(): Promise<string> } => {
+  return makePendingModelResultStub(
+    Promise.resolve({ response, text: JSON.stringify(fixtureReviewResponse) }),
+  )
+}
 
 const fixturePrContext: PrContext = {
   prNumber: 7,
@@ -4691,14 +4716,16 @@ describe("staged phases", () => {
       const remainingReviewMs = () => deadline - Date.now()
       const costResponse = Promise.withResolvers<unknown>()
       const getGeneration = vi.fn(() => costResponse.promise)
-      const send = vi.fn(async () => ({
-        id: "accepted-before-deadline",
-        model: "test/model",
-        choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
-        usage: { promptTokens: 10, completionTokens: 20 },
-      }))
+      const callModel = vi.fn(() => {
+        return makeModelResultStub({
+          id: "accepted-before-deadline",
+          model: "test/model",
+          usage: { inputTokens: 10, outputTokens: 20 },
+        })
+      })
       const client = createOpenRouterClient({
-        sdk: { chat: { send }, generations: { getGeneration } },
+        agent: { callModel },
+        sdk: { generations: { getGeneration } },
         requestTimeoutMs: 900_000,
         remainingReviewMs,
       })
@@ -4731,7 +4758,7 @@ describe("staged phases", () => {
         modelUsed: "test/model",
       })
       expect(remainingReviewMs()).toBe(0)
-      expect(send).toHaveBeenCalledTimes(1)
+      expect(callModel).toHaveBeenCalledTimes(1)
       expect(getGeneration).toHaveBeenCalledExactlyOnceWith(
         { id: "accepted-before-deadline" },
         { retries: { strategy: "none" }, signal: expect.any(AbortSignal) },
@@ -4776,20 +4803,20 @@ describe("staged phases", () => {
     try {
       const deadline = Date.now() + 1000
       const remainingReviewMs = () => deadline - Date.now()
-      const lateResponse = Promise.withResolvers<unknown>()
+      const lateResponse = Promise.withResolvers<ModelCallResult>()
       const response = {
         id: "completed",
         model: "test/model",
-        choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
-        usage: { promptTokens: 10, completionTokens: 20, cost: 0.01 },
+        usage: { inputTokens: 10, outputTokens: 20, cost: 0.01 },
       }
-      const send = vi
+      const callModel = vi
         .fn()
-        .mockResolvedValueOnce(response)
-        .mockResolvedValueOnce(response)
-        .mockImplementation(() => lateResponse.promise)
+        .mockReturnValueOnce(makeModelResultStub(response))
+        .mockReturnValueOnce(makeModelResultStub(response))
+        .mockImplementation(() => makePendingModelResultStub(lateResponse.promise))
       const client = createOpenRouterClient({
-        sdk: { chat: { send }, generations: { getGeneration: vi.fn() } },
+        agent: { callModel },
+        sdk: { generations: { getGeneration: vi.fn() } },
         requestTimeoutMs: 900_000,
         remainingReviewMs,
       })
@@ -4808,7 +4835,7 @@ describe("staged phases", () => {
       const pending = orchestrate(stubs.deps, createTestLogger())
       await vi.advanceTimersByTimeAsync(1000)
       const result = await pending
-      expect(send).toHaveBeenCalledTimes(3)
+      expect(callModel).toHaveBeenCalledTimes(3)
       expect(result.phases).toEqual([
         { phase: "correctness-security", status: "completed" },
         { phase: "conventions-tests", status: "completed" },
@@ -4858,7 +4885,7 @@ describe("staged phases", () => {
         reviews: stubs.postFindingsReviewCalls,
         result,
       })
-      lateResponse.resolve(response)
+      lateResponse.resolve({ response, text: JSON.stringify(fixtureReviewResponse) })
       await vi.runAllTimersAsync()
       expect({
         checks: stubs.updateCheckRunCalls,
@@ -4875,8 +4902,7 @@ describe("staged phases", () => {
     const response = {
       id: "completed",
       model: "test/model",
-      choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
-      usage: { promptTokens: 10, completionTokens: 20, cost: 0.01 },
+      usage: { inputTokens: 10, outputTokens: 20, cost: 0.01 },
     }
 
     // correctness-security is dispatched first, so a logger shared across the
@@ -4884,19 +4910,21 @@ describe("staged phases", () => {
     // The failure is keyed on that phase's prompt text, not on call order
     const correctnessSecurityPassScope = "this pass covers correctness & security"
     const failedPrompts = new Set<string>()
-    const send = vi.fn(async ({ chatRequest }: { chatRequest: ChatRequestSubset }) => {
-      const systemPrompt = first(chatRequest.messages).content
+    const callModel = vi.fn(({ instructions }: ReviewRequest) => {
       const isFirstCorrectnessSecurityRequest =
-        systemPrompt.includes(correctnessSecurityPassScope) && !failedPrompts.has(systemPrompt)
+        instructions.includes(correctnessSecurityPassScope) && !failedPrompts.has(instructions)
 
       if (isFirstCorrectnessSecurityRequest) {
-        failedPrompts.add(systemPrompt)
-        throw Object.assign(new Error("HTTP 500"), { statusCode: 500 })
+        failedPrompts.add(instructions)
+        return makePendingModelResultStub(
+          Promise.reject(Object.assign(new Error("HTTP 500"), { statusCode: 500 })),
+        )
       }
-      return response
+      return makeModelResultStub(response)
     })
     const client = createOpenRouterClient({
-      sdk: { chat: { send }, generations: { getGeneration: vi.fn() } },
+      agent: { callModel },
+      sdk: { generations: { getGeneration: vi.fn() } },
       requestTimeoutMs: 900_000,
       remainingReviewMs: () => Infinity,
       retryDelayMs: 0,
@@ -4934,7 +4962,7 @@ describe("staged phases", () => {
       { phase: "conventions-tests", status: "completed" },
       { phase: "subtle-bugs", status: "completed" },
     ])
-    expect(send).toHaveBeenCalledTimes(4)
+    expect(callModel).toHaveBeenCalledTimes(4)
     expect(logsWithMessage(generateLogger, "review attempt failed")).toEqual([
       {
         level: "warn",

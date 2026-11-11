@@ -31,37 +31,39 @@ export type StructuredReviewResult = {
   attempts: ModelAttempt[]
 }
 
-/** Structural subset of the SDK's ChatRequest — exactly what we send. */
-export type ChatRequestSubset = {
+/** Structural subset of the Agent SDK's call-model input — exactly what we
+ *  send, as one Responses API request with no tools. */
+export type ReviewRequest = {
   model: string
-  messages: { role: "system" | "user"; content: string }[]
-  maxCompletionTokens: number
-  responseFormat: {
-    type: "json_schema"
-    jsonSchema: {
+  instructions: string
+  input: string
+  maxOutputTokens: number
+  text: {
+    format: {
+      type: "json_schema"
       name: string
       strict: boolean
       schema: Record<string, unknown>
     }
   }
-  stream: false
 }
 
 /**
- * Structural subset of the OpenRouter SDK — test stubs are plain objects.
- * Method syntax keeps the real SDK assignable under strictFunctionTypes;
- * responses are `unknown` on purpose: Zod parses across the boundary.
+ * Structural subset of the Agent SDK client — test stubs are plain objects.
+ * Method syntax keeps the real client assignable under strictFunctionTypes.
+ * `getResponse` resolves `unknown` on purpose: Zod parses across the
+ * boundary. `getText` is the SDK's own extraction of the message text.
  */
-export type OpenRouterLike = {
-  chat: {
-    send(
-      request: { chatRequest: ChatRequestSubset },
-      options?: {
-        retries?: { strategy: "backoff" | "none" }
-        signal?: AbortSignal
-      },
-    ): Promise<unknown>
-  }
+export type AgentLike = {
+  callModel(
+    request: ReviewRequest & { signal: AbortSignal },
+    options?: { retries?: { strategy: "backoff" | "none" } },
+  ): { getResponse(): Promise<unknown>; getText(): Promise<string> }
+}
+
+/** Structural subset of the OpenRouter SDK's REST client — the generation
+ *  cost lookup is the one endpoint the Agent SDK does not cover. */
+export type GenerationsLike = {
   generations: {
     getGeneration(
       request: { id: string },
@@ -88,17 +90,18 @@ export type OpenRouterClient = {
   ) => Promise<StructuredReviewResult>
 }
 
-const chatResultSchema = z.object({
+/** The fields read from the Agent SDK's materialized Responses result. The
+ *  SDK types `usage` as both nullable and optional, so the block is nullish. */
+const responsesResultSchema = z.object({
   id: z.string(),
   model: z.string(),
-  choices: z.array(z.object({ message: z.object({ content: z.unknown() }) })),
   usage: z
     .object({
-      promptTokens: z.number(),
-      completionTokens: z.number(),
-      cost: z.number().nullable().optional(),
+      inputTokens: z.number(),
+      outputTokens: z.number(),
+      cost: z.number().nullish(),
     })
-    .optional(),
+    .nullish(),
 })
 
 const generationResponseSchema = z.object({
@@ -126,7 +129,7 @@ const MAX_ATTEMPTS_PER_MODEL = 2
  *  rate-limit burst has a recovery window. */
 const RETRY_DELAY_MS = 1_000
 
-/** The output ceiling, sent as the request's `maxCompletionTokens`, for every
+/** The output ceiling, sent as the request's `maxOutputTokens`, for every
  *  attempt except a context-overflow retry. Without one, some providers apply
  *  a default output limit that cuts a large review off mid-JSON. */
 const MAX_COMPLETION_TOKENS = 128_000
@@ -302,7 +305,7 @@ const parseJsonOrNull = (text: string): { parsed: unknown } | null => {
   }
 }
 
-const buildChatRequest = ({
+const buildReviewRequest = ({
   systemPrompt,
   userPrompt,
   model,
@@ -312,22 +315,19 @@ const buildChatRequest = ({
   userPrompt: string
   model: string
   maxCompletionTokens: number
-}): ChatRequestSubset => ({
+}): ReviewRequest => ({
   model,
-  messages: [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userPrompt },
-  ],
-  maxCompletionTokens,
-  responseFormat: {
-    type: "json_schema",
-    jsonSchema: {
+  instructions: systemPrompt,
+  input: userPrompt,
+  maxOutputTokens: maxCompletionTokens,
+  text: {
+    format: {
+      type: "json_schema",
       name: "review_response",
       strict: true,
       schema: reviewResponseJsonSchema,
     },
   },
-  stream: false,
 })
 
 type SingleAttempt =
@@ -393,12 +393,14 @@ const summarizeAttempts = (attempts: ModelAttempt[]): string => {
 /** The client holds no logger. Each requestReview call passes its own, so
  *  concurrent callers can tag their requests' lines with their own props. */
 export const createOpenRouterClient = ({
+  agent,
   sdk,
   requestTimeoutMs,
   remainingReviewMs,
   retryDelayMs = RETRY_DELAY_MS,
 }: {
-  sdk: OpenRouterLike
+  agent: AgentLike
+  sdk: GenerationsLike
   /** Per-attempt deadline. When it elapses the attempt records outcome
    *  `timeout` and the ladder moves on — to the next model when one
    *  exists, otherwise a same-model retry while attempts remain — whether
@@ -424,26 +426,36 @@ export const createOpenRouterClient = ({
     }
   }
 
-  /** Sends one chat request under the per-attempt deadline. Its only log lines
-   *  are withDeadline's; requestReview logs each attempt's outcome. */
+  /** Sends one review request under the per-attempt deadline. Its only log
+   *  lines are withDeadline's; requestReview logs each attempt's outcome. */
   const attemptOnce = async (
-    chatRequest: ChatRequestSubset,
+    reviewRequest: ReviewRequest,
     logger: Logger,
   ): Promise<SingleAttempt> => {
-    const { model } = chatRequest
+    const { model } = reviewRequest
 
     // No remaining-time guard here. requestReview calls ensureReviewTimeRemaining
     // before every attempt, so some review time is always left
     const callTimeout = getCallTimeout(remainingReviewMs())
 
+    // The Agent SDK streams every request and materializes the result on the
+    // first read. A "Stream ended without completion event" rejection on every
+    // model means its bundled SDK copy rejected a changed wire field or
+    // ignored a stream error event; only the raw stream tells those apart
     const sendResult = await withDeadline(
       {
-        start: (signal) => {
-          return sdk.chat.send({ chatRequest }, { retries: { strategy: "none" }, signal })
+        start: async (signal) => {
+          const modelResult = agent.callModel(
+            { ...reviewRequest, signal },
+            { retries: { strategy: "none" } },
+          )
+          const response = await modelResult.getResponse()
+          const text = await modelResult.getText()
+          return { response, text }
         },
         timeoutMs: callTimeout.timeoutMs,
       },
-      logger.child({ operation: "chat request", model }),
+      logger.child({ operation: "review request", model }),
     )
 
     // Retryable even when the review deadline caused the timeout, because
@@ -480,7 +492,7 @@ export const createOpenRouterClient = ({
       }
       const fittedCeiling = fittedMaxCompletionTokens({
         error: sendResult.error,
-        rejectedMaxCompletionTokens: chatRequest.maxCompletionTokens,
+        rejectedMaxCompletionTokens: reviewRequest.maxOutputTokens,
       })
 
       if (fittedCeiling) {
@@ -497,7 +509,7 @@ export const createOpenRouterClient = ({
       return { kind: "failed", attempt, retryable, keyRejected }
     }
 
-    const parsedResult = chatResultSchema.safeParse(sendResult.value)
+    const parsedResult = responsesResultSchema.safeParse(sendResult.value.response)
 
     // A malformed response body points at a provider or gateway glitch rather
     // than the request, so a second call can come back well-formed
@@ -510,20 +522,20 @@ export const createOpenRouterClient = ({
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
-          errorSummary: "unexpected chat response shape",
+          errorSummary: "unexpected review response shape",
         },
         retryable: true,
         keyRejected: false,
       }
     }
 
-    const chatResult = parsedResult.data
+    const responsesResult = parsedResult.data
 
     // Failed-validation attempts still carry usage — they were billed too
     const usage = {
-      promptTokens: chatResult.usage?.promptTokens ?? null,
-      completionTokens: chatResult.usage?.completionTokens ?? null,
-      costUsd: chatResult.usage?.cost ?? null,
+      promptTokens: responsesResult.usage?.inputTokens ?? null,
+      completionTokens: responsesResult.usage?.outputTokens ?? null,
+      costUsd: responsesResult.usage?.cost ?? null,
     }
     const failedValidation = (outcome: AttemptOutcome, errorSummary: string): SingleAttempt => ({
       kind: "failed",
@@ -532,9 +544,11 @@ export const createOpenRouterClient = ({
       keyRejected: false,
     })
 
-    const content = chatResult.choices[0]?.message.content
+    // The SDK extracts "" when the output holds no message item, such as a
+    // reasoning-only response
+    const content = sendResult.value.text
 
-    if (typeof content !== "string" || content === "") {
+    if (content === "") {
       return failedValidation("empty_content", "response had no text content")
     }
 
@@ -559,8 +573,8 @@ export const createOpenRouterClient = ({
     return {
       kind: "accepted",
       review: parsedReview.data,
-      routedModel: chatResult.model,
-      generationId: chatResult.id,
+      routedModel: responsesResult.model,
+      generationId: responsesResult.id,
       attempt: { model, outcome: "accepted", ...usage, errorSummary: null },
     }
   }
@@ -645,7 +659,7 @@ export const createOpenRouterClient = ({
       while (modelAttemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
         ensureReviewTimeRemaining()
         const attemptResult = await attemptOnce(
-          buildChatRequest({ systemPrompt, userPrompt, model: ladderModel, maxCompletionTokens }),
+          buildReviewRequest({ systemPrompt, userPrompt, model: ladderModel, maxCompletionTokens }),
           logger,
         )
 
