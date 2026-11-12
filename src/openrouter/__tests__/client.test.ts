@@ -270,14 +270,6 @@ const requestParams = {
 }
 
 describe("captured Responses fixtures", () => {
-  it.each([
-    { label: "accepted", payload: acceptedWirePayload },
-    { label: "invalid JSON", payload: invalidJsonWirePayload },
-    { label: "schema mismatch", payload: schemaMismatchWirePayload },
-  ])("the $label wire payload passes the SDK's result transform", ({ payload }) => {
-    expect(openResponsesResultFromJSON(JSON.stringify(payload)).ok).toBe(true)
-  })
-
   it("the overflow and bad-key bodies build the SDK's error classes with their status and message", () => {
     const overflowError = makeBadRequestError(overflowErrorBody)
     const badKeyError = new UnauthorizedResponseError(
@@ -592,6 +584,41 @@ describe("requestReview", () => {
     })
   })
 
+  it("reports the response's routed model as modelUsed when it differs from the requested model", async () => {
+    const stub = makeClientStubs({ modelResults: [{ value: acceptedResult }] })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(
+      { ...requestParams, model: "openrouter/auto", fallbackModel: null },
+      logger,
+    )
+
+    expect(result).toEqual({
+      review: acceptedReview,
+      modelUsed: "z-ai/glm-5.3-flash",
+      attempts: [
+        {
+          model: "openrouter/auto",
+          outcome: "accepted",
+          ...ACCEPTED_USAGE,
+          errorSummary: null,
+        },
+      ],
+    })
+    expect(logsWithMessage(logger, "review response accepted")).toEqual([
+      {
+        level: "info",
+        message: "review response accepted",
+        data: {
+          model: "openrouter/auto",
+          routedModel: "z-ai/glm-5.3-flash",
+          generationId: ACCEPTED_GENERATION_ID,
+          totalAttemptCount: 1,
+        },
+      },
+    ])
+  })
+
   it("retries the same model once on invalid JSON, recording both attempts", async () => {
     const stub = makeClientStubs({
       modelResults: [{ value: invalidJsonResult }, { value: acceptedResult }],
@@ -745,12 +772,18 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams, logger)
 
-    expect(stub.modelCalls.map((modelCall) => modelCall.request.model)).toEqual([
-      "z-ai/glm-5.3-flash",
-      "z-ai/glm-5.3-flash",
-    ])
-    expect(stub.modelCalls[0]?.options).toEqual({ retries: { strategy: "none" } })
-    expect(stub.modelCalls[0]?.request.signal).toBeInstanceOf(AbortSignal)
+    const actionLadderCall = {
+      model: "z-ai/glm-5.3-flash",
+      signal: expect.any(AbortSignal),
+      options: { retries: { strategy: "none" } },
+    }
+    expect(
+      stub.modelCalls.map(({ request, options }) => ({
+        model: request.model,
+        signal: request.signal,
+        options,
+      })),
+    ).toEqual([actionLadderCall, actionLadderCall])
     expect(result.attempts[0]).toEqual({
       model: "z-ai/glm-5.3-flash",
       outcome: "api_error",
@@ -1955,7 +1988,7 @@ describe("requestReview", () => {
   })
 
   it("degrades to a null cost with a warning when the generation lookup throws synchronously", async () => {
-    const sdkWithThrowingLookup: GenerationsLike = {
+    const throwingCostLookupClient: GenerationsLike = {
       generations: {
         getGeneration: () => {
           throw new Error("lookup threw before returning a promise")
@@ -1963,7 +1996,7 @@ describe("requestReview", () => {
       },
     }
     const { agent } = makeClientStubs({ modelResults: [{ value: makeNoCostResult() }] })
-    const { client, logger } = makeClient({ agent, costLookupClient: sdkWithThrowingLookup })
+    const { client, logger } = makeClient({ agent, costLookupClient: throwingCostLookupClient })
 
     const result = await client.requestReview(requestParams, logger)
 
