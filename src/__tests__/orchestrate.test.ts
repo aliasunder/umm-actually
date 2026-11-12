@@ -4708,6 +4708,56 @@ describe("staged phases", () => {
     ])
   })
 
+  it("publishes full coverage without a deadline warning when the review deadline runs out after every phase completed", async () => {
+    // The only phase's response spends the rest of this test's controllable deadline
+    const deadline = { remainingMs: 1 }
+    const stubs = makeOrchestrateDeps({
+      remainingReviewMs: () => deadline.remainingMs,
+      generateFindings: async (reviewContext) => {
+        stubs.generateFindingsCalls.push(reviewContext)
+        deadline.remainingMs = 0
+        return {
+          review: fixtureReviewResponse,
+          modelUsed: "test/model",
+          attempts: [fixtureAttempt],
+        }
+      },
+    })
+
+    const result = await orchestrate(stubs.deps, createTestLogger())
+
+    expect(result).toEqual({
+      findingsCount: expectedSelection.selected.length,
+      reviewUrl: "https://github.com/test/review/1",
+      modelUsed: "test/model",
+      skippedReason: "",
+      phases: [{ phase: "combined", status: "completed" }],
+      reviewSummaryMarkdown: expectedReviewSummary(),
+      costSummaryMarkdown: expectedCostSummary,
+      conventionsNote: null,
+    })
+    expect(stubs.upsertSummaryCommentCalls).toEqual([
+      expectedStatus({
+        isFirstRun: true,
+        postedCount: expectedSelection.selected.length,
+        totalCount: expectedSelection.selected.length,
+      }),
+    ])
+    expect(stubs.postFindingsReviewCalls).toEqual([
+      expectedFindingsReview(expectedSelection.selected),
+    ])
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "success",
+        output: {
+          title: `${expectedSelection.selected.length} findings`,
+          summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.\n\n${expectedCostSummary}`,
+        },
+      },
+    ])
+  })
+
   it("publishes completed parallel phases once when a provider ignores the review deadline abort", async () => {
     vi.useFakeTimers()
     try {

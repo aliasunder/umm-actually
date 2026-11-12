@@ -434,6 +434,43 @@ describe("requestReview", () => {
     }
   })
 
+  it("returns an accepted review whose response arrives as the review deadline runs out", async () => {
+    // The response spends the rest of this test's controllable deadline
+    const deadline = { remainingMs: 100 }
+    const stub = makeClientStubs({
+      modelResults: [
+        {
+          pending: async () => {
+            deadline.remainingMs = 0
+            return acceptedResult
+          },
+        },
+      ],
+    })
+    const logger = createTestLogger()
+    const client = createOpenRouterClient({
+      agent: stub.agent,
+      requestTimeoutMs: 45_000,
+      remainingReviewMs: () => deadline.remainingMs,
+    })
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result).toEqual({
+      review: acceptedReview,
+      modelUsed: requestParams.model,
+      attempts: [
+        {
+          model: requestParams.model,
+          outcome: "accepted",
+          ...ACCEPTED_USAGE,
+          errorSummary: null,
+        },
+      ],
+    })
+    expect(stub.modelCalls.map(({ request }) => request.model)).toEqual([requestParams.model])
+  })
+
   it("sends one Responses request with the prompts, the full output ceiling, the strict review schema and an abort signal", async () => {
     const stub = makeClientStubs({ modelResults: [{ value: acceptedResult }] })
     const { client, logger } = makeClient(stub)
@@ -1797,7 +1834,7 @@ describe("requestReview", () => {
     expect(stub.modelCalls).toHaveLength(4)
   })
 
-  it("records null token counts when the response carries no usage block", async () => {
+  it("records null token counts and a null cost when the response carries no usage block", async () => {
     const stub = makeClientStubs({
       modelResults: [{ value: makeNoUsageResult() }],
     })
