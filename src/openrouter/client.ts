@@ -636,7 +636,12 @@ export const createOpenRouterClient = ({
     }
 
     // parsed.data = Zod safeParse result; .data = API envelope's data property
-    return parsed.data.data.totalCost
+    const costUsd = parsed.data.data.totalCost
+
+    // Logged at info because how often an accepted response arrives without
+    // its cost is what decides whether this fallback stays
+    lookupLogger.info("generation cost looked up", { costUsd })
+    return costUsd
   }
 
   const requestReview: OpenRouterClient["requestReview"] = async (

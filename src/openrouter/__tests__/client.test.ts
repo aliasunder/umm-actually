@@ -1990,6 +1990,17 @@ describe("requestReview", () => {
         errorSummary: null,
       },
     ])
+    expect(logsWithMessage(logger, "generation cost looked up")).toEqual([
+      {
+        level: "info",
+        message: "generation cost looked up",
+        data: {
+          operation: "generation cost lookup",
+          generationId: ACCEPTED_GENERATION_ID,
+          costUsd: 0.0399,
+        },
+      },
+    ])
   })
 
   it("degrades to a null cost with a warning when the generation lookup fails", async () => {
