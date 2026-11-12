@@ -63,7 +63,7 @@ const fixtureReviewResponse: ReviewResponse = JSON.parse(
 )
 
 /** The pair a `callModel` stub hands back once its request settles: the
- *  materialized response the client parses and the text the SDK extracts. */
+ *  materialized response the client reads and the text the SDK extracts. */
 type ModelCallResult = { response: ResponsesResult; text: string }
 
 /** A `callModel` result that settles with the given promise. Both reads await
