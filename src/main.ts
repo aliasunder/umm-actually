@@ -1,7 +1,6 @@
 import * as core from "@actions/core"
 import { context, getOctokit } from "@actions/github"
 import { OpenRouter as OpenRouterAgent } from "@openrouter/agent"
-import { OpenRouter } from "@openrouter/sdk"
 import envVar from "env-var"
 import { parseConfig, type RawInputs } from "./config.js"
 import { createContextReader } from "./context/workspace.js"
@@ -141,7 +140,6 @@ try {
           // passes its own phase-tagged logger to requestReview
           openrouterClient: createOpenRouterClient({
             agent: new OpenRouterAgent({ apiKey: config.openrouterApiKey }),
-            costLookupClient: new OpenRouter({ apiKey: config.openrouterApiKey }),
             requestTimeoutMs: config.requestTimeoutSeconds * 1000,
             remainingReviewMs,
           }),

@@ -14,7 +14,6 @@ import {
   createOpenRouterClient,
   ReviewRequestError,
   type AgentLike,
-  type GenerationsLike,
   type ResponsesResult,
   type ReviewRequest,
 } from "../client.js"
@@ -97,8 +96,7 @@ const acceptedResult = toModelCallResult(acceptedWirePayload)
 const invalidJsonResult = toModelCallResult(invalidJsonWirePayload)
 const schemaMismatchResult = toModelCallResult(schemaMismatchWirePayload)
 
-/** The accepted payload with its usage cost removed — the case that routes
- *  the client to the generation cost lookup. */
+/** The accepted payload with its usage cost removed. */
 const makeNoCostResult = (): ModelCallResult => {
   const { usage, ...payload } = parseAcceptedPayload()
   const usageWithoutCost = Object.fromEntries(
@@ -126,25 +124,10 @@ type StubModelResult =
   | { error: unknown }
   | { pending: (request: { signal: AbortSignal }) => Promise<ModelCallResult> }
 
-type StubOptions = { signal?: AbortSignal } | undefined
-
-type StubGenerationResponse =
-  { value: unknown } | { error: unknown } | { pending: (options: StubOptions) => Promise<unknown> }
-
-const makeClientStubs = ({
-  modelResults,
-  generationResponses = [],
-}: {
-  modelResults: StubModelResult[]
-  generationResponses?: StubGenerationResponse[]
-}) => {
+const makeClientStubs = ({ modelResults }: { modelResults: StubModelResult[] }) => {
   const modelCalls: {
     request: ReviewRequest & { signal: AbortSignal }
     options: { retries?: { strategy: "backoff" | "none" } } | undefined
-  }[] = []
-  const generationCalls: {
-    id: string
-    options: StubOptions
   }[] = []
 
   const takeNextModelResult = (request: { signal: AbortSignal }): Promise<ModelCallResult> => {
@@ -172,30 +155,13 @@ const makeClientStubs = ({
     },
   }
 
-  const costLookupClient: GenerationsLike = {
-    generations: {
-      getGeneration: async (request, options) => {
-        generationCalls.push({ ...request, options })
-        const next = generationResponses.at(generationCalls.length - 1)
-
-        if (!next) {
-          throw new Error(`stub: unexpected getGeneration call #${generationCalls.length}`)
-        }
-        if ("error" in next) throw next.error
-        if ("pending" in next) return next.pending(options)
-        return next.value
-      },
-    },
-  }
-
-  return { agent, costLookupClient, modelCalls, generationCalls }
+  return { agent, modelCalls }
 }
 
-const makeClient = (stub: { agent: AgentLike; costLookupClient: GenerationsLike }) => {
+const makeClient = (stub: { agent: AgentLike }) => {
   const logger = createTestLogger()
   const client = createOpenRouterClient({
     agent: stub.agent,
-    costLookupClient: stub.costLookupClient,
     remainingReviewMs: () => Infinity,
     requestTimeoutMs: 45_000,
     retryDelayMs: 0,
@@ -330,7 +296,6 @@ describe("requestReview", () => {
     const logger = createTestLogger()
     const client = createOpenRouterClient({
       agent: stub.agent,
-      costLookupClient: stub.costLookupClient,
       requestTimeoutMs: 45_000,
       remainingReviewMs: () => 0,
     })
@@ -349,7 +314,6 @@ describe("requestReview", () => {
       deadlineExceeded: true,
     })
     expect(stub.modelCalls).toEqual([])
-    expect(stub.generationCalls).toEqual([])
   })
 
   it.each(["primary", "fallback"])(
@@ -368,7 +332,6 @@ describe("requestReview", () => {
         const logger = createTestLogger()
         const client = createOpenRouterClient({
           agent: stub.agent,
-          costLookupClient: stub.costLookupClient,
           requestTimeoutMs: 45_000,
           remainingReviewMs: () => deadline - performance.now(),
         })
@@ -425,7 +388,6 @@ describe("requestReview", () => {
         late.resolve(acceptedResult)
         await vi.advanceTimersByTimeAsync(1000)
         expect(error.attempts).toEqual(expectedAttempts)
-        expect(stub.generationCalls).toEqual([])
         expect(vi.getTimerCount()).toBe(0)
       } finally {
         vi.useRealTimers()
@@ -441,7 +403,6 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
         requestTimeoutMs: 45_000,
         remainingReviewMs: () => deadline - performance.now(),
       })
@@ -466,104 +427,6 @@ describe("requestReview", () => {
           },
         ],
       })
-      expect(stub.modelCalls.map(({ request }) => request.model)).toEqual([requestParams.model])
-      expect(vi.getTimerCount()).toBe(0)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("skips cost lookup when an accepted response exhausts the remaining review time", async () => {
-    const remainingReviewMs = vi.fn(() => 100)
-    const stub = makeClientStubs({
-      modelResults: [
-        {
-          pending: async () => {
-            remainingReviewMs.mockReturnValue(0)
-            return makeNoCostResult()
-          },
-        },
-      ],
-    })
-    const logger = createTestLogger()
-    const client = createOpenRouterClient({
-      agent: stub.agent,
-      costLookupClient: stub.costLookupClient,
-      requestTimeoutMs: 45_000,
-      remainingReviewMs,
-    })
-    expect(await client.requestReview(requestParams, logger)).toEqual({
-      review: acceptedReview,
-      modelUsed: requestParams.model,
-      attempts: [
-        {
-          model: requestParams.model,
-          outcome: "accepted",
-          promptTokens: 54,
-          completionTokens: 102,
-          costUsd: null,
-          errorSummary: null,
-        },
-      ],
-    })
-    expect(stub.modelCalls.map(({ request }) => request.model)).toEqual([requestParams.model])
-    expect(stub.generationCalls).toEqual([])
-    expect(logsWithMessage(logger, "generation cost lookup skipped")).toEqual([
-      {
-        level: "debug",
-        message: "generation cost lookup skipped",
-        data: {
-          operation: "generation cost lookup",
-          generationId: ACCEPTED_GENERATION_ID,
-          reason: "review deadline exceeded",
-        },
-      },
-    ])
-  })
-
-  it("retains an accepted review when cost lookup reaches the review deadline and ignores its late response", async () => {
-    vi.useFakeTimers()
-    try {
-      const late = Promise.withResolvers<unknown>()
-      const stub = makeClientStubs({
-        modelResults: [{ value: makeNoCostResult() }],
-        generationResponses: [{ pending: () => late.promise }],
-      })
-      const deadline = performance.now() + 100
-      const logger = createTestLogger()
-      const client = createOpenRouterClient({
-        agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
-        requestTimeoutMs: 45_000,
-        remainingReviewMs: () => deadline - performance.now(),
-      })
-      const request = client.requestReview(requestParams, logger)
-      await vi.advanceTimersByTimeAsync(100)
-      const result = await request
-      const expected = {
-        review: acceptedReview,
-        modelUsed: requestParams.model,
-        attempts: [
-          {
-            model: requestParams.model,
-            outcome: "accepted",
-            promptTokens: 54,
-            completionTokens: 102,
-            costUsd: null,
-            errorSummary: null,
-          },
-        ],
-      }
-      expect(result).toEqual(expected)
-      expect(
-        stub.generationCalls.map(({ id, options }) => ({
-          id,
-          aborted: options?.signal?.aborted,
-        })),
-      ).toEqual([{ id: ACCEPTED_GENERATION_ID, aborted: true }])
-      late.resolve({ data: { totalCost: 42 } })
-      await vi.advanceTimersByTimeAsync(1000)
-      expect(result).toEqual(expected)
       expect(stub.modelCalls.map(({ request }) => request.model)).toEqual([requestParams.model])
       expect(vi.getTimerCount()).toBe(0)
     } finally {
@@ -900,7 +763,6 @@ describe("requestReview", () => {
   it("passes a live (non-aborted) AbortSignal to the SDK call", async () => {
     const stub = makeClientStubs({
       modelResults: [{ value: acceptedResult }],
-      generationResponses: [{ value: { data: { totalCost: 0.01 } } }],
     })
     const { client, logger } = makeClient(stub)
 
@@ -934,7 +796,6 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1012,7 +873,6 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1098,7 +958,6 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1146,7 +1005,6 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1202,7 +1060,6 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1245,7 +1102,6 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1301,7 +1157,6 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1365,7 +1220,6 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs,
@@ -1382,107 +1236,6 @@ describe("requestReview", () => {
       } finally {
         setTimeoutSpy.mockRestore()
       }
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("reports the review deadline as the cost lookup's failure when that deadline cuts the lookup short", async () => {
-    vi.useFakeTimers()
-    try {
-      const stub = makeClientStubs({
-        modelResults: [{ value: makeNoCostResult() }],
-        generationResponses: [{ pending: () => new Promise(() => undefined) }],
-      })
-      const logger = createTestLogger()
-      const deadline = performance.now() + 100
-      const client = createOpenRouterClient({
-        agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
-        requestTimeoutMs: 45_000,
-        remainingReviewMs: () => deadline - performance.now(),
-      })
-
-      const reviewPromise = client.requestReview(requestParams, logger)
-      await vi.advanceTimersByTimeAsync(100)
-      await reviewPromise
-
-      expect(logger.messages.filter((entry) => entry.level === "warn")).toEqual([
-        {
-          level: "warn",
-          message: "request deadline elapsed",
-          data: {
-            operation: "generation cost lookup",
-            generationId: ACCEPTED_GENERATION_ID,
-            timeoutMs: 100,
-          },
-        },
-        {
-          level: "warn",
-          message: "generation cost lookup failed",
-          data: {
-            operation: "generation cost lookup",
-            generationId: ACCEPTED_GENERATION_ID,
-            error: "review deadline exceeded",
-          },
-        },
-      ])
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("degrades to a null cost with both warnings when the generation lookup exceeds the deadline", async () => {
-    vi.useFakeTimers()
-    try {
-      const stub = makeClientStubs({
-        modelResults: [{ value: makeNoCostResult() }],
-        generationResponses: [{ pending: () => new Promise(() => undefined) }],
-      })
-      const logger = createTestLogger()
-      const client = createOpenRouterClient({
-        agent: stub.agent,
-        costLookupClient: stub.costLookupClient,
-        remainingReviewMs: () => Infinity,
-        requestTimeoutMs: 45_000,
-        retryDelayMs: 0,
-      })
-
-      const reviewPromise = client.requestReview(requestParams, logger)
-      await vi.advanceTimersByTimeAsync(45_000)
-      const result = await reviewPromise
-
-      expect(result.attempts).toEqual([
-        {
-          model: requestParams.model,
-          outcome: "accepted",
-          ...ACCEPTED_USAGE,
-          costUsd: null,
-          errorSummary: null,
-        },
-      ])
-      expect(logsWithMessage(logger, "request deadline elapsed")).toEqual([
-        {
-          level: "warn",
-          message: "request deadline elapsed",
-          data: {
-            operation: "generation cost lookup",
-            generationId: ACCEPTED_GENERATION_ID,
-            timeoutMs: 45_000,
-          },
-        },
-      ])
-      expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
-        {
-          level: "warn",
-          message: "generation cost lookup failed",
-          data: {
-            operation: "generation cost lookup",
-            generationId: ACCEPTED_GENERATION_ID,
-            error: "no response within 45s",
-          },
-        },
-      ])
     } finally {
       vi.useRealTimers()
     }
@@ -1512,7 +1265,6 @@ describe("requestReview", () => {
     const logger = createTestLogger()
     const client = createOpenRouterClient({
       agent: stub.agent,
-      costLookupClient: stub.costLookupClient,
       remainingReviewMs: () => Infinity,
       requestTimeoutMs: 45_000,
       retryDelayMs,
@@ -2045,157 +1797,38 @@ describe("requestReview", () => {
     expect(stub.modelCalls).toHaveLength(4)
   })
 
-  it("looks up the generation cost when the accepted attempt has no usage cost", async () => {
-    const stub = makeClientStubs({
-      modelResults: [{ value: makeNoCostResult() }],
-      generationResponses: [{ value: { data: { totalCost: 0.0399 } } }],
-    })
-    const { client, logger } = makeClient(stub)
-
-    const result = await client.requestReview(requestParams, logger)
-
-    expect(stub.generationCalls).toEqual([
-      {
-        id: ACCEPTED_GENERATION_ID,
-        options: {
-          retries: { strategy: "none" },
-          signal: expect.any(AbortSignal),
-        },
-      },
-    ])
-    expect(result.attempts).toEqual([
-      {
-        model: requestParams.model,
-        outcome: "accepted",
-        ...ACCEPTED_USAGE,
-        costUsd: 0.0399,
-        errorSummary: null,
-      },
-    ])
-    expect(logsWithMessage(logger, "generation cost looked up")).toEqual([
-      {
-        level: "info",
-        message: "generation cost looked up",
-        data: {
-          operation: "generation cost lookup",
-          generationId: ACCEPTED_GENERATION_ID,
-          costUsd: 0.0399,
-        },
-      },
-    ])
-  })
-
-  it("degrades to a null cost with a warning when the generation lookup fails", async () => {
-    const stub = makeClientStubs({
-      modelResults: [{ value: makeNoCostResult() }],
-      generationResponses: [{ error: makeStatusError(500) }],
-    })
-    const { client, logger } = makeClient(stub)
-
-    const result = await client.requestReview(requestParams, logger)
-
-    expect(result.attempts).toEqual([
-      {
-        model: requestParams.model,
-        outcome: "accepted",
-        ...ACCEPTED_USAGE,
-        costUsd: null,
-        errorSummary: null,
-      },
-    ])
-    expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
-      {
-        level: "warn",
-        message: "generation cost lookup failed",
-        data: {
-          operation: "generation cost lookup",
-          generationId: ACCEPTED_GENERATION_ID,
-          error: "HTTP 500",
-        },
-      },
-    ])
-  })
-
-  it("degrades to a null cost with a warning when the generation lookup throws synchronously", async () => {
-    const throwingCostLookupClient: GenerationsLike = {
-      generations: {
-        getGeneration: () => {
-          throw new Error("lookup threw before returning a promise")
-        },
-      },
-    }
-    const { agent } = makeClientStubs({ modelResults: [{ value: makeNoCostResult() }] })
-    const { client, logger } = makeClient({ agent, costLookupClient: throwingCostLookupClient })
-
-    const result = await client.requestReview(requestParams, logger)
-
-    expect(result.attempts).toEqual([
-      {
-        model: requestParams.model,
-        outcome: "accepted",
-        ...ACCEPTED_USAGE,
-        costUsd: null,
-        errorSummary: null,
-      },
-    ])
-    expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
-      {
-        level: "warn",
-        message: "generation cost lookup failed",
-        data: {
-          operation: "generation cost lookup",
-          generationId: ACCEPTED_GENERATION_ID,
-          error: "lookup threw before returning a promise",
-        },
-      },
-    ])
-  })
-
-  it("degrades to a null cost with a warning when the generation response has an unexpected shape", async () => {
-    const stub = makeClientStubs({
-      modelResults: [{ value: makeNoCostResult() }],
-      generationResponses: [{ value: { data: {} } }],
-    })
-    const { client, logger } = makeClient(stub)
-
-    const result = await client.requestReview(requestParams, logger)
-
-    expect(result.attempts).toEqual([
-      {
-        model: requestParams.model,
-        outcome: "accepted",
-        ...ACCEPTED_USAGE,
-        costUsd: null,
-        errorSummary: null,
-      },
-    ])
-    expect(logsWithMessage(logger, "unexpected generation response shape")).toEqual([
-      {
-        level: "warn",
-        message: "unexpected generation response shape",
-        data: { operation: "generation cost lookup", generationId: ACCEPTED_GENERATION_ID },
-      },
-    ])
-  })
-
   it("records null token counts when the response carries no usage block", async () => {
     const stub = makeClientStubs({
       modelResults: [{ value: makeNoUsageResult() }],
-      generationResponses: [{ value: { data: { totalCost: 0.0399 } } }],
     })
     const { client, logger } = makeClient(stub)
 
     const result = await client.requestReview(requestParams, logger)
 
-    // costUsd from the lookup proves the missing usage block routed the
-    // accepted attempt through the generation-cost fallback
     expect(result.attempts).toEqual([
       {
         model: "z-ai/glm-5.3-flash",
         outcome: "accepted",
         promptTokens: null,
         completionTokens: null,
-        costUsd: 0.0399,
+        costUsd: null,
+        errorSummary: null,
+      },
+    ])
+  })
+
+  it("records a null cost with its token counts when the usage block carries no cost", async () => {
+    const stub = makeClientStubs({ modelResults: [{ value: makeNoCostResult() }] })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        costUsd: null,
         errorSummary: null,
       },
     ])

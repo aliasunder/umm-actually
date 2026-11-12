@@ -33,7 +33,6 @@
     "@actions/core": "3.0.1",
     "@actions/github": "9.1.1",
     "@openrouter/agent": "1.1.0",
-    "@openrouter/sdk": "1.5.33",
     "env-var": "7.5.0",
     "luxon": "3.7.2",
     "parse-diff": "0.12.0",
@@ -41,6 +40,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@openrouter/sdk": "1.5.33",
     "@stylistic/eslint-plugin": "5.10.0",
     "@types/luxon": "3.7.6",
     "@types/node": "26.6.6",

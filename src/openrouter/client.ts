@@ -1,5 +1,4 @@
 import { DateTime } from "luxon"
-import { z } from "zod"
 import type { Logger } from "../logger.js"
 import {
   reviewResponseJsonSchema,
@@ -83,21 +82,6 @@ export type AgentLike = {
   ): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> }
 }
 
-/** Structural subset of the OpenRouter SDK's REST client — the generation
- *  cost lookup is the one endpoint this client calls that the Agent SDK does
- *  not cover. */
-export type GenerationsLike = {
-  generations: {
-    getGeneration(
-      request: { id: string },
-      options?: {
-        retries?: { strategy: "backoff" | "none" }
-        signal?: AbortSignal
-      },
-    ): Promise<unknown>
-  }
-}
-
 export type OpenRouterClient = {
   /** Every line the request logs goes through `logger`, so props the caller
    *  binds to it tag all of them. A timed-out HTTP call can still settle
@@ -112,10 +96,6 @@ export type OpenRouterClient = {
     logger: Logger,
   ) => Promise<StructuredReviewResult>
 }
-
-const generationResponseSchema = z.object({
-  data: z.object({ totalCost: z.number() }),
-})
 
 /** Auth and credit statuses. The fallback model shares the key, so these end
  *  the ladder without trying it. */
@@ -407,13 +387,11 @@ const summarizeAttempts = (attempts: ModelAttempt[]): string => {
  *  concurrent callers can tag their requests' lines with their own props. */
 export const createOpenRouterClient = ({
   agent,
-  costLookupClient,
   requestTimeoutMs,
   remainingReviewMs,
   retryDelayMs = RETRY_DELAY_MS,
 }: {
   agent: AgentLike
-  costLookupClient: GenerationsLike
   /** Per-attempt deadline. When it elapses the attempt records outcome
    *  `timeout` and the ladder moves on — to the next model when one
    *  exists, otherwise a same-model retry while attempts remain — whether
@@ -421,7 +399,7 @@ export const createOpenRouterClient = ({
    *  best-effort. */
   requestTimeoutMs: number
   /** Milliseconds left in the whole review's time budget; 0 or less once
-   *  it has run out. Caps every attempt, cost lookup, and retry delay. */
+   *  it has run out. Caps every attempt and retry delay. */
   remainingReviewMs: () => number
   retryDelayMs?: number
 }): OpenRouterClient => {
@@ -579,69 +557,10 @@ export const createOpenRouterClient = ({
       review: parsedReview.data,
       routedModel: responsesResult.model,
 
-      // A Responses result's `id` is its generation id (`gen-…`), the id the
-      // generation cost lookup takes
+      // A Responses result's `id` is its generation id (`gen-…`)
       generationId: responsesResult.id,
       attempt: { model, outcome: "accepted", ...usage, errorSummary: null },
     }
-  }
-
-  /** A cost lookup failure must never fail a completed review, so every
-   *  failure degrades to a null cost. */
-  const lookupGenerationCost = async (
-    generationId: string,
-    logger: Logger,
-  ): Promise<number | null> => {
-    const remainingMs = remainingReviewMs()
-
-    // Every lookup line names the generation, so a failure ties back to it
-    const lookupLogger = logger.child({ operation: "generation cost lookup", generationId })
-
-    if (remainingMs <= 0) {
-      lookupLogger.debug("generation cost lookup skipped", { reason: "review deadline exceeded" })
-      return null
-    }
-
-    const callTimeout = getCallTimeout(remainingMs)
-
-    const lookup = await withDeadline(
-      {
-        start: (signal) => {
-          return costLookupClient.generations.getGeneration(
-            { id: generationId },
-            { retries: { strategy: "none" }, signal },
-          )
-        },
-        timeoutMs: callTimeout.timeoutMs,
-      },
-      lookupLogger,
-    )
-
-    if (lookup.status === "timed_out") {
-      lookupLogger.warn("generation cost lookup failed", { error: callTimeout.timeoutSummary })
-      return null
-    }
-    if (lookup.status === "rejected") {
-      lookupLogger.warn("generation cost lookup failed", {
-        error: summarizeError(lookup.error),
-      })
-      return null
-    }
-
-    const parsed = generationResponseSchema.safeParse(lookup.value)
-
-    if (!parsed.success) {
-      lookupLogger.warn("unexpected generation response shape")
-      return null
-    }
-
-    // parsed.data = Zod safeParse result; .data = API envelope's data property
-    const costUsd = parsed.data.data.totalCost
-
-    // Logged at info because how often an accepted response arrives without
-    // its cost is what decides whether this fallback stays
-    lookupLogger.info("generation cost looked up", { costUsd })
-    return costUsd
   }
 
   const requestReview: OpenRouterClient["requestReview"] = async (
@@ -684,11 +603,7 @@ export const createOpenRouterClient = ({
         )
 
         if (attemptResult.kind === "accepted") {
-          // The generation lookup runs only when the response's usage omits the cost
-          const costUsd =
-            attemptResult.attempt.costUsd ??
-            (await lookupGenerationCost(attemptResult.generationId, logger))
-          attempts.push({ ...attemptResult.attempt, costUsd })
+          attempts.push(attemptResult.attempt)
           logger.info("review response accepted", {
             model: ladderModel,
             routedModel: attemptResult.routedModel,

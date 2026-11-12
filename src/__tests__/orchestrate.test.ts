@@ -4708,95 +4708,6 @@ describe("staged phases", () => {
     ])
   })
 
-  it("publishes full coverage without a deadline warning when only accepted-response cost lookup expires", async () => {
-    vi.useFakeTimers()
-    try {
-      const deadline = Date.now() + 1000
-      const remainingReviewMs = () => deadline - Date.now()
-      const costResponse = Promise.withResolvers<unknown>()
-      const getGeneration = vi.fn(() => costResponse.promise)
-      const callModel = vi.fn(() => {
-        return makeModelResultStub({
-          id: "accepted-before-deadline",
-          model: "test/model",
-          usage: { inputTokens: 10, outputTokens: 20 },
-        })
-      })
-      const client = createOpenRouterClient({
-        agent: { callModel },
-        costLookupClient: { generations: { getGeneration } },
-        requestTimeoutMs: 900_000,
-        remainingReviewMs,
-      })
-      const stubs = makeOrchestrateDeps({
-        remainingReviewMs,
-        generateFindings: createPromptedGenerateFindings(
-          {
-            openrouterClient: client,
-            model: "test/model",
-            fallbackModel: "fallback/model",
-          },
-          createTestLogger(),
-        ),
-      })
-      const pending = orchestrate(stubs.deps, createTestLogger())
-      await vi.advanceTimersByTimeAsync(1000)
-      const result = await pending
-      const expectedCost = renderCostSummary({
-        attempts: [
-          {
-            phase: "combined",
-            model: "test/model",
-            outcome: "accepted",
-            promptTokens: 10,
-            completionTokens: 20,
-            costUsd: null,
-            errorSummary: null,
-          },
-        ],
-        modelUsed: "test/model",
-      })
-      expect(remainingReviewMs()).toBe(0)
-      expect(callModel).toHaveBeenCalledTimes(1)
-      expect(getGeneration).toHaveBeenCalledExactlyOnceWith(
-        { id: "accepted-before-deadline" },
-        { retries: { strategy: "none" }, signal: expect.any(AbortSignal) },
-      )
-      expect(result).toEqual({
-        findingsCount: expectedSelection.selected.length,
-        reviewUrl: "https://github.com/test/review/1",
-        modelUsed: "test/model",
-        skippedReason: "",
-        phases: [{ phase: "combined", status: "completed" }],
-        reviewSummaryMarkdown: expectedReviewSummary(),
-        costSummaryMarkdown: expectedCost,
-        conventionsNote: null,
-      })
-      expect(stubs.upsertSummaryCommentCalls).toEqual([
-        expectedStatus({
-          isFirstRun: true,
-          postedCount: expectedSelection.selected.length,
-          totalCount: expectedSelection.selected.length,
-        }),
-      ])
-      expect(stubs.postFindingsReviewCalls).toEqual([
-        expectedFindingsReview(expectedSelection.selected),
-      ])
-      expect(stubs.updateCheckRunCalls).toEqual([
-        {
-          checkRunId: 555,
-          conclusion: "success",
-          output: {
-            title: `${expectedSelection.selected.length} findings`,
-            summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.\n\n${expectedCost}`,
-          },
-        },
-      ])
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   it("publishes completed parallel phases once when a provider ignores the review deadline abort", async () => {
     vi.useFakeTimers()
     try {
@@ -4815,7 +4726,6 @@ describe("staged phases", () => {
         .mockImplementation(() => makePendingModelResultStub(lateResponse.promise))
       const client = createOpenRouterClient({
         agent: { callModel },
-        costLookupClient: { generations: { getGeneration: vi.fn() } },
         requestTimeoutMs: 900_000,
         remainingReviewMs,
       })
@@ -4923,7 +4833,6 @@ describe("staged phases", () => {
     })
     const client = createOpenRouterClient({
       agent: { callModel },
-      costLookupClient: { generations: { getGeneration: vi.fn() } },
       requestTimeoutMs: 900_000,
       remainingReviewMs: () => Infinity,
       retryDelayMs: 0,

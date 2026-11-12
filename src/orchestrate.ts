@@ -1054,8 +1054,7 @@ const runReviewPipeline = async (
   const completedPhases = phaseOutcomes.filter((outcome) => outcome.status === "completed")
   const phases = phaseOutcomes.map(describePhaseOutcome)
 
-  // Only a phase that failed on the deadline lost coverage. A completed phase
-  // whose cost lookup the deadline skipped still delivered its findings.
+  // Only a phase that failed on the deadline lost coverage
   const coverageLostToReviewDeadline = phaseOutcomes.some(
     (outcome) => outcome.status === "failed" && outcome.deadlineExceeded,
   )
