@@ -3,6 +3,7 @@ import { openResponsesResultFromJSON } from "@openrouter/sdk/models"
 import {
   BadRequestResponseError,
   OpenRouterError,
+  ResponseValidationError,
   UnauthorizedResponseError,
 } from "@openrouter/sdk/models/errors"
 import { describe, expect, it, vi } from "vitest"
@@ -221,6 +222,20 @@ const makeHttpMeta = (
  *  the status-less path the network-error test pins. */
 const makeStatusError = (statusCode: number, message = `HTTP ${statusCode}`): OpenRouterError => {
   return new OpenRouterError(message, makeHttpMeta(statusCode, ""))
+}
+
+/** The error the SDK throws when a non-streamed 200 body fails its result
+ *  schema, built the way the SDK's response matcher builds it. */
+const makeResponseValidationError = (): ResponseValidationError => {
+  const body = JSON.stringify({ object: "response" })
+  const message = "Response validation failed"
+
+  return new ResponseValidationError(message, {
+    ...makeHttpMeta(200, body),
+    cause: new Error("output: Invalid input: expected array, received undefined"),
+    rawValue: JSON.parse(body),
+    rawMessage: message,
+  })
 }
 
 /** The `{ error: { code, message } }` body OpenRouter sends on a rejected request. */
@@ -725,9 +740,9 @@ describe("requestReview", () => {
     ])
   })
 
-  it("retries the same model once on a 429", async () => {
+  it.each([408, 429])("retries the same model once on a %i", async (statusCode) => {
     const stub = makeClientStubs({
-      modelResults: [{ error: makeStatusError(429) }, { value: acceptedResult }],
+      modelResults: [{ error: makeStatusError(statusCode) }, { value: acceptedResult }],
     })
     const { client, logger } = makeClient(stub)
 
@@ -737,22 +752,27 @@ describe("requestReview", () => {
       "z-ai/glm-5.3-flash",
       "z-ai/glm-5.3-flash",
     ])
-    expect(result.attempts[0]).toEqual({
-      model: "z-ai/glm-5.3-flash",
-      outcome: "api_error",
-      promptTokens: null,
-      completionTokens: null,
-      costUsd: null,
-      errorSummary: "HTTP 429: HTTP 429",
-    })
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: `HTTP ${statusCode}: HTTP ${statusCode}`,
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        errorSummary: null,
+      },
+    ])
   })
 
   it("retries the same model once when the SDK rejects a non-streamed 200 body", async () => {
     const stub = makeClientStubs({
-      modelResults: [
-        { error: makeStatusError(200, "Response validation failed") },
-        { value: acceptedResult },
-      ],
+      modelResults: [{ error: makeResponseValidationError() }, { value: acceptedResult }],
     })
     const { client, logger } = makeClient(stub)
 
@@ -762,14 +782,22 @@ describe("requestReview", () => {
       "z-ai/glm-5.3-flash",
       "z-ai/glm-5.3-flash",
     ])
-    expect(result.attempts[0]).toEqual({
-      model: "z-ai/glm-5.3-flash",
-      outcome: "api_error",
-      promptTokens: null,
-      completionTokens: null,
-      costUsd: null,
-      errorSummary: "HTTP 200: Response validation failed",
-    })
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: "HTTP 200: Response validation failed",
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        errorSummary: null,
+      },
+    ])
   })
 
   it("retries a status-less network error and records its bare message", async () => {
@@ -784,14 +812,22 @@ describe("requestReview", () => {
       "z-ai/glm-5.3-flash",
       "z-ai/glm-5.3-flash",
     ])
-    expect(result.attempts[0]).toEqual({
-      model: "z-ai/glm-5.3-flash",
-      outcome: "api_error",
-      promptTokens: null,
-      completionTokens: null,
-      costUsd: null,
-      errorSummary: "socket hang up",
-    })
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: "socket hang up",
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        errorSummary: null,
+      },
+    ])
   })
 
   it("retries an SDK-thrown TimeoutError as an api_error through the action's ladder, not the SDK's", async () => {
@@ -816,14 +852,22 @@ describe("requestReview", () => {
         options,
       })),
     ).toEqual([actionLadderCall, actionLadderCall])
-    expect(result.attempts[0]).toEqual({
-      model: "z-ai/glm-5.3-flash",
-      outcome: "api_error",
-      promptTokens: null,
-      completionTokens: null,
-      costUsd: null,
-      errorSummary: "Request timed out",
-    })
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: "Request timed out",
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        errorSummary: null,
+      },
+    ])
     expect(logsWithMessage(logger, "review attempt failed")).toEqual([
       {
         level: "warn",
@@ -1508,7 +1552,22 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams, logger)
 
-    expect(result.attempts[0]?.errorSummary).toBe(`HTTP 429: ${"x".repeat(200)}…`)
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary: `HTTP 429: ${"x".repeat(200)}…`,
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        errorSummary: null,
+      },
+    ])
   })
 
   it("advances to the fallback model without a retry on a 404", async () => {
@@ -1747,15 +1806,23 @@ describe("requestReview", () => {
       { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
       { model: "deepseek/deepseek-v4.1-flash", maxOutputTokens: 128_000 },
     ])
-    expect(result.attempts[0]).toEqual({
-      model: "z-ai/glm-5.3-flash",
-      outcome: "api_error",
-      promptTokens: null,
-      completionTokens: null,
-      costUsd: null,
-      errorSummary:
-        "HTTP 400: This endpoint's maximum context length is 8192 tokens. However, you requested about 11593 tokens (4593 of text input, 7000 in the output). Please reduce the length of either one, or use the context-co…",
-    })
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        errorSummary:
+          "HTTP 400: This endpoint's maximum context length is 8192 tokens. However, you requested about 11593 tokens (4593 of text input, 7000 in the output). Please reduce the length of either one, or use the context-co…",
+      },
+      {
+        model: "deepseek/deepseek-v4.1-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        errorSummary: null,
+      },
+    ])
   })
 
   it("aborts the ladder after exactly one call on the captured bad-key body", async () => {
