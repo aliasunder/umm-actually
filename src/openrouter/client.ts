@@ -497,7 +497,7 @@ export const createOpenRouterClient = ({
         return { kind: "context_overflow", attempt, fittedMaxOutputTokens: fittedCeiling }
       }
 
-      const keyRejected = statusCode ? KEY_REJECTED_STATUSES.has(statusCode) : false
+      const keyRejected = false
 
       // A 4xx other than a 408 or a 429, such as a 400 bad request or a
       // 401/402/403 auth or credit status, is structural and does not retry.
