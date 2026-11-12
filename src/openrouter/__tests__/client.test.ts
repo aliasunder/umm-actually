@@ -61,7 +61,9 @@ const parseAcceptedPayload = (): z.infer<typeof acceptedPayloadSchema> => {
 }
 
 /** The text the Agent SDK extracts from a payload: the first message item's
- *  output text, or "" when the output holds no message item. */
+ *  output text, or "" when the output holds no message item. This mirrors the
+ *  SDK's convention rather than calling it, so the tests pin the client's
+ *  text-to-outcome mapping, not the SDK's extraction. */
 const extractMessageText = (payload: unknown): string => {
   const message = wirePayloadSchema.parse(payload).output.find((item) => item.type === "message")
   const outputText = message?.content?.find((part) => part.type === "output_text")
@@ -212,7 +214,11 @@ const makeHttpMeta = (
   body,
 })
 
-/** An SDK error of the given status, as the SDK's base class carries it. */
+/** An SDK error of the given status, as the SDK's base class carries it. The
+ *  repo's @openrouter/sdk copy stands in for the copy bundled inside
+ *  @openrouter/agent, which throws the production errors; both set
+ *  `statusCode` from the HTTP response. An error without `statusCode` takes
+ *  the status-less path the network-error test pins. */
 const makeStatusError = (statusCode: number, message = `HTTP ${statusCode}`): OpenRouterError => {
   return new OpenRouterError(message, makeHttpMeta(statusCode, ""))
 }
@@ -652,7 +658,7 @@ describe("requestReview", () => {
     ])
   })
 
-  it("retries the same model once when the output holds no message item", async () => {
+  it("records empty_content and retries the same model once when the SDK extracts no text", async () => {
     const stub = makeClientStubs({
       modelResults: [{ value: makeReasoningOnlyResult() }, { value: acceptedResult }],
     })
