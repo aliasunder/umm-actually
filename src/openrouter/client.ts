@@ -522,7 +522,7 @@ export const createOpenRouterClient = ({
       // An unknown status, a 5xx, a 408, or a 429 is transient and retries;
       // any other 4xx, such as a 400 bad request or a 401/402/403 auth or
       // credit status, is structural and does not
-      const retryable = !statusCode || statusCode >= 500 || RETRYABLE_4XX_STATUSES.has(statusCode)
+      const retryable = !statusCode || statusCode >= 400 || RETRYABLE_4XX_STATUSES.has(statusCode)
 
       return { kind: "failed", attempt, retryable, keyRejected }
     }
