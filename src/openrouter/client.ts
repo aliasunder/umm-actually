@@ -521,12 +521,16 @@ export const createOpenRouterClient = ({
 
       const keyRejected = statusCode ? KEY_REJECTED_STATUSES.has(statusCode) : false
 
-      // An unknown status, a 5xx, a 408, or a 429 is transient and retries;
-      // any other 4xx, such as a 400 bad request or a 401/402/403 auth or
-      // credit status, is structural and does not
-      const retryable = !statusCode || statusCode >= 500 || RETRYABLE_4XX_STATUSES.has(statusCode)
+      // A 4xx other than a 408 or a 429, such as a 400 bad request or a
+      // 401/402/403 auth or credit status, is structural and does not retry.
+      // Every other failure retries. That includes the status-200 error the SDK
+      // throws when a non-streamed body fails its result schema, because a
+      // second call can come back well-formed
+      const isStructuralClientError = statusCode
+        ? statusCode >= 400 && statusCode < 500 && !RETRYABLE_4XX_STATUSES.has(statusCode)
+        : false
 
-      return { kind: "failed", attempt, retryable, keyRejected }
+      return { kind: "failed", attempt, retryable: !isStructuralClientError, keyRejected }
     }
 
     const responsesResult = sendResult.value.response

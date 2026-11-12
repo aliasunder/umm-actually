@@ -747,6 +747,31 @@ describe("requestReview", () => {
     })
   })
 
+  it("retries the same model once when the SDK rejects a non-streamed 200 body", async () => {
+    const stub = makeClientStubs({
+      modelResults: [
+        { error: makeStatusError(200, "Response validation failed") },
+        { value: acceptedResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(stub.modelCalls.map((modelCall) => modelCall.request.model)).toEqual([
+      "z-ai/glm-5.3-flash",
+      "z-ai/glm-5.3-flash",
+    ])
+    expect(result.attempts[0]).toEqual({
+      model: "z-ai/glm-5.3-flash",
+      outcome: "api_error",
+      promptTokens: null,
+      completionTokens: null,
+      costUsd: null,
+      errorSummary: "HTTP 200: Response validation failed",
+    })
+  })
+
   it("retries a status-less network error and records its bare message", async () => {
     const stub = makeClientStubs({
       modelResults: [{ error: new Error("socket hang up") }, { value: acceptedResult }],
