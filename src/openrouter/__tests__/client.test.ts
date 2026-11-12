@@ -249,8 +249,15 @@ const makeBadRequestError = (body: unknown): BadRequestResponseError => {
   )
 }
 
+/** The numbers in the captured overflow body's message: the window, the
+ *  requested total, the input estimate and the output ceiling. */
+const OVERFLOW_NUMBERS_PATTERN =
+  /maximum context length is \d+ tokens\. However, you requested about \d+ tokens \(\d+ of text input, \d+ in the output\)/
+
 /** OpenRouter's 400 when the prompt plus the requested output ceiling exceeds
- *  the routed endpoint's context window, worded as the live API words it. */
+ *  the routed endpoint's context window: the captured body's wording with
+ *  only its numbers replaced, so every fitted-retry test runs on the live
+ *  wording the detector must match. */
 const makeContextOverflowError = ({
   contextLength,
   inputTokens,
@@ -258,7 +265,15 @@ const makeContextOverflowError = ({
   contextLength: number
   inputTokens: number
 }): BadRequestResponseError => {
-  const message = `This endpoint's maximum context length is ${contextLength} tokens. However, you requested about ${inputTokens + 128_000} tokens (${inputTokens} of text input, 128000 in the output). Please reduce the length of either one, or use the context-compression plugin to compress your prompt automatically.`
+  const capturedMessage = errorBodySchema.parse(overflowErrorBody).error.message
+
+  if (!OVERFLOW_NUMBERS_PATTERN.test(capturedMessage)) {
+    throw new Error("the captured overflow body no longer carries the expected numbers")
+  }
+  const message = capturedMessage.replace(
+    OVERFLOW_NUMBERS_PATTERN,
+    `maximum context length is ${contextLength} tokens. However, you requested about ${inputTokens + 128_000} tokens (${inputTokens} of text input, 128000 in the output)`,
+  )
   return makeBadRequestError({ error: { code: 400, message } })
 }
 
