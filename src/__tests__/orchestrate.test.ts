@@ -10,6 +10,7 @@ import {
   createOpenRouterClient,
   type ModelAttempt,
   type OpenRouterClient,
+  type ResponsesResult,
   type ReviewRequest,
   type StructuredReviewResult,
 } from "../openrouter/client.js"
@@ -63,24 +64,22 @@ const fixtureReviewResponse: ReviewResponse = JSON.parse(
 
 /** The pair a `callModel` stub hands back once its request settles: the
  *  materialized response the client parses and the text the SDK extracts. */
-type ModelCallResult = { response: unknown; text: string }
+type ModelCallResult = { response: ResponsesResult; text: string }
 
 /** A `callModel` result that settles with the given promise. Both reads await
  *  the one promise, the way the SDK's reads share one materialized stream. */
 const makePendingModelResultStub = (
   settled: Promise<ModelCallResult>,
-): { getResponse(): Promise<unknown>; getText(): Promise<string> } => ({
+): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> } => ({
   getResponse: async () => (await settled).response,
   getText: async () => (await settled).text,
 })
 
 /** A `callModel` result that resolves at once with an accepted-shaped response
  *  carrying the fixture review as its text. */
-const makeModelResultStub = (response: {
-  id: string
-  model: string
-  usage: { inputTokens: number; outputTokens: number; cost?: number }
-}): { getResponse(): Promise<unknown>; getText(): Promise<string> } => {
+const makeModelResultStub = (
+  response: ResponsesResult,
+): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> } => {
   return makePendingModelResultStub(
     Promise.resolve({ response, text: JSON.stringify(fixtureReviewResponse) }),
   )

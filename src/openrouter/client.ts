@@ -50,11 +50,28 @@ export type ReviewRequest = {
   }
 }
 
+/** The fields read from the Responses result the Agent SDK takes from the
+ *  stream's completion event. The SDK's own schema validates the result
+ *  before it resolves, so the client reads it through this structural type
+ *  rather than parsing it again; the SDK types `usage` as both nullable and
+ *  optional. */
+export type ResponsesResult = {
+  id: string
+  model: string
+  usage?:
+    | {
+        inputTokens: number
+        outputTokens: number
+        cost?: number | null | undefined
+      }
+    | null
+    | undefined
+}
+
 /**
  * Structural subset of the Agent SDK client.
  * - Test stubs are plain objects; method syntax keeps the real client
  *   assignable under strictFunctionTypes.
- * - `getResponse` resolves `unknown` on purpose: Zod parses across the boundary.
  * - `getText` is the SDK's own extraction of the message text.
  * - The abort signal goes in the request, where the SDK takes the signal that
  *   cancels the whole call and aborts its in-flight stream.
@@ -63,7 +80,7 @@ export type AgentLike = {
   callModel(
     request: ReviewRequest & { signal: AbortSignal },
     options?: { retries?: { strategy: "backoff" | "none" } },
-  ): { getResponse(): Promise<unknown>; getText(): Promise<string> }
+  ): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> }
 }
 
 /** Structural subset of the OpenRouter SDK's REST client — the generation
@@ -95,21 +112,6 @@ export type OpenRouterClient = {
     logger: Logger,
   ) => Promise<StructuredReviewResult>
 }
-
-/** The fields read from the Responses result that the Agent SDK takes from
- *  the stream's completion event. The SDK types `usage` as both nullable and
- *  optional, so the block is nullish. */
-const responsesResultSchema = z.object({
-  id: z.string(),
-  model: z.string(),
-  usage: z
-    .object({
-      inputTokens: z.number(),
-      outputTokens: z.number(),
-      cost: z.number().nullish(),
-    })
-    .nullish(),
-})
 
 const generationResponseSchema = z.object({
   data: z.object({ totalCost: z.number() }),
@@ -527,27 +529,7 @@ export const createOpenRouterClient = ({
       return { kind: "failed", attempt, retryable, keyRejected }
     }
 
-    const parsedResult = responsesResultSchema.safeParse(sendResult.value.response)
-
-    // A malformed response body points at a provider or gateway glitch rather
-    // than the request, so a second call can come back well-formed
-    if (!parsedResult.success) {
-      return {
-        kind: "failed",
-        attempt: {
-          model,
-          outcome: "api_error",
-          promptTokens: null,
-          completionTokens: null,
-          costUsd: null,
-          errorSummary: "unexpected review response shape",
-        },
-        retryable: true,
-        keyRejected: false,
-      }
-    }
-
-    const responsesResult = parsedResult.data
+    const responsesResult = sendResult.value.response
 
     // Failed-validation attempts still carry usage — they were billed too
     const usage = {

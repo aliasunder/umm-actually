@@ -14,6 +14,7 @@ import {
   ReviewRequestError,
   type AgentLike,
   type GenerationsLike,
+  type ResponsesResult,
   type ReviewRequest,
 } from "../client.js"
 
@@ -73,7 +74,7 @@ const extractMessageText = (payload: unknown): string => {
  *  through the SDK's own transform. The repo's @openrouter/sdk copy runs it
  *  here as a drift guard on hand-edited fixtures; the Agent SDK's bundled
  *  copy parses every field the client reads identically. */
-const transformWirePayload = (payload: unknown): unknown => {
+const transformWirePayload = (payload: unknown): ResponsesResult => {
   const transformed = openResponsesResultFromJSON(JSON.stringify(payload))
 
   if (!transformed.ok) throw transformed.error
@@ -82,7 +83,7 @@ const transformWirePayload = (payload: unknown): unknown => {
 
 /** What one `callModel` stub call resolves: the transformed response and the
  *  SDK-extracted text, as the client reads them. */
-type ModelCallResult = { response: unknown; text: string }
+type ModelCallResult = { response: ResponsesResult; text: string }
 
 const toModelCallResult = (payload: unknown): ModelCallResult => ({
   response: transformWirePayload(payload),
@@ -1929,27 +1930,6 @@ describe("requestReview", () => {
       }),
     )
     expect(stub.modelCalls).toHaveLength(4)
-  })
-
-  it("treats an unrecognized review response shape as a retryable api_error", async () => {
-    const stub = makeClientStubs({
-      modelResults: [
-        { value: { response: { unexpected: true }, text: acceptedResult.text } },
-        { value: acceptedResult },
-      ],
-    })
-    const { client, logger } = makeClient(stub)
-
-    const result = await client.requestReview(requestParams, logger)
-
-    expect(result.attempts[0]).toEqual({
-      model: "z-ai/glm-5.3-flash",
-      outcome: "api_error",
-      promptTokens: null,
-      completionTokens: null,
-      costUsd: null,
-      errorSummary: "unexpected review response shape",
-    })
   })
 
   it("looks up the generation cost when the accepted attempt has no usage cost", async () => {
