@@ -28,7 +28,7 @@ src/
   config.ts                # action inputs → validated ActionConfig
   logger.ts                # structured JSON logger — levels, child contexts, lazy props
   github/                  # GitHub I/O: event payload → PrContext, octokit wrappers (diff fetch, review posting)
-  openrouter/              # OpenRouter I/O: @openrouter/sdk wrapper, per-attempt and shared review deadlines, retry ladder (up to two attempts per model, then the fallback_model input; on HTTP errors, timeouts, invalid structured output), cost summary
+  openrouter/              # OpenRouter I/O: review requests through @openrouter/agent, per-attempt and shared review deadlines, retry ladder (up to two attempts per model, then the fallback_model input; on HTTP errors, timeouts, invalid structured output), cost summary
   diff/                    # pure transforms over parse-diff output: git-quoted path decoding, annotation, commentable lines, diff-level exclusion (patterns, gitattributes linguist rules, wildcard cap: at most 2 "*" per path segment so matching cannot backtrack for minutes)
   context/                 # workspace I/O: conventions file, root .gitattributes, changed files, import-trace scan, doc-mention scan, priority docs
   review/                  # pure review logic (the model call is a function the caller passes in): finding schema, phases + stage dispatch (defined under Review instruction authoring), prompt, non-finding filter and unknown-file filter (README sections of those names), cross-phase merge, path normalization, selection, comment mapping, markdown code spans, title similarity, context notes, summary
@@ -47,7 +47,9 @@ backwards dependency and a bug — enforced by a
 the outermost layer, so only tests import from a `__tests__/` folder.
 
 Use the official SDKs — don't hand-roll what `@actions/core`,
-`@actions/github` (octokit), `@openrouter/sdk`, or `parse-diff` already do.
+`@actions/github` (octokit), `@openrouter/agent`, `@openrouter/sdk` (a dev
+dependency: the tests take Responses result and error shapes from it), or
+`parse-diff` already do.
 Before writing any parsing or validation helper, check the SDK's utility
 surface first: `@actions/core` ships `getBooleanInput` (strict YAML 1.2
 booleans), which replaced a hand-rolled boolean-string Zod transform here.

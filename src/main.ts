@@ -1,6 +1,6 @@
 import * as core from "@actions/core"
 import { context, getOctokit } from "@actions/github"
-import { OpenRouter } from "@openrouter/sdk"
+import { OpenRouter as OpenRouterAgent } from "@openrouter/agent"
 import envVar from "env-var"
 import { parseConfig, type RawInputs } from "./config.js"
 import { createContextReader } from "./context/workspace.js"
@@ -12,6 +12,8 @@ import { createPromptedGenerateFindings, orchestrate } from "./orchestrate.js"
 const actionStartedAt = performance.now()
 const logger = createLogger("umm-actually")
 
+// The action's own unawaited promises cannot reject, so a rejection here comes
+// from a promise inside an SDK. Logging it keeps Node from exiting mid-review
 process.on("unhandledRejection", (error) => {
   logger.warn("unhandled promise rejection (likely SDK internal)", {
     error: describeError(error),
@@ -20,6 +22,7 @@ process.on("unhandledRejection", (error) => {
 
 // Cleanups to run when the job is cancelled. It holds at most one entry, the
 // open check run's completion call, registered only while that run is open.
+// A Set lets the unregister callback delete exactly the cleanup it added.
 // Mutable on purpose — signal handlers can only reach shared state
 const cancellationCleanups = new Set<() => Promise<void>>()
 
@@ -136,7 +139,7 @@ try {
           // createOpenRouterClient takes no logger because each review phase
           // passes its own phase-tagged logger to requestReview
           openrouterClient: createOpenRouterClient({
-            sdk: new OpenRouter({ apiKey: config.openrouterApiKey }),
+            agent: new OpenRouterAgent({ apiKey: config.openrouterApiKey }),
             requestTimeoutMs: config.requestTimeoutSeconds * 1000,
             remainingReviewMs,
           }),

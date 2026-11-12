@@ -1,5 +1,4 @@
 import { DateTime } from "luxon"
-import { z } from "zod"
 import type { Logger } from "../logger.js"
 import {
   reviewResponseJsonSchema,
@@ -11,9 +10,10 @@ export type AttemptOutcome =
   "accepted" | "api_error" | "timeout" | "empty_content" | "invalid_json" | "schema_mismatch"
 
 export type ModelAttempt = {
-  /** The model this attempt requested. The ladder is the primary model, then
-   *  the fallback when one is set. OpenRouter's routed model is reported only
-   *  for the accepted attempt, as StructuredReviewResult.modelUsed. */
+  /** The model this attempt requested from the model ladder, which tries the
+   *  primary model and then the fallback when one is set. OpenRouter's routed
+   *  model is reported only for the accepted attempt, as
+   *  StructuredReviewResult.modelUsed. */
   model: string
   outcome: AttemptOutcome
   promptTokens: number | null
@@ -31,46 +31,55 @@ export type StructuredReviewResult = {
   attempts: ModelAttempt[]
 }
 
-/** Structural subset of the SDK's ChatRequest — exactly what we send. */
-export type ChatRequestSubset = {
+/** Structural subset of the `callModel` input of the Agent SDK
+ *  (`@openrouter/agent`) — exactly what we send, as one request with no tools
+ *  to OpenRouter's Responses API (`/responses`). */
+export type ReviewRequest = {
   model: string
-  messages: { role: "system" | "user"; content: string }[]
-  maxCompletionTokens: number
-  responseFormat: {
-    type: "json_schema"
-    jsonSchema: {
+  instructions: string
+  input: string
+  maxOutputTokens: number
+  text: {
+    format: {
+      type: "json_schema"
       name: string
       strict: boolean
       schema: Record<string, unknown>
     }
   }
-  stream: false
+}
+
+/** The fields read from the Responses result the Agent SDK takes from the
+ *  stream's completion event. The SDK's own schema validates the result
+ *  before it resolves, so the client reads it through this structural type
+ *  rather than parsing it again; the SDK types `usage` as both nullable and
+ *  optional. */
+export type ResponsesResult = {
+  id: string
+  model: string
+  usage?:
+    | {
+        inputTokens: number
+        outputTokens: number
+        cost?: number | null | undefined
+      }
+    | null
+    | undefined
 }
 
 /**
- * Structural subset of the OpenRouter SDK — test stubs are plain objects.
- * Method syntax keeps the real SDK assignable under strictFunctionTypes;
- * responses are `unknown` on purpose: Zod parses across the boundary.
+ * Structural subset of the Agent SDK client.
+ * - Test stubs are plain objects; method syntax keeps the real client
+ *   assignable under strictFunctionTypes.
+ * - `getText` is the SDK's own extraction of the message text.
+ * - The abort signal goes in the request, where the SDK takes the signal that
+ *   cancels the whole call and aborts its in-flight stream.
  */
-export type OpenRouterLike = {
-  chat: {
-    send(
-      request: { chatRequest: ChatRequestSubset },
-      options?: {
-        retries?: { strategy: "backoff" | "none" }
-        signal?: AbortSignal
-      },
-    ): Promise<unknown>
-  }
-  generations: {
-    getGeneration(
-      request: { id: string },
-      options?: {
-        retries?: { strategy: "backoff" | "none" }
-        signal?: AbortSignal
-      },
-    ): Promise<unknown>
-  }
+export type AgentLike = {
+  callModel(
+    request: ReviewRequest & { signal: AbortSignal },
+    options?: { retries?: { strategy: "backoff" | "none" } },
+  ): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> }
 }
 
 export type OpenRouterClient = {
@@ -88,31 +97,14 @@ export type OpenRouterClient = {
   ) => Promise<StructuredReviewResult>
 }
 
-const chatResultSchema = z.object({
-  id: z.string(),
-  model: z.string(),
-  choices: z.array(z.object({ message: z.object({ content: z.unknown() }) })),
-  usage: z
-    .object({
-      promptTokens: z.number(),
-      completionTokens: z.number(),
-      cost: z.number().nullable().optional(),
-    })
-    .optional(),
-})
-
-const generationResponseSchema = z.object({
-  data: z.object({ totalCost: z.number() }),
-})
-
 /** Auth and credit statuses. The fallback model shares the key, so these end
  *  the ladder without trying it. */
 const KEY_REJECTED_STATUSES = new Set([401, 402, 403])
 
 /** The transient 4xx statuses — HTTP request timeout (408) and rate limit
- *  (429). attemptOnce also marks 5xx and status-less network errors
- *  retryable, and a context-overflow 400 retries with a smaller output
- *  ceiling; any other 4xx is structural and skips the retry. */
+ *  (429). Any other 4xx is structural and skips the retry, except a
+ *  context-overflow 400, which retries with a smaller output ceiling;
+ *  attemptOnce retries every failure outside the 4xx range. */
 const RETRYABLE_4XX_STATUSES = new Set([408, 429])
 
 /** Cap on same-model attempts for failures that settle quickly (HTTP errors,
@@ -126,10 +118,12 @@ const MAX_ATTEMPTS_PER_MODEL = 2
  *  rate-limit burst has a recovery window. */
 const RETRY_DELAY_MS = 1_000
 
-/** The output ceiling, sent as the request's `maxCompletionTokens`, for every
+/** The output ceiling, sent as the request's `maxOutputTokens`, for every
  *  attempt except a context-overflow retry. Without one, some providers apply
- *  a default output limit that cuts a large review off mid-JSON. */
-const MAX_COMPLETION_TOKENS = 128_000
+ *  a default output limit that cuts a large review off mid-JSON. 128_000 is
+ *  several times what a review usually spends, so in practice only a runaway
+ *  response reaches it. */
+const MAX_OUTPUT_TOKENS = 128_000
 
 /** OpenRouter's 400 when the prompt plus the output ceiling exceeds the routed
  *  endpoint's context window, e.g. "This endpoint's maximum context length is
@@ -147,10 +141,12 @@ const CONTEXT_FIT_MARGIN_TOKENS = 8_192
  *  of thousands of output tokens, reasoning included, so a smaller ceiling
  *  would cut many off mid-JSON and still bill the full prompt. Below it, the
  *  400 fails like any other structural 4xx. */
-const MIN_FITTED_MAX_COMPLETION_TOKENS = 32_768
+const MIN_FITTED_MAX_OUTPUT_TOKENS = 32_768
 
-/** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs
- *  and future SDK versions need no instanceof on SDK internals. */
+/** HTTP errors from both SDKs carry the response's numeric `statusCode`.
+ *  `@openrouter/agent` throws them from its own bundled copy of
+ *  `@openrouter/sdk`, whose error classes differ from the repo's copy, so the
+ *  check is duck-typed rather than an instanceof. */
 const errorStatusCode = (error: unknown): number | undefined => {
   if (typeof error !== "object" || error === null) return undefined
   if (!("statusCode" in error) || typeof error.statusCode !== "number") {
@@ -162,12 +158,12 @@ const errorStatusCode = (error: unknown): number | undefined => {
 /** The largest output ceiling that fits the endpoint a context-overflow error
  *  names, or null when the error is something else or no usable smaller
  *  ceiling fits. */
-const fittedMaxCompletionTokens = ({
+const fittedMaxOutputTokens = ({
   error,
-  rejectedMaxCompletionTokens,
+  rejectedMaxOutputTokens,
 }: {
   error: unknown
-  rejectedMaxCompletionTokens: number
+  rejectedMaxOutputTokens: number
 }): number | null => {
   if (errorStatusCode(error) !== 400 || !(error instanceof Error)) return null
 
@@ -180,11 +176,11 @@ const fittedMaxCompletionTokens = ({
   const fittedCeiling = Number(contextLength) - Number(inputTokens) - CONTEXT_FIT_MARGIN_TOKENS
 
   // The endpoint leaves too little room for a review to finish its JSON
-  if (fittedCeiling < MIN_FITTED_MAX_COMPLETION_TOKENS) return null
+  if (fittedCeiling < MIN_FITTED_MAX_OUTPUT_TOKENS) return null
 
   // The estimated input plus the rejected ceiling already fit the window, so
   // that ceiling did not cause this 400 and lowering it cannot fix it
-  if (fittedCeiling >= rejectedMaxCompletionTokens) return null
+  if (fittedCeiling >= rejectedMaxOutputTokens) return null
 
   return fittedCeiling
 }
@@ -302,32 +298,29 @@ const parseJsonOrNull = (text: string): { parsed: unknown } | null => {
   }
 }
 
-const buildChatRequest = ({
+const buildReviewRequest = ({
   systemPrompt,
   userPrompt,
   model,
-  maxCompletionTokens,
+  maxOutputTokens,
 }: {
   systemPrompt: string
   userPrompt: string
   model: string
-  maxCompletionTokens: number
-}): ChatRequestSubset => ({
+  maxOutputTokens: number
+}): ReviewRequest => ({
   model,
-  messages: [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userPrompt },
-  ],
-  maxCompletionTokens,
-  responseFormat: {
-    type: "json_schema",
-    jsonSchema: {
+  instructions: systemPrompt,
+  input: userPrompt,
+  maxOutputTokens,
+  text: {
+    format: {
+      type: "json_schema",
       name: "review_response",
       strict: true,
       schema: reviewResponseJsonSchema,
     },
   },
-  stream: false,
 })
 
 type SingleAttempt =
@@ -348,7 +341,7 @@ type SingleAttempt =
   | {
       kind: "context_overflow"
       attempt: ModelAttempt
-      fittedMaxCompletionTokens: number
+      fittedMaxOutputTokens: number
     }
 
 /** Thrown when the model ladder ends without an accepted review; retains every
@@ -356,7 +349,7 @@ type SingleAttempt =
 export class ReviewRequestError extends Error {
   readonly attempts: ModelAttempt[]
   /** An auth or credit status (401/402/403) stopped the ladder. The key fails
-   *  for every model, so the stage runner skips the stages after this one. */
+   *  for every model, so `runStages` skips the review stages after this one. */
   readonly keyRejected: boolean
   /** The whole review's time budget ran out, as reported by the
    *  `remainingReviewMs` that createOpenRouterClient takes. */
@@ -393,12 +386,12 @@ const summarizeAttempts = (attempts: ModelAttempt[]): string => {
 /** The client holds no logger. Each requestReview call passes its own, so
  *  concurrent callers can tag their requests' lines with their own props. */
 export const createOpenRouterClient = ({
-  sdk,
+  agent,
   requestTimeoutMs,
   remainingReviewMs,
   retryDelayMs = RETRY_DELAY_MS,
 }: {
-  sdk: OpenRouterLike
+  agent: AgentLike
   /** Per-attempt deadline. When it elapses the attempt records outcome
    *  `timeout` and the ladder moves on — to the next model when one
    *  exists, otherwise a same-model retry while attempts remain — whether
@@ -406,7 +399,7 @@ export const createOpenRouterClient = ({
    *  best-effort. */
   requestTimeoutMs: number
   /** Milliseconds left in the whole review's time budget; 0 or less once
-   *  it has run out. Caps every attempt, cost lookup, and retry delay. */
+   *  it has run out. Caps every attempt and retry delay. */
   remainingReviewMs: () => number
   retryDelayMs?: number
 }): OpenRouterClient => {
@@ -424,26 +417,43 @@ export const createOpenRouterClient = ({
     }
   }
 
-  /** Sends one chat request under the per-attempt deadline. Its only log lines
-   *  are withDeadline's; requestReview logs each attempt's outcome. */
+  /** Sends one review request under the per-attempt deadline. Its only log
+   *  lines are withDeadline's; requestReview logs each attempt's outcome. */
   const attemptOnce = async (
-    chatRequest: ChatRequestSubset,
+    reviewRequest: ReviewRequest,
     logger: Logger,
   ): Promise<SingleAttempt> => {
-    const { model } = chatRequest
+    const { model } = reviewRequest
 
     // No remaining-time guard here. requestReview calls ensureReviewTimeRemaining
     // before every attempt, so some review time is always left
     const callTimeout = getCallTimeout(remainingReviewMs())
 
+    // The Agent SDK starts the request's stream on the first read and takes
+    // the Responses result from the stream's completion event.
+    // - A stream that closes without a completion event rejects with "Stream
+    //   ended without completion event", a status-less error that retries
+    //   like a network error.
+    // - When every model fails that way, the `@openrouter/sdk` copy bundled
+    //   inside `@openrouter/agent` rejected a changed wire field or ignored a
+    //   stream error event; only the raw stream tells those apart.
     const sendResult = await withDeadline(
       {
-        start: (signal) => {
-          return sdk.chat.send({ chatRequest }, { retries: { strategy: "none" }, signal })
+        start: async (signal) => {
+          const modelResult = agent.callModel(
+            { ...reviewRequest, signal },
+            { retries: { strategy: "none" } },
+          )
+          const response = await modelResult.getResponse()
+
+          // getText reads the response getResponse already awaited, so it
+          // sends no second request
+          const text = await modelResult.getText()
+          return { response, text }
         },
         timeoutMs: callTimeout.timeoutMs,
       },
-      logger.child({ operation: "chat request", model }),
+      logger.child({ operation: "review request", model }),
     )
 
     // Retryable even when the review deadline caused the timeout, because
@@ -478,52 +488,36 @@ export const createOpenRouterClient = ({
           ? `HTTP ${statusCode}: ${summarizeError(sendResult.error)}`
           : summarizeError(sendResult.error),
       }
-      const fittedCeiling = fittedMaxCompletionTokens({
+      const fittedCeiling = fittedMaxOutputTokens({
         error: sendResult.error,
-        rejectedMaxCompletionTokens: chatRequest.maxCompletionTokens,
+        rejectedMaxOutputTokens: reviewRequest.maxOutputTokens,
       })
 
       if (fittedCeiling) {
-        return { kind: "context_overflow", attempt, fittedMaxCompletionTokens: fittedCeiling }
+        return { kind: "context_overflow", attempt, fittedMaxOutputTokens: fittedCeiling }
       }
 
       const keyRejected = statusCode ? KEY_REJECTED_STATUSES.has(statusCode) : false
 
-      // An unknown status, a 5xx, a 408, or a 429 is transient and retries;
-      // any other 4xx, such as a 400 bad request or a 401/402/403 auth or
-      // credit status, is structural and does not
-      const retryable = !statusCode || statusCode >= 500 || RETRYABLE_4XX_STATUSES.has(statusCode)
+      // A 4xx other than a 408 or a 429, such as a 400 bad request or a
+      // 401/402/403 auth or credit status, is structural and does not retry.
+      // Every other failure retries. That includes the status-200 error the SDK
+      // throws when a non-streamed body fails its result schema, because a
+      // second call can come back well-formed
+      const isStructuralClientError = statusCode
+        ? statusCode >= 400 && statusCode < 500 && !RETRYABLE_4XX_STATUSES.has(statusCode)
+        : false
 
-      return { kind: "failed", attempt, retryable, keyRejected }
+      return { kind: "failed", attempt, retryable: !isStructuralClientError, keyRejected }
     }
 
-    const parsedResult = chatResultSchema.safeParse(sendResult.value)
-
-    // A malformed response body points at a provider or gateway glitch rather
-    // than the request, so a second call can come back well-formed
-    if (!parsedResult.success) {
-      return {
-        kind: "failed",
-        attempt: {
-          model,
-          outcome: "api_error",
-          promptTokens: null,
-          completionTokens: null,
-          costUsd: null,
-          errorSummary: "unexpected chat response shape",
-        },
-        retryable: true,
-        keyRejected: false,
-      }
-    }
-
-    const chatResult = parsedResult.data
+    const responsesResult = sendResult.value.response
 
     // Failed-validation attempts still carry usage — they were billed too
     const usage = {
-      promptTokens: chatResult.usage?.promptTokens ?? null,
-      completionTokens: chatResult.usage?.completionTokens ?? null,
-      costUsd: chatResult.usage?.cost ?? null,
+      promptTokens: responsesResult.usage?.inputTokens ?? null,
+      completionTokens: responsesResult.usage?.outputTokens ?? null,
+      costUsd: responsesResult.usage?.cost ?? null,
     }
     const failedValidation = (outcome: AttemptOutcome, errorSummary: string): SingleAttempt => ({
       kind: "failed",
@@ -532,9 +526,11 @@ export const createOpenRouterClient = ({
       keyRejected: false,
     })
 
-    const content = chatResult.choices[0]?.message.content
+    // The SDK extracts "" when the output holds no message item, such as a
+    // reasoning-only response
+    const content = sendResult.value.text
 
-    if (typeof content !== "string" || content === "") {
+    if (content === "") {
       return failedValidation("empty_content", "response had no text content")
     }
 
@@ -559,63 +555,12 @@ export const createOpenRouterClient = ({
     return {
       kind: "accepted",
       review: parsedReview.data,
-      routedModel: chatResult.model,
-      generationId: chatResult.id,
+      routedModel: responsesResult.model,
+
+      // A Responses result's `id` is its generation id (`gen-…`)
+      generationId: responsesResult.id,
       attempt: { model, outcome: "accepted", ...usage, errorSummary: null },
     }
-  }
-
-  /** A cost lookup failure must never fail a completed review, so every
-   *  failure degrades to a null cost. */
-  const lookupGenerationCost = async (
-    generationId: string,
-    logger: Logger,
-  ): Promise<number | null> => {
-    const remainingMs = remainingReviewMs()
-
-    // Every lookup line names the generation, so a failure ties back to it
-    const lookupLogger = logger.child({ operation: "generation cost lookup", generationId })
-
-    if (remainingMs <= 0) {
-      lookupLogger.debug("generation cost lookup skipped", { reason: "review deadline exceeded" })
-      return null
-    }
-
-    const callTimeout = getCallTimeout(remainingMs)
-
-    const lookup = await withDeadline(
-      {
-        start: (signal) => {
-          return sdk.generations.getGeneration(
-            { id: generationId },
-            { retries: { strategy: "none" }, signal },
-          )
-        },
-        timeoutMs: callTimeout.timeoutMs,
-      },
-      lookupLogger,
-    )
-
-    if (lookup.status === "timed_out") {
-      lookupLogger.warn("generation cost lookup failed", { error: callTimeout.timeoutSummary })
-      return null
-    }
-    if (lookup.status === "rejected") {
-      lookupLogger.warn("generation cost lookup failed", {
-        error: summarizeError(lookup.error),
-      })
-      return null
-    }
-
-    const parsed = generationResponseSchema.safeParse(lookup.value)
-
-    if (!parsed.success) {
-      lookupLogger.warn("unexpected generation response shape")
-      return null
-    }
-
-    // parsed.data = Zod safeParse result; .data = API envelope's data property
-    return parsed.data.data.totalCost
   }
 
   const requestReview: OpenRouterClient["requestReview"] = async (
@@ -634,27 +579,31 @@ export const createOpenRouterClient = ({
       })
     }
 
+    // Each model's attempts end in one of four ways:
+    // - An accepted review returns.
+    // - A rejected key or a spent review deadline throws, ending the ladder.
+    // - A timeout with a next model left, or a structural failure, breaks to
+    //   the next model.
+    // - A failed last attempt ends the while loop and moves to the next model.
+    // When the last model's attempts end without a review, the throw after the
+    // loops reports every attempt
     for (const [ladderIndex, ladderModel] of modelLadder.entries()) {
       const nextLadderModel = modelLadder[ladderIndex + 1]
 
       // Both are reassigned across this model's attempts. Each model starts at
       // the full ceiling because its own endpoints decide what fits, so a
       // context overflow lowers the ceiling only for the same model's retry
-      let maxCompletionTokens = MAX_COMPLETION_TOKENS
+      let maxOutputTokens = MAX_OUTPUT_TOKENS
       let modelAttemptNumber = 1
       while (modelAttemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
         ensureReviewTimeRemaining()
         const attemptResult = await attemptOnce(
-          buildChatRequest({ systemPrompt, userPrompt, model: ladderModel, maxCompletionTokens }),
+          buildReviewRequest({ systemPrompt, userPrompt, model: ladderModel, maxOutputTokens }),
           logger,
         )
 
         if (attemptResult.kind === "accepted") {
-          // The generation lookup runs only when the response's usage omits the cost
-          const costUsd =
-            attemptResult.attempt.costUsd ??
-            (await lookupGenerationCost(attemptResult.generationId, logger))
-          attempts.push({ ...attemptResult.attempt, costUsd })
+          attempts.push(attemptResult.attempt)
           logger.info("review response accepted", {
             model: ladderModel,
             routedModel: attemptResult.routedModel,
@@ -713,10 +662,10 @@ export const createOpenRouterClient = ({
         // fitted ceiling, so the loop ends and any next model starts at the
         // full ceiling
         if (retryRemains && attemptResult.kind === "context_overflow") {
-          maxCompletionTokens = attemptResult.fittedMaxCompletionTokens
+          maxOutputTokens = attemptResult.fittedMaxOutputTokens
           logger.info("retrying with an output ceiling that fits the endpoint's context window", {
             model: ladderModel,
-            maxCompletionTokens,
+            maxOutputTokens,
           })
         }
 

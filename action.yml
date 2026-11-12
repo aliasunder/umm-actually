@@ -25,7 +25,7 @@ inputs:
     required: false
     default: "900"
   review_timeout_seconds:
-    description: Shared model-work budget from action start, in seconds, including context preparation, all phases, retries, fallbacks and cost lookups. Completed phases post when it expires, with incomplete coverage identified; the run fails if none completed. Leave room below the workflow job timeout for setup and GitHub publication. External cancellation stops the run at once; unlike the deadline, it does not post completed phases. Empty = 1500
+    description: Shared model-work budget from action start, in seconds, including context preparation, all phases, retries and fallbacks. Completed phases post when it expires, with incomplete coverage identified; the run fails if none completed. Leave room below the workflow job timeout for setup and GitHub publication. External cancellation stops the run at once; unlike the deadline, it does not post completed phases. Empty = 1500
     required: false
     default: "1500"
   max_findings:

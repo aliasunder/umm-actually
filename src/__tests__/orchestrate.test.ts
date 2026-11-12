@@ -8,9 +8,10 @@ import type { ContextReader } from "../context/workspace.js"
 import {
   ReviewRequestError,
   createOpenRouterClient,
-  type ChatRequestSubset,
   type ModelAttempt,
   type OpenRouterClient,
+  type ResponsesResult,
+  type ReviewRequest,
   type StructuredReviewResult,
 } from "../openrouter/client.js"
 import { buildUserPrompt, estimateTokens, type PromptFile } from "../review/prompt.js"
@@ -60,6 +61,29 @@ const pullRequestPayload: Record<string, unknown> = JSON.parse(
 const fixtureReviewResponse: ReviewResponse = JSON.parse(
   readFileSync(new URL("../../fixtures/openrouter.response.json", import.meta.url), "utf8"),
 )
+
+/** The pair a `callModel` stub hands back once its request settles: the
+ *  materialized response the client reads and the text the SDK extracts. */
+type ModelCallResult = { response: ResponsesResult; text: string }
+
+/** A `callModel` result that settles with the given promise. Both reads await
+ *  the one promise, the way the SDK's reads share one materialized stream. */
+const makePendingModelResultStub = (
+  settled: Promise<ModelCallResult>,
+): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> } => ({
+  getResponse: async () => (await settled).response,
+  getText: async () => (await settled).text,
+})
+
+/** A `callModel` result that resolves at once with an accepted-shaped response
+ *  carrying the fixture review as its text. */
+const makeModelResultStub = (
+  response: ResponsesResult,
+): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> } => {
+  return makePendingModelResultStub(
+    Promise.resolve({ response, text: JSON.stringify(fixtureReviewResponse) }),
+  )
+}
 
 const fixturePrContext: PrContext = {
   prNumber: 7,
@@ -4684,91 +4708,54 @@ describe("staged phases", () => {
     ])
   })
 
-  it("publishes full coverage without a deadline warning when only accepted-response cost lookup expires", async () => {
-    vi.useFakeTimers()
-    try {
-      const deadline = Date.now() + 1000
-      const remainingReviewMs = () => deadline - Date.now()
-      const costResponse = Promise.withResolvers<unknown>()
-      const getGeneration = vi.fn(() => costResponse.promise)
-      const send = vi.fn(async () => ({
-        id: "accepted-before-deadline",
-        model: "test/model",
-        choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
-        usage: { promptTokens: 10, completionTokens: 20 },
-      }))
-      const client = createOpenRouterClient({
-        sdk: { chat: { send }, generations: { getGeneration } },
-        requestTimeoutMs: 900_000,
-        remainingReviewMs,
-      })
-      const stubs = makeOrchestrateDeps({
-        remainingReviewMs,
-        generateFindings: createPromptedGenerateFindings(
-          {
-            openrouterClient: client,
-            model: "test/model",
-            fallbackModel: "fallback/model",
-          },
-          createTestLogger(),
-        ),
-      })
-      const pending = orchestrate(stubs.deps, createTestLogger())
-      await vi.advanceTimersByTimeAsync(1000)
-      const result = await pending
-      const expectedCost = renderCostSummary({
-        attempts: [
-          {
-            phase: "combined",
-            model: "test/model",
-            outcome: "accepted",
-            promptTokens: 10,
-            completionTokens: 20,
-            costUsd: null,
-            errorSummary: null,
-          },
-        ],
-        modelUsed: "test/model",
-      })
-      expect(remainingReviewMs()).toBe(0)
-      expect(send).toHaveBeenCalledTimes(1)
-      expect(getGeneration).toHaveBeenCalledExactlyOnceWith(
-        { id: "accepted-before-deadline" },
-        { retries: { strategy: "none" }, signal: expect.any(AbortSignal) },
-      )
-      expect(result).toEqual({
-        findingsCount: expectedSelection.selected.length,
-        reviewUrl: "https://github.com/test/review/1",
-        modelUsed: "test/model",
-        skippedReason: "",
-        phases: [{ phase: "combined", status: "completed" }],
-        reviewSummaryMarkdown: expectedReviewSummary(),
-        costSummaryMarkdown: expectedCost,
-        conventionsNote: null,
-      })
-      expect(stubs.upsertSummaryCommentCalls).toEqual([
-        expectedStatus({
-          isFirstRun: true,
-          postedCount: expectedSelection.selected.length,
-          totalCount: expectedSelection.selected.length,
-        }),
-      ])
-      expect(stubs.postFindingsReviewCalls).toEqual([
-        expectedFindingsReview(expectedSelection.selected),
-      ])
-      expect(stubs.updateCheckRunCalls).toEqual([
-        {
-          checkRunId: 555,
-          conclusion: "success",
-          output: {
-            title: `${expectedSelection.selected.length} findings`,
-            summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.\n\n${expectedCost}`,
-          },
+  it("publishes full coverage without a deadline warning when the review deadline runs out after every phase completed", async () => {
+    // The only phase's response spends the rest of this test's controllable deadline
+    const deadline = { remainingMs: 1 }
+    const stubs = makeOrchestrateDeps({
+      remainingReviewMs: () => deadline.remainingMs,
+      generateFindings: async (reviewContext) => {
+        stubs.generateFindingsCalls.push(reviewContext)
+        deadline.remainingMs = 0
+        return {
+          review: fixtureReviewResponse,
+          modelUsed: "test/model",
+          attempts: [fixtureAttempt],
+        }
+      },
+    })
+
+    const result = await orchestrate(stubs.deps, createTestLogger())
+
+    expect(result).toEqual({
+      findingsCount: expectedSelection.selected.length,
+      reviewUrl: "https://github.com/test/review/1",
+      modelUsed: "test/model",
+      skippedReason: "",
+      phases: [{ phase: "combined", status: "completed" }],
+      reviewSummaryMarkdown: expectedReviewSummary(),
+      costSummaryMarkdown: expectedCostSummary,
+      conventionsNote: null,
+    })
+    expect(stubs.upsertSummaryCommentCalls).toEqual([
+      expectedStatus({
+        isFirstRun: true,
+        postedCount: expectedSelection.selected.length,
+        totalCount: expectedSelection.selected.length,
+      }),
+    ])
+    expect(stubs.postFindingsReviewCalls).toEqual([
+      expectedFindingsReview(expectedSelection.selected),
+    ])
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "success",
+        output: {
+          title: `${expectedSelection.selected.length} findings`,
+          summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.\n\n${expectedCostSummary}`,
         },
-      ])
-    } finally {
-      vi.useRealTimers()
-    }
+      },
+    ])
   })
 
   it("publishes completed parallel phases once when a provider ignores the review deadline abort", async () => {
@@ -4776,20 +4763,19 @@ describe("staged phases", () => {
     try {
       const deadline = Date.now() + 1000
       const remainingReviewMs = () => deadline - Date.now()
-      const lateResponse = Promise.withResolvers<unknown>()
+      const lateResponse = Promise.withResolvers<ModelCallResult>()
       const response = {
         id: "completed",
         model: "test/model",
-        choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
-        usage: { promptTokens: 10, completionTokens: 20, cost: 0.01 },
+        usage: { inputTokens: 10, outputTokens: 20, cost: 0.01 },
       }
-      const send = vi
+      const callModel = vi
         .fn()
-        .mockResolvedValueOnce(response)
-        .mockResolvedValueOnce(response)
-        .mockImplementation(() => lateResponse.promise)
+        .mockReturnValueOnce(makeModelResultStub(response))
+        .mockReturnValueOnce(makeModelResultStub(response))
+        .mockImplementation(() => makePendingModelResultStub(lateResponse.promise))
       const client = createOpenRouterClient({
-        sdk: { chat: { send }, generations: { getGeneration: vi.fn() } },
+        agent: { callModel },
         requestTimeoutMs: 900_000,
         remainingReviewMs,
       })
@@ -4808,7 +4794,7 @@ describe("staged phases", () => {
       const pending = orchestrate(stubs.deps, createTestLogger())
       await vi.advanceTimersByTimeAsync(1000)
       const result = await pending
-      expect(send).toHaveBeenCalledTimes(3)
+      expect(callModel).toHaveBeenCalledTimes(3)
       expect(result.phases).toEqual([
         { phase: "correctness-security", status: "completed" },
         { phase: "conventions-tests", status: "completed" },
@@ -4858,7 +4844,7 @@ describe("staged phases", () => {
         reviews: stubs.postFindingsReviewCalls,
         result,
       })
-      lateResponse.resolve(response)
+      lateResponse.resolve({ response, text: JSON.stringify(fixtureReviewResponse) })
       await vi.runAllTimersAsync()
       expect({
         checks: stubs.updateCheckRunCalls,
@@ -4875,8 +4861,7 @@ describe("staged phases", () => {
     const response = {
       id: "completed",
       model: "test/model",
-      choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
-      usage: { promptTokens: 10, completionTokens: 20, cost: 0.01 },
+      usage: { inputTokens: 10, outputTokens: 20, cost: 0.01 },
     }
 
     // correctness-security is dispatched first, so a logger shared across the
@@ -4884,19 +4869,20 @@ describe("staged phases", () => {
     // The failure is keyed on that phase's prompt text, not on call order
     const correctnessSecurityPassScope = "this pass covers correctness & security"
     const failedPrompts = new Set<string>()
-    const send = vi.fn(async ({ chatRequest }: { chatRequest: ChatRequestSubset }) => {
-      const systemPrompt = first(chatRequest.messages).content
+    const callModel = vi.fn(({ instructions }: ReviewRequest) => {
       const isFirstCorrectnessSecurityRequest =
-        systemPrompt.includes(correctnessSecurityPassScope) && !failedPrompts.has(systemPrompt)
+        instructions.includes(correctnessSecurityPassScope) && !failedPrompts.has(instructions)
 
       if (isFirstCorrectnessSecurityRequest) {
-        failedPrompts.add(systemPrompt)
-        throw Object.assign(new Error("HTTP 500"), { statusCode: 500 })
+        failedPrompts.add(instructions)
+        return makePendingModelResultStub(
+          Promise.reject(Object.assign(new Error("HTTP 500"), { statusCode: 500 })),
+        )
       }
-      return response
+      return makeModelResultStub(response)
     })
     const client = createOpenRouterClient({
-      sdk: { chat: { send }, generations: { getGeneration: vi.fn() } },
+      agent: { callModel },
       requestTimeoutMs: 900_000,
       remainingReviewMs: () => Infinity,
       retryDelayMs: 0,
@@ -4934,7 +4920,7 @@ describe("staged phases", () => {
       { phase: "conventions-tests", status: "completed" },
       { phase: "subtle-bugs", status: "completed" },
     ])
-    expect(send).toHaveBeenCalledTimes(4)
+    expect(callModel).toHaveBeenCalledTimes(4)
     expect(logsWithMessage(generateLogger, "review attempt failed")).toEqual([
       {
         level: "warn",
