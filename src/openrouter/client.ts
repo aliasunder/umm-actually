@@ -122,9 +122,9 @@ const generationResponseSchema = z.object({
 const KEY_REJECTED_STATUSES = new Set([401, 402, 403])
 
 /** The transient 4xx statuses — HTTP request timeout (408) and rate limit
- *  (429). attemptOnce also marks 5xx and status-less network errors
- *  retryable, and a context-overflow 400 retries with a smaller output
- *  ceiling; any other 4xx is structural and skips the retry. */
+ *  (429). Any other 4xx is structural and skips the retry, except a
+ *  context-overflow 400, which retries with a smaller output ceiling;
+ *  attemptOnce retries every failure outside the 4xx range. */
 const RETRYABLE_4XX_STATUSES = new Set([408, 429])
 
 /** Cap on same-model attempts for failures that settle quickly (HTTP errors,
