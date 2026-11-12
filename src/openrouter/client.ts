@@ -67,7 +67,8 @@ export type AgentLike = {
 }
 
 /** Structural subset of the OpenRouter SDK's REST client — the generation
- *  cost lookup is the one endpoint the Agent SDK does not cover. */
+ *  cost lookup is the one endpoint this client calls that the Agent SDK does
+ *  not cover. */
 export type GenerationsLike = {
   generations: {
     getGeneration(
@@ -95,8 +96,8 @@ export type OpenRouterClient = {
   ) => Promise<StructuredReviewResult>
 }
 
-/** The fields read from the Responses result that the Agent SDK assembles
- *  from the streamed events. The SDK types `usage` as both nullable and
+/** The fields read from the Responses result that the Agent SDK takes from
+ *  the stream's completion event. The SDK types `usage` as both nullable and
  *  optional, so the block is nullish. */
 const responsesResultSchema = z.object({
   id: z.string(),
@@ -448,8 +449,8 @@ export const createOpenRouterClient = ({
     // before every attempt, so some review time is always left
     const callTimeout = getCallTimeout(remainingReviewMs())
 
-    // The Agent SDK starts the request's stream on the first read and
-    // assembles the Responses result when the stream completes.
+    // The Agent SDK starts the request's stream on the first read and takes
+    // the Responses result from the stream's completion event.
     // - A stream that closes without a completion event rejects with "Stream
     //   ended without completion event", a status-less error that retries
     //   like a network error.
