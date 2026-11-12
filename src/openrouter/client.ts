@@ -11,9 +11,10 @@ export type AttemptOutcome =
   "accepted" | "api_error" | "timeout" | "empty_content" | "invalid_json" | "schema_mismatch"
 
 export type ModelAttempt = {
-  /** The model this attempt requested. The ladder is the primary model, then
-   *  the fallback when one is set. OpenRouter's routed model is reported only
-   *  for the accepted attempt, as StructuredReviewResult.modelUsed. */
+  /** The model this attempt requested from the model ladder, which tries the
+   *  primary model and then the fallback when one is set. OpenRouter's routed
+   *  model is reported only for the accepted attempt, as
+   *  StructuredReviewResult.modelUsed. */
   model: string
   outcome: AttemptOutcome
   promptTokens: number | null
@@ -31,8 +32,9 @@ export type StructuredReviewResult = {
   attempts: ModelAttempt[]
 }
 
-/** Structural subset of the Agent SDK's call-model input — exactly what we
- *  send, as one Responses API request with no tools. */
+/** Structural subset of the `callModel` input of the Agent SDK
+ *  (`@openrouter/agent`) — exactly what we send, as one request with no tools
+ *  to OpenRouter's Responses API (`/responses`). */
 export type ReviewRequest = {
   model: string
   instructions: string
@@ -49,10 +51,13 @@ export type ReviewRequest = {
 }
 
 /**
- * Structural subset of the Agent SDK client — test stubs are plain objects.
- * Method syntax keeps the real client assignable under strictFunctionTypes.
- * `getResponse` resolves `unknown` on purpose: Zod parses across the
- * boundary. `getText` is the SDK's own extraction of the message text.
+ * Structural subset of the Agent SDK client.
+ * - Test stubs are plain objects; method syntax keeps the real client
+ *   assignable under strictFunctionTypes.
+ * - `getResponse` resolves `unknown` on purpose: Zod parses across the boundary.
+ * - `getText` is the SDK's own extraction of the message text.
+ * - The abort signal goes in the request, where the SDK takes the signal that
+ *   cancels the whole call and aborts its in-flight stream.
  */
 export type AgentLike = {
   callModel(
@@ -90,8 +95,9 @@ export type OpenRouterClient = {
   ) => Promise<StructuredReviewResult>
 }
 
-/** The fields read from the Agent SDK's materialized Responses result. The
- *  SDK types `usage` as both nullable and optional, so the block is nullish. */
+/** The fields read from the Responses result that the Agent SDK assembles
+ *  from the streamed events. The SDK types `usage` as both nullable and
+ *  optional, so the block is nullish. */
 const responsesResultSchema = z.object({
   id: z.string(),
   model: z.string(),
@@ -131,8 +137,10 @@ const RETRY_DELAY_MS = 1_000
 
 /** The output ceiling, sent as the request's `maxOutputTokens`, for every
  *  attempt except a context-overflow retry. Without one, some providers apply
- *  a default output limit that cuts a large review off mid-JSON. */
-const MAX_COMPLETION_TOKENS = 128_000
+ *  a default output limit that cuts a large review off mid-JSON. 128_000 is
+ *  several times what a review usually spends, so in practice only a runaway
+ *  response reaches it. */
+const MAX_OUTPUT_TOKENS = 128_000
 
 /** OpenRouter's 400 when the prompt plus the output ceiling exceeds the routed
  *  endpoint's context window, e.g. "This endpoint's maximum context length is
@@ -150,10 +158,12 @@ const CONTEXT_FIT_MARGIN_TOKENS = 8_192
  *  of thousands of output tokens, reasoning included, so a smaller ceiling
  *  would cut many off mid-JSON and still bill the full prompt. Below it, the
  *  400 fails like any other structural 4xx. */
-const MIN_FITTED_MAX_COMPLETION_TOKENS = 32_768
+const MIN_FITTED_MAX_OUTPUT_TOKENS = 32_768
 
-/** OpenRouter SDK errors carry a numeric `statusCode` — duck-typed so stubs
- *  and future SDK versions need no instanceof on SDK internals. */
+/** HTTP errors from both SDKs carry the response's numeric `statusCode`.
+ *  `@openrouter/agent` throws them from its own bundled copy of
+ *  `@openrouter/sdk`, whose error classes differ from the repo's copy, so the
+ *  check is duck-typed rather than an instanceof. */
 const errorStatusCode = (error: unknown): number | undefined => {
   if (typeof error !== "object" || error === null) return undefined
   if (!("statusCode" in error) || typeof error.statusCode !== "number") {
@@ -165,12 +175,12 @@ const errorStatusCode = (error: unknown): number | undefined => {
 /** The largest output ceiling that fits the endpoint a context-overflow error
  *  names, or null when the error is something else or no usable smaller
  *  ceiling fits. */
-const fittedMaxCompletionTokens = ({
+const fittedMaxOutputTokens = ({
   error,
-  rejectedMaxCompletionTokens,
+  rejectedMaxOutputTokens,
 }: {
   error: unknown
-  rejectedMaxCompletionTokens: number
+  rejectedMaxOutputTokens: number
 }): number | null => {
   if (errorStatusCode(error) !== 400 || !(error instanceof Error)) return null
 
@@ -183,11 +193,11 @@ const fittedMaxCompletionTokens = ({
   const fittedCeiling = Number(contextLength) - Number(inputTokens) - CONTEXT_FIT_MARGIN_TOKENS
 
   // The endpoint leaves too little room for a review to finish its JSON
-  if (fittedCeiling < MIN_FITTED_MAX_COMPLETION_TOKENS) return null
+  if (fittedCeiling < MIN_FITTED_MAX_OUTPUT_TOKENS) return null
 
   // The estimated input plus the rejected ceiling already fit the window, so
   // that ceiling did not cause this 400 and lowering it cannot fix it
-  if (fittedCeiling >= rejectedMaxCompletionTokens) return null
+  if (fittedCeiling >= rejectedMaxOutputTokens) return null
 
   return fittedCeiling
 }
@@ -309,17 +319,17 @@ const buildReviewRequest = ({
   systemPrompt,
   userPrompt,
   model,
-  maxCompletionTokens,
+  maxOutputTokens,
 }: {
   systemPrompt: string
   userPrompt: string
   model: string
-  maxCompletionTokens: number
+  maxOutputTokens: number
 }): ReviewRequest => ({
   model,
   instructions: systemPrompt,
   input: userPrompt,
-  maxOutputTokens: maxCompletionTokens,
+  maxOutputTokens,
   text: {
     format: {
       type: "json_schema",
@@ -348,7 +358,7 @@ type SingleAttempt =
   | {
       kind: "context_overflow"
       attempt: ModelAttempt
-      fittedMaxCompletionTokens: number
+      fittedMaxOutputTokens: number
     }
 
 /** Thrown when the model ladder ends without an accepted review; retains every
@@ -356,7 +366,7 @@ type SingleAttempt =
 export class ReviewRequestError extends Error {
   readonly attempts: ModelAttempt[]
   /** An auth or credit status (401/402/403) stopped the ladder. The key fails
-   *  for every model, so the stage runner skips the stages after this one. */
+   *  for every model, so `runStages` skips the review stages after this one. */
   readonly keyRejected: boolean
   /** The whole review's time budget ran out, as reported by the
    *  `remainingReviewMs` that createOpenRouterClient takes. */
@@ -394,13 +404,13 @@ const summarizeAttempts = (attempts: ModelAttempt[]): string => {
  *  concurrent callers can tag their requests' lines with their own props. */
 export const createOpenRouterClient = ({
   agent,
-  sdk,
+  costLookupClient,
   requestTimeoutMs,
   remainingReviewMs,
   retryDelayMs = RETRY_DELAY_MS,
 }: {
   agent: AgentLike
-  sdk: GenerationsLike
+  costLookupClient: GenerationsLike
   /** Per-attempt deadline. When it elapses the attempt records outcome
    *  `timeout` and the ladder moves on — to the next model when one
    *  exists, otherwise a same-model retry while attempts remain — whether
@@ -438,10 +448,14 @@ export const createOpenRouterClient = ({
     // before every attempt, so some review time is always left
     const callTimeout = getCallTimeout(remainingReviewMs())
 
-    // The Agent SDK streams every request and materializes the result on the
-    // first read. A "Stream ended without completion event" rejection on every
-    // model means its bundled SDK copy rejected a changed wire field or
-    // ignored a stream error event; only the raw stream tells those apart
+    // The Agent SDK starts the request's stream on the first read and
+    // assembles the Responses result when the stream completes.
+    // - A stream that closes without a completion event rejects with "Stream
+    //   ended without completion event", a status-less error that retries
+    //   like a network error.
+    // - When every model fails that way, the `@openrouter/sdk` copy bundled
+    //   inside `@openrouter/agent` rejected a changed wire field or ignored a
+    //   stream error event; only the raw stream tells those apart.
     const sendResult = await withDeadline(
       {
         start: async (signal) => {
@@ -450,6 +464,9 @@ export const createOpenRouterClient = ({
             { retries: { strategy: "none" } },
           )
           const response = await modelResult.getResponse()
+
+          // getText reads the response getResponse already awaited, so it
+          // sends no second request
           const text = await modelResult.getText()
           return { response, text }
         },
@@ -490,13 +507,13 @@ export const createOpenRouterClient = ({
           ? `HTTP ${statusCode}: ${summarizeError(sendResult.error)}`
           : summarizeError(sendResult.error),
       }
-      const fittedCeiling = fittedMaxCompletionTokens({
+      const fittedCeiling = fittedMaxOutputTokens({
         error: sendResult.error,
-        rejectedMaxCompletionTokens: reviewRequest.maxOutputTokens,
+        rejectedMaxOutputTokens: reviewRequest.maxOutputTokens,
       })
 
       if (fittedCeiling) {
-        return { kind: "context_overflow", attempt, fittedMaxCompletionTokens: fittedCeiling }
+        return { kind: "context_overflow", attempt, fittedMaxOutputTokens: fittedCeiling }
       }
 
       const keyRejected = statusCode ? KEY_REJECTED_STATUSES.has(statusCode) : false
@@ -574,6 +591,9 @@ export const createOpenRouterClient = ({
       kind: "accepted",
       review: parsedReview.data,
       routedModel: responsesResult.model,
+
+      // A Responses result's `id` is its generation id (`gen-…`), the id the
+      // generation cost lookup takes
       generationId: responsesResult.id,
       attempt: { model, outcome: "accepted", ...usage, errorSummary: null },
     }
@@ -600,7 +620,7 @@ export const createOpenRouterClient = ({
     const lookup = await withDeadline(
       {
         start: (signal) => {
-          return sdk.generations.getGeneration(
+          return costLookupClient.generations.getGeneration(
             { id: generationId },
             { retries: { strategy: "none" }, signal },
           )
@@ -648,18 +668,26 @@ export const createOpenRouterClient = ({
       })
     }
 
+    // Each model's attempts end in one of four ways:
+    // - An accepted review returns.
+    // - A rejected key or a spent review deadline throws, ending the ladder.
+    // - A timeout with a next model left, or a structural failure, breaks to
+    //   the next model.
+    // - A failed last attempt ends the while loop and moves to the next model.
+    // When the last model's attempts end without a review, the throw after the
+    // loops reports every attempt
     for (const [ladderIndex, ladderModel] of modelLadder.entries()) {
       const nextLadderModel = modelLadder[ladderIndex + 1]
 
       // Both are reassigned across this model's attempts. Each model starts at
       // the full ceiling because its own endpoints decide what fits, so a
       // context overflow lowers the ceiling only for the same model's retry
-      let maxCompletionTokens = MAX_COMPLETION_TOKENS
+      let maxOutputTokens = MAX_OUTPUT_TOKENS
       let modelAttemptNumber = 1
       while (modelAttemptNumber <= MAX_ATTEMPTS_PER_MODEL) {
         ensureReviewTimeRemaining()
         const attemptResult = await attemptOnce(
-          buildReviewRequest({ systemPrompt, userPrompt, model: ladderModel, maxCompletionTokens }),
+          buildReviewRequest({ systemPrompt, userPrompt, model: ladderModel, maxOutputTokens }),
           logger,
         )
 
@@ -727,10 +755,10 @@ export const createOpenRouterClient = ({
         // fitted ceiling, so the loop ends and any next model starts at the
         // full ceiling
         if (retryRemains && attemptResult.kind === "context_overflow") {
-          maxCompletionTokens = attemptResult.fittedMaxCompletionTokens
+          maxOutputTokens = attemptResult.fittedMaxOutputTokens
           logger.info("retrying with an output ceiling that fits the endpoint's context window", {
             model: ladderModel,
-            maxCompletionTokens,
+            maxOutputTokens,
           })
         }
 

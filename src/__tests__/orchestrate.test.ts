@@ -4725,7 +4725,7 @@ describe("staged phases", () => {
       })
       const client = createOpenRouterClient({
         agent: { callModel },
-        sdk: { generations: { getGeneration } },
+        costLookupClient: { generations: { getGeneration } },
         requestTimeoutMs: 900_000,
         remainingReviewMs,
       })
@@ -4816,7 +4816,7 @@ describe("staged phases", () => {
         .mockImplementation(() => makePendingModelResultStub(lateResponse.promise))
       const client = createOpenRouterClient({
         agent: { callModel },
-        sdk: { generations: { getGeneration: vi.fn() } },
+        costLookupClient: { generations: { getGeneration: vi.fn() } },
         requestTimeoutMs: 900_000,
         remainingReviewMs,
       })
@@ -4924,7 +4924,7 @@ describe("staged phases", () => {
     })
     const client = createOpenRouterClient({
       agent: { callModel },
-      sdk: { generations: { getGeneration: vi.fn() } },
+      costLookupClient: { generations: { getGeneration: vi.fn() } },
       requestTimeoutMs: 900_000,
       remainingReviewMs: () => Infinity,
       retryDelayMs: 0,

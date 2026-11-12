@@ -168,7 +168,7 @@ const makeClientStubs = ({
     },
   }
 
-  const sdk: GenerationsLike = {
+  const costLookupClient: GenerationsLike = {
     generations: {
       getGeneration: async (request, options) => {
         generationCalls.push({ ...request, options })
@@ -184,14 +184,14 @@ const makeClientStubs = ({
     },
   }
 
-  return { agent, sdk, modelCalls, generationCalls }
+  return { agent, costLookupClient, modelCalls, generationCalls }
 }
 
-const makeClient = (stub: { agent: AgentLike; sdk: GenerationsLike }) => {
+const makeClient = (stub: { agent: AgentLike; costLookupClient: GenerationsLike }) => {
   const logger = createTestLogger()
   const client = createOpenRouterClient({
     agent: stub.agent,
-    sdk: stub.sdk,
+    costLookupClient: stub.costLookupClient,
     remainingReviewMs: () => Infinity,
     requestTimeoutMs: 45_000,
     retryDelayMs: 0,
@@ -243,10 +243,10 @@ const makeContextOverflowError = ({
 /** The model and output ceiling of every review request sent, in order. */
 const sentCeilings = (stub: {
   modelCalls: { request: ReviewRequest }[]
-}): { model: string; maxCompletionTokens: number }[] => {
+}): { model: string; maxOutputTokens: number }[] => {
   return stub.modelCalls.map(({ request }) => ({
     model: request.model,
-    maxCompletionTokens: request.maxOutputTokens,
+    maxOutputTokens: request.maxOutputTokens,
   }))
 }
 
@@ -301,7 +301,7 @@ describe("requestReview", () => {
     const logger = createTestLogger()
     const client = createOpenRouterClient({
       agent: stub.agent,
-      sdk: stub.sdk,
+      costLookupClient: stub.costLookupClient,
       requestTimeoutMs: 45_000,
       remainingReviewMs: () => 0,
     })
@@ -339,7 +339,7 @@ describe("requestReview", () => {
         const logger = createTestLogger()
         const client = createOpenRouterClient({
           agent: stub.agent,
-          sdk: stub.sdk,
+          costLookupClient: stub.costLookupClient,
           requestTimeoutMs: 45_000,
           remainingReviewMs: () => deadline - performance.now(),
         })
@@ -412,7 +412,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         requestTimeoutMs: 45_000,
         remainingReviewMs: () => deadline - performance.now(),
       })
@@ -459,7 +459,7 @@ describe("requestReview", () => {
     const logger = createTestLogger()
     const client = createOpenRouterClient({
       agent: stub.agent,
-      sdk: stub.sdk,
+      costLookupClient: stub.costLookupClient,
       requestTimeoutMs: 45_000,
       remainingReviewMs,
     })
@@ -504,7 +504,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         requestTimeoutMs: 45_000,
         remainingReviewMs: () => deadline - performance.now(),
       })
@@ -810,7 +810,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -888,7 +888,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -974,7 +974,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1022,7 +1022,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1078,7 +1078,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1121,7 +1121,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1177,7 +1177,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1241,7 +1241,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs,
@@ -1274,7 +1274,7 @@ describe("requestReview", () => {
       const deadline = performance.now() + 100
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         requestTimeoutMs: 45_000,
         remainingReviewMs: () => deadline - performance.now(),
       })
@@ -1318,7 +1318,7 @@ describe("requestReview", () => {
       const logger = createTestLogger()
       const client = createOpenRouterClient({
         agent: stub.agent,
-        sdk: stub.sdk,
+        costLookupClient: stub.costLookupClient,
         remainingReviewMs: () => Infinity,
         requestTimeoutMs: 45_000,
         retryDelayMs: 0,
@@ -1379,7 +1379,7 @@ describe("requestReview", () => {
     const logger = createTestLogger()
     const client = createOpenRouterClient({
       agent: stub.agent,
-      sdk: stub.sdk,
+      costLookupClient: stub.costLookupClient,
       remainingReviewMs: () => Infinity,
       requestTimeoutMs: 45_000,
       retryDelayMs,
@@ -1482,8 +1482,8 @@ describe("requestReview", () => {
 
     // 262,144 window − 135,762 input − 8,192 margin
     expect(sentCeilings(stub)).toEqual([
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 118_190 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 118_190 },
     ])
     expect(result).toEqual({
       review: acceptedReview,
@@ -1512,7 +1512,7 @@ describe("requestReview", () => {
       {
         level: "info",
         message: CEILING_RETRY_LOG,
-        data: { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 118_190 },
+        data: { model: "z-ai/glm-5.3-flash", maxOutputTokens: 118_190 },
       },
     ])
   })
@@ -1530,9 +1530,9 @@ describe("requestReview", () => {
     await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 118_190 },
-      { model: "deepseek/deepseek-v4.1-flash", maxCompletionTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 118_190 },
+      { model: "deepseek/deepseek-v4.1-flash", maxOutputTokens: 128_000 },
     ])
   })
 
@@ -1548,8 +1548,8 @@ describe("requestReview", () => {
     await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "deepseek/deepseek-v4.1-flash", maxCompletionTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "deepseek/deepseek-v4.1-flash", maxOutputTokens: 128_000 },
     ])
   })
 
@@ -1566,8 +1566,8 @@ describe("requestReview", () => {
     await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "deepseek/deepseek-v4.1-flash", maxCompletionTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "deepseek/deepseek-v4.1-flash", maxOutputTokens: 128_000 },
     ])
   })
 
@@ -1584,8 +1584,8 @@ describe("requestReview", () => {
     await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 32_768 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 32_768 },
     ])
   })
 
@@ -1603,8 +1603,8 @@ describe("requestReview", () => {
     await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "deepseek/deepseek-v4.1-flash", maxCompletionTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "deepseek/deepseek-v4.1-flash", maxOutputTokens: 128_000 },
     ])
     expect(logsWithMessage(logger, CEILING_RETRY_LOG)).toEqual([])
   })
@@ -1622,9 +1622,9 @@ describe("requestReview", () => {
     await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "deepseek/deepseek-v4.1-flash", maxCompletionTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "deepseek/deepseek-v4.1-flash", maxOutputTokens: 128_000 },
     ])
     expect(logsWithMessage(logger, CEILING_RETRY_LOG)).toEqual([])
   })
@@ -1642,8 +1642,8 @@ describe("requestReview", () => {
     await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
     ])
   })
 
@@ -1656,8 +1656,8 @@ describe("requestReview", () => {
     await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "deepseek/deepseek-v4.1-flash", maxCompletionTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "deepseek/deepseek-v4.1-flash", maxOutputTokens: 128_000 },
     ])
   })
 
@@ -1670,8 +1670,8 @@ describe("requestReview", () => {
     const result = await client.requestReview(requestParams, logger)
 
     expect(sentCeilings(stub)).toEqual([
-      { model: "z-ai/glm-5.3-flash", maxCompletionTokens: 128_000 },
-      { model: "deepseek/deepseek-v4.1-flash", maxCompletionTokens: 128_000 },
+      { model: "z-ai/glm-5.3-flash", maxOutputTokens: 128_000 },
+      { model: "deepseek/deepseek-v4.1-flash", maxOutputTokens: 128_000 },
     ])
     expect(result.attempts[0]).toEqual({
       model: "z-ai/glm-5.3-flash",
@@ -1963,7 +1963,7 @@ describe("requestReview", () => {
       },
     }
     const { agent } = makeClientStubs({ modelResults: [{ value: makeNoCostResult() }] })
-    const { client, logger } = makeClient({ agent, sdk: sdkWithThrowingLookup })
+    const { client, logger } = makeClient({ agent, costLookupClient: sdkWithThrowingLookup })
 
     const result = await client.requestReview(requestParams, logger)
 
