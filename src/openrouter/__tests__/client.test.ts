@@ -1361,7 +1361,15 @@ describe("requestReview", () => {
       await vi.advanceTimersByTimeAsync(45_000)
       const result = await reviewPromise
 
-      expect(result.attempts[0]?.costUsd).toBeNull()
+      expect(result.attempts).toEqual([
+        {
+          model: requestParams.model,
+          outcome: "accepted",
+          ...ACCEPTED_USAGE,
+          costUsd: null,
+          errorSummary: null,
+        },
+      ])
       expect(logsWithMessage(logger, "request deadline elapsed")).toEqual([
         {
           level: "warn",
@@ -1390,17 +1398,18 @@ describe("requestReview", () => {
   })
 
   it("clears the review attempt timeout timer after a successful response", async () => {
-    const stub = makeClientStubs({
-      modelResults: [{ value: acceptedResult }],
-    })
-    const { client, logger } = makeClient(stub)
-
-    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
+    vi.useFakeTimers()
     try {
+      const stub = makeClientStubs({
+        modelResults: [{ value: acceptedResult }],
+      })
+      const { client, logger } = makeClient(stub)
+
       await client.requestReview(requestParams, logger)
-      expect(clearTimeoutSpy).toHaveBeenCalled()
+
+      expect(vi.getTimerCount()).toBe(0)
     } finally {
-      clearTimeoutSpy.mockRestore()
+      vi.useRealTimers()
     }
   })
 
@@ -1961,7 +1970,15 @@ describe("requestReview", () => {
         },
       },
     ])
-    expect(result.attempts[0]?.costUsd).toBe(0.0399)
+    expect(result.attempts).toEqual([
+      {
+        model: requestParams.model,
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        costUsd: 0.0399,
+        errorSummary: null,
+      },
+    ])
   })
 
   it("degrades to a null cost with a warning when the generation lookup fails", async () => {
@@ -1973,7 +1990,15 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams, logger)
 
-    expect(result.attempts[0]?.costUsd).toBeNull()
+    expect(result.attempts).toEqual([
+      {
+        model: requestParams.model,
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        costUsd: null,
+        errorSummary: null,
+      },
+    ])
     expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
       {
         level: "warn",
@@ -2000,7 +2025,15 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams, logger)
 
-    expect(result.attempts[0]?.costUsd).toBeNull()
+    expect(result.attempts).toEqual([
+      {
+        model: requestParams.model,
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        costUsd: null,
+        errorSummary: null,
+      },
+    ])
     expect(logsWithMessage(logger, "generation cost lookup failed")).toEqual([
       {
         level: "warn",
@@ -2023,7 +2056,15 @@ describe("requestReview", () => {
 
     const result = await client.requestReview(requestParams, logger)
 
-    expect(result.attempts[0]?.costUsd).toBeNull()
+    expect(result.attempts).toEqual([
+      {
+        model: requestParams.model,
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        costUsd: null,
+        errorSummary: null,
+      },
+    ])
     expect(logsWithMessage(logger, "unexpected generation response shape")).toEqual([
       {
         level: "warn",
