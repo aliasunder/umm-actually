@@ -576,6 +576,7 @@ const runReviewPipeline = async (
     stages: ReviewStage[]
   },
   logger: Logger,
+  // eslint-disable-next-line complexity -- this function is over the limit; split it before adding a branch
 ): Promise<OrchestrateResult> => {
   const { config, githubClient, contextReader, generateFindings } = deps
 

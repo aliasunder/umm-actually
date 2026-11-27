@@ -131,6 +131,11 @@ files. Prefer SDK-provided types over redefining shapes.
   guard, each step and each commented declaration, so no comment sits
   directly under the previous statement. ESLint enforces the
   declaration-before-`if` case; the rest is on the author.
+- A function stays at complexity 20 or less, with control statements (`if`,
+  loops, `switch`, `try`) nested at most 4 deep; ESLint enforces both. A
+  function marked `eslint-disable-next-line complexity` takes no new branch,
+  and a function a new branch pushes over the limit gets no new disable.
+  Split out the part being changed first, in its own commit.
 - A function whose returned expression spans lines gets a block body `{}`;
   expression bodies are for one-liners. A multi-clause boolean spanning
   lines gets `{ return (...) }`; guard chains get explicit early returns,
