@@ -1,4 +1,4 @@
-import type { PostModelCallPayload } from "@openrouter/agent"
+import type { OpenResponsesResult, PostModelCallPayload } from "@openrouter/agent"
 import { DateTime } from "luxon"
 import type { Logger } from "../logger.js"
 import {
@@ -60,26 +60,13 @@ export type ReviewRequest = {
 }
 
 /** The fields read from the Responses result the Agent SDK takes from the
- *  stream's completion event.
- *  - The SDK's own schema validates the result before it resolves, so the
- *    client reads it through this structural type rather than parsing it again.
- *  - `status` and `incompleteDetails.reason` are open enums in the SDK, so a
- *    value it does not name still arrives as a string.
- *  - The SDK types `usage` as both nullable and optional. */
-export type ResponsesResult = {
-  id: string
-  model: string
-  status: string
-  incompleteDetails?: { reason?: string | undefined } | null | undefined
-  usage?:
-    | {
-        inputTokens: number
-        outputTokens: number
-        cost?: number | null | undefined
-      }
-    | null
-    | undefined
-}
+ *  stream's completion event. The SDK's own schema validates the result
+ *  before it resolves, so the client reads it through the SDK's type rather
+ *  than parsing it again. */
+export type ResponsesResult = Pick<
+  OpenResponsesResult,
+  "id" | "model" | "status" | "incompleteDetails" | "usage"
+>
 
 /**
  * Structural subset of the Agent SDK client.
@@ -684,43 +671,42 @@ export const createOpenRouterClient = ({
       logger.child({ operation: "review request", model }),
     )
 
-    // Retryable even when the review deadline caused the timeout, because
-    // requestReview checks the deadline before any retry and throws there
-    if (sendResult.status === "timed_out") {
-      return {
-        kind: "failed",
-        attempt: {
-          model,
-          outcome: "timeout",
-          promptTokens: null,
-          completionTokens: null,
-          costUsd: null,
-          durationMs: null,
-          errorSummary: callTimeout.timeoutSummary,
-        },
-        retryable: true,
-        keyRejected: false,
-        generationId: null,
-      }
-    }
-
     const completedCall = completedCalls.at(-1)
 
-    if (sendResult.status === "rejected") {
-      return attemptFromRejection({
-        model,
-        error: sendResult.error,
-        rejectedMaxOutputTokens: reviewRequest.maxOutputTokens,
-        completedCall,
-      })
+    switch (sendResult.status) {
+      // Retryable even when the review deadline caused the timeout, because
+      // requestReview checks the deadline before any retry and throws there
+      case "timed_out":
+        return {
+          kind: "failed",
+          attempt: {
+            model,
+            outcome: "timeout",
+            promptTokens: null,
+            completionTokens: null,
+            costUsd: null,
+            durationMs: null,
+            errorSummary: callTimeout.timeoutSummary,
+          },
+          retryable: true,
+          keyRejected: false,
+          generationId: null,
+        }
+      case "rejected":
+        return attemptFromRejection({
+          model,
+          error: sendResult.error,
+          rejectedMaxOutputTokens: reviewRequest.maxOutputTokens,
+          completedCall,
+        })
+      case "resolved":
+        return attemptFromResponse({
+          model,
+          response: sendResult.value.response,
+          text: sendResult.value.text,
+          completedCall,
+        })
     }
-
-    return attemptFromResponse({
-      model,
-      response: sendResult.value.response,
-      text: sendResult.value.text,
-      completedCall,
-    })
   }
 
   const requestReview: OpenRouterClient["requestReview"] = async (

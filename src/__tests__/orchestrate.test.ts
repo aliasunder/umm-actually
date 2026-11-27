@@ -87,6 +87,22 @@ type CompletedResponse = ResponsesResult & {
   usage: { inputTokens: number; outputTokens: number; cost: number }
 }
 
+/** A completed, priced response from the stubbed SDK. */
+const completedResponse: CompletedResponse = {
+  id: "completed",
+  model: "test/model",
+  status: "completed",
+  incompleteDetails: null,
+  usage: {
+    inputTokens: 10,
+    inputTokensDetails: { cachedTokens: 0 },
+    outputTokens: 20,
+    outputTokensDetails: { reasoningTokens: 0 },
+    totalTokens: 30,
+    cost: 0.01,
+  },
+}
+
 /** A `callModel` result that resolves at once with the response and the
  *  fixture review as its text. Like the Agent SDK, the stub first sends the
  *  request's PostModelCall report, so an accepted attempt carries a duration
@@ -4799,16 +4815,14 @@ describe("staged phases", () => {
       const deadline = Date.now() + 1000
       const remainingReviewMs = () => deadline - Date.now()
       const lateResponse = Promise.withResolvers<ModelCallResult>()
-      const response = {
-        id: "completed",
-        model: "test/model",
-        status: "completed",
-        usage: { inputTokens: 10, outputTokens: 20, cost: 0.01 },
-      }
       const callModel = vi
         .fn<AgentLike["callModel"]>()
-        .mockImplementationOnce((request) => makeCompletedModelResultStub(request, response))
-        .mockImplementationOnce((request) => makeCompletedModelResultStub(request, response))
+        .mockImplementationOnce((request) => {
+          return makeCompletedModelResultStub(request, completedResponse)
+        })
+        .mockImplementationOnce((request) => {
+          return makeCompletedModelResultStub(request, completedResponse)
+        })
         .mockImplementation(() => makePendingModelResultStub(lateResponse.promise))
       const client = createOpenRouterClient({
         agent: { callModel },
@@ -4880,7 +4894,10 @@ describe("staged phases", () => {
         reviews: stubs.postFindingsReviewCalls,
         result,
       })
-      lateResponse.resolve({ response, text: JSON.stringify(fixtureReviewResponse) })
+      lateResponse.resolve({
+        response: completedResponse,
+        text: JSON.stringify(fixtureReviewResponse),
+      })
       await vi.runAllTimersAsync()
       expect({
         checks: stubs.updateCheckRunCalls,
@@ -4894,13 +4911,6 @@ describe("staged phases", () => {
   })
 
   it("tags each parallel phase's client log lines with that phase", async () => {
-    const response = {
-      id: "completed",
-      model: "test/model",
-      status: "completed",
-      usage: { inputTokens: 10, outputTokens: 20, cost: 0.01 },
-    }
-
     // correctness-security is dispatched first, so a logger shared across the
     // concurrent calls would already carry a later phase when its failure logs.
     // The failure is keyed on that phase's prompt text, not on call order
@@ -4917,7 +4927,7 @@ describe("staged phases", () => {
           Promise.reject(Object.assign(new Error("HTTP 500"), { statusCode: 500 })),
         )
       }
-      return makeCompletedModelResultStub(request, response)
+      return makeCompletedModelResultStub(request, completedResponse)
     })
     const client = createOpenRouterClient({
       agent: { callModel },
