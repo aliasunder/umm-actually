@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs"
+import { OpenRouter, type PostModelCallPayload } from "@openrouter/agent"
 
 // @openrouter/sdk is not a declared dependency. These imports read the copy
 // @openrouter/agent installs, so the tests build the same result and error
-// classes production receives
-import { openResponsesResultFromJSON } from "@openrouter/sdk/models"
+// classes, and the same HTTP client, production receives
+import { HTTPClient, type Fetcher } from "@openrouter/sdk/lib/http"
+import { openResponsesResultFromJSON, type OpenResponsesResult } from "@openrouter/sdk/models"
 import {
   OpenRouterError,
   ResponsesBadRequestResponseError,
@@ -18,7 +20,6 @@ import {
   createOpenRouterClient,
   ReviewRequestError,
   type AgentLike,
-  type ResponsesResult,
   type ReviewRequest,
 } from "../client.js"
 
@@ -78,8 +79,8 @@ const extractMessageText = (payload: unknown): string => {
 
 /** What the Agent SDK hands the client for a wire payload: the payload run
  *  through the SDK's own transform, here also a drift guard on hand-edited
- *  fixtures. */
-const transformWirePayload = (payload: unknown): ResponsesResult => {
+ *  fixtures. The stub reads the full result to build its call report. */
+const transformWirePayload = (payload: unknown): OpenResponsesResult => {
   const transformed = openResponsesResultFromJSON(JSON.stringify(payload))
 
   if (!transformed.ok) throw transformed.error
@@ -88,7 +89,37 @@ const transformWirePayload = (payload: unknown): ResponsesResult => {
 
 /** What one `callModel` stub call resolves: the transformed response and the
  *  SDK-extracted text, as the client reads them. */
-type ModelCallResult = { response: ResponsesResult; text: string }
+type ModelCallResult = { response: OpenResponsesResult; text: string }
+
+/** The duration every stub call report carries. */
+const STUB_CALL_DURATION_MS = 1234
+
+/** The report the Agent SDK's PostModelCall hook receives for a completed
+ *  call, with the stub's fixed duration in place of a measured one. */
+const makeCallReport = (response: OpenResponsesResult): PostModelCallPayload => {
+  const reportedUsage = response.usage
+    ? {
+        usage: {
+          inputTokens: response.usage.inputTokens,
+          outputTokens: response.usage.outputTokens,
+          totalTokens: response.usage.totalTokens,
+          cachedTokens: response.usage.inputTokensDetails.cachedTokens,
+          reasoningTokens: response.usage.outputTokensDetails.reasoningTokens,
+          ...(typeof response.usage.cost === "number" ? { cost: response.usage.cost } : {}),
+        },
+      }
+    : {}
+
+  return {
+    sessionId: "",
+    responseId: response.id,
+    model: response.model,
+    durationMs: STUB_CALL_DURATION_MS,
+    turnType: "initial",
+    turnNumber: 0,
+    ...reportedUsage,
+  }
+}
 
 const toModelCallResult = (payload: unknown): ModelCallResult => ({
   response: transformWirePayload(payload),
@@ -114,43 +145,91 @@ const makeNoUsageResult = (): ModelCallResult => {
 }
 
 /** The accepted payload with only its reasoning item, so the SDK extracts no text. */
-const makeReasoningOnlyResult = (): ModelCallResult => {
+const makeReasoningOnlyPayload = (): z.infer<typeof acceptedPayloadSchema> => {
   const payload = parseAcceptedPayload()
   const reasoningItems = payload.output.filter((item) => item.type === "reasoning")
-  return toModelCallResult({ ...payload, output: reasoningItems })
+  return { ...payload, output: reasoningItems }
 }
 
-/** `pending` hands the call's request to a custom promise — for a request
- *  that never settles, settles late, or honours the abort signal. */
+/** The accepted payload with no output items: the empty final turn the SDK
+ *  rejects after its call report. */
+const makeEmptyOutputPayload = (): z.infer<typeof acceptedPayloadSchema> => {
+  return { ...parseAcceptedPayload(), output: [] }
+}
+
+/** A payload the provider marked as stopped early, with the given
+ *  `incomplete_details` wire field. */
+const makeIncompleteResult = ({
+  payload,
+  incompleteDetails,
+}: {
+  payload: unknown
+  incompleteDetails: { reason: string } | null
+}): ModelCallResult => {
+  return toModelCallResult({
+    ...wirePayloadSchema.parse(payload),
+    status: "incomplete",
+    incomplete_details: incompleteDetails,
+  })
+}
+
+/** The error the Agent SDK throws for the empty-output payload's final turn. */
+const EMPTY_OUTPUT_REJECTION_MESSAGE = `Invalid final response: empty or invalid output — output array is empty (length 0) for response "${ACCEPTED_GENERATION_ID}". The model returned no output items. This can happen when the provider returns an empty final turn; see the strictFinalResponse/allowFinalResponse options`
+
+/** That error's attempt summary, cut at the client's 200-character cap. */
+const EMPTY_OUTPUT_REJECTION_SUMMARY = `Invalid final response: empty or invalid output — output array is empty (length 0) for response "${ACCEPTED_GENERATION_ID}". The model returned no output items. This can happen when the prov…`
+
+/** How one stub call settles. The stub sends the call report the SDK would,
+ *  before the call settles:
+ *  - `value` and a resolved `pending` report their response.
+ *  - `error` reports `completedResponse` when one is given: a call the SDK
+ *    rejected after the model call completed, such as an empty final turn.
+ *  - `pending` hands the call's request to a custom promise, for a request
+ *    that never settles, settles late, or honours the abort signal. */
 type StubModelResult =
   | { value: ModelCallResult }
-  | { error: unknown }
+  | { error: unknown; completedResponse?: OpenResponsesResult }
   | { pending: (request: { signal: AbortSignal }) => Promise<ModelCallResult> }
+
+type StubRequest = Parameters<AgentLike["callModel"]>[0]
+
+/** Runs the request's PostModelCall handlers with the report for `response`. */
+const reportCompletedCall = (request: StubRequest, response: OpenResponsesResult): void => {
+  const report = makeCallReport(response)
+
+  for (const { handler } of request.hooks.PostModelCall) handler(report)
+}
 
 const makeClientStubs = ({ modelResults }: { modelResults: StubModelResult[] }) => {
   const modelCalls: {
-    request: ReviewRequest & { signal: AbortSignal }
+    request: StubRequest
     options: { retries?: { strategy: "backoff" | "none" } } | undefined
   }[] = []
 
-  const takeNextModelResult = (request: { signal: AbortSignal }): Promise<ModelCallResult> => {
+  const takeNextModelResult = async (request: StubRequest): Promise<ModelCallResult> => {
     const next = modelResults.at(modelCalls.length - 1)
 
     if (!next) {
       throw new Error(`stub: unexpected callModel call #${modelCalls.length}`)
     }
-    if ("error" in next) throw next.error
-    if ("pending" in next) return next.pending(request)
-    return Promise.resolve(next.value)
+
+    if ("error" in next) {
+      if (next.completedResponse) reportCompletedCall(request, next.completedResponse)
+      throw next.error
+    }
+
+    const result = "pending" in next ? await next.pending(request) : next.value
+    reportCompletedCall(request, result.response)
+    return result
   }
 
   const agent: AgentLike = {
     callModel: (request, options) => {
       modelCalls.push({ request, options })
 
-      // Promise.try settles a synchronous throw from the queue as a rejection,
-      // the way the SDK's materialized stream rejects
-      const settled = Promise.try(takeNextModelResult, request)
+      // The async queue read settles every stub error as a rejection, the way
+      // the SDK's materialized stream rejects
+      const settled = takeNextModelResult(request)
       return {
         getResponse: async () => (await settled).response,
         getText: async () => (await settled).text,
@@ -350,6 +429,7 @@ describe("requestReview", () => {
                   promptTokens: null,
                   completionTokens: null,
                   costUsd: null,
+                  durationMs: null,
                   errorSummary: "HTTP 400: HTTP 400",
                 },
               ]
@@ -360,6 +440,7 @@ describe("requestReview", () => {
             promptTokens: null,
             completionTokens: null,
             costUsd: null,
+            durationMs: null,
             errorSummary: "review deadline exceeded",
           },
         ]
@@ -424,6 +505,7 @@ describe("requestReview", () => {
             model: requestParams.model,
             outcome: "invalid_json",
             ...ACCEPTED_USAGE,
+            durationMs: STUB_CALL_DURATION_MS,
             errorSummary: "response content is not valid JSON",
           },
         ],
@@ -465,6 +547,7 @@ describe("requestReview", () => {
           model: requestParams.model,
           outcome: "accepted",
           ...ACCEPTED_USAGE,
+          durationMs: STUB_CALL_DURATION_MS,
           errorSummary: null,
         },
       ],
@@ -494,6 +577,7 @@ describe("requestReview", () => {
             },
           },
           signal: expect.any(AbortSignal),
+          hooks: { PostModelCall: [{ handler: expect.any(Function) }] },
         },
         options: { retries: { strategy: "none" } },
       },
@@ -516,6 +600,7 @@ describe("requestReview", () => {
           promptTokens: 54,
           completionTokens: 102,
           costUsd: 0.000021036,
+          durationMs: STUB_CALL_DURATION_MS,
           errorSummary: null,
         },
       ],
@@ -539,6 +624,7 @@ describe("requestReview", () => {
           model: "openrouter/auto",
           outcome: "accepted",
           ...ACCEPTED_USAGE,
+          durationMs: STUB_CALL_DURATION_MS,
           errorSummary: null,
         },
       ],
@@ -576,6 +662,7 @@ describe("requestReview", () => {
         promptTokens: 54,
         completionTokens: 102,
         costUsd: 0.000021036,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: "response content is not valid JSON",
       },
       {
@@ -584,6 +671,7 @@ describe("requestReview", () => {
         promptTokens: 54,
         completionTokens: 102,
         costUsd: 0.000021036,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
@@ -591,7 +679,10 @@ describe("requestReview", () => {
 
   it("records empty_content and retries the same model once when the SDK extracts no text", async () => {
     const stub = makeClientStubs({
-      modelResults: [{ value: makeReasoningOnlyResult() }, { value: acceptedResult }],
+      modelResults: [
+        { value: toModelCallResult(makeReasoningOnlyPayload()) },
+        { value: acceptedResult },
+      ],
     })
     const { client, logger } = makeClient(stub)
 
@@ -602,6 +693,7 @@ describe("requestReview", () => {
         model: "z-ai/glm-5.3-flash",
         outcome: "empty_content",
         ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: "response had no text content",
       },
       {
@@ -610,9 +702,249 @@ describe("requestReview", () => {
         promptTokens: 54,
         completionTokens: 102,
         costUsd: 0.000021036,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
+  })
+
+  it("records the SDK's empty-output rejection as a billed empty_content attempt and logs its generation id", async () => {
+    const stub = makeClientStubs({
+      modelResults: [
+        {
+          error: new Error(EMPTY_OUTPUT_REJECTION_MESSAGE),
+          completedResponse: transformWirePayload(makeEmptyOutputPayload()),
+        },
+        { value: acceptedResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "empty_content",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: EMPTY_OUTPUT_REJECTION_SUMMARY,
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: null,
+      },
+    ])
+    expect(logsWithMessage(logger, "review attempt failed")).toEqual([
+      {
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          model: "z-ai/glm-5.3-flash",
+          modelAttemptNumber: 1,
+          outcome: "empty_content",
+          errorSummary: EMPTY_OUTPUT_REJECTION_SUMMARY,
+          generationId: ACCEPTED_GENERATION_ID,
+        },
+      },
+    ])
+  })
+
+  it("keeps api_error for a missing-fields rejection while recording the reported call's usage and duration", async () => {
+    const stub = makeClientStubs({
+      modelResults: [
+        {
+          error: new Error("Invalid final response: missing required fields: output"),
+          completedResponse: acceptedResult.response,
+        },
+        { value: acceptedResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "api_error",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: "Invalid final response: missing required fields: output",
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: null,
+      },
+    ])
+    expect(logsWithMessage(logger, "review attempt failed")).toEqual([
+      {
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          model: "z-ai/glm-5.3-flash",
+          modelAttemptNumber: 1,
+          outcome: "api_error",
+          errorSummary: "Invalid final response: missing required fields: output",
+          generationId: ACCEPTED_GENERATION_ID,
+        },
+      },
+    ])
+  })
+
+  it("records response_incomplete with the provider's reason when an incomplete response is not valid JSON, then retries", async () => {
+    const stub = makeClientStubs({
+      modelResults: [
+        {
+          value: makeIncompleteResult({
+            payload: invalidJsonWirePayload,
+            incompleteDetails: { reason: "max_output_tokens" },
+          }),
+        },
+        { value: acceptedResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(stub.modelCalls.map((modelCall) => modelCall.request.model)).toEqual([
+      "z-ai/glm-5.3-flash",
+      "z-ai/glm-5.3-flash",
+    ])
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "response_incomplete",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: "response incomplete: max_output_tokens",
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: null,
+      },
+    ])
+    expect(logsWithMessage(logger, "review attempt failed")).toEqual([
+      {
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          model: "z-ai/glm-5.3-flash",
+          modelAttemptNumber: 1,
+          outcome: "response_incomplete",
+          errorSummary: "response incomplete: max_output_tokens",
+          generationId: ACCEPTED_GENERATION_ID,
+        },
+      },
+    ])
+  })
+
+  it("records response_incomplete, not empty_content, for an incomplete reasoning-only response", async () => {
+    const stub = makeClientStubs({
+      modelResults: [
+        {
+          value: makeIncompleteResult({
+            payload: makeReasoningOnlyPayload(),
+            incompleteDetails: { reason: "content_filter" },
+          }),
+        },
+        { value: acceptedResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "response_incomplete",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: "response incomplete: content_filter",
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: null,
+      },
+    ])
+  })
+
+  it("names an unknown reason when an incomplete response that fails the schema carries no incomplete details", async () => {
+    const stub = makeClientStubs({
+      modelResults: [
+        {
+          value: makeIncompleteResult({
+            payload: schemaMismatchWirePayload,
+            incompleteDetails: null,
+          }),
+        },
+        { value: acceptedResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "response_incomplete",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: "response incomplete: unknown reason",
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: null,
+      },
+    ])
+  })
+
+  it("accepts a schema-valid review even when the response reports itself incomplete", async () => {
+    const stub = makeClientStubs({
+      modelResults: [
+        {
+          value: makeIncompleteResult({
+            payload: acceptedWirePayload,
+            incompleteDetails: { reason: "max_output_tokens" },
+          }),
+        },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result).toEqual({
+      review: acceptedReview,
+      modelUsed: "z-ai/glm-5.3-flash",
+      attempts: [
+        {
+          model: "z-ai/glm-5.3-flash",
+          outcome: "accepted",
+          ...ACCEPTED_USAGE,
+          durationMs: STUB_CALL_DURATION_MS,
+          errorSummary: null,
+        },
+      ],
+    })
   })
 
   it("advances to the fallback model after two schema mismatches", async () => {
@@ -639,6 +971,7 @@ describe("requestReview", () => {
       promptTokens: 54,
       completionTokens: 102,
       costUsd: 0.000021036,
+      durationMs: STUB_CALL_DURATION_MS,
       errorSummary:
         "schema mismatch at analysis: Invalid input: expected string, received undefined",
     }
@@ -651,6 +984,7 @@ describe("requestReview", () => {
         promptTokens: 54,
         completionTokens: 102,
         costUsd: 0.000021036,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
@@ -675,12 +1009,14 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: null,
         errorSummary: `HTTP ${statusCode}: HTTP ${statusCode}`,
       },
       {
         model: "z-ai/glm-5.3-flash",
         outcome: "accepted",
         ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
@@ -705,12 +1041,14 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: null,
         errorSummary: "HTTP 200: Response validation failed",
       },
       {
         model: "z-ai/glm-5.3-flash",
         outcome: "accepted",
         ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
@@ -735,12 +1073,14 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: null,
         errorSummary: "socket hang up",
       },
       {
         model: "z-ai/glm-5.3-flash",
         outcome: "accepted",
         ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
@@ -775,12 +1115,14 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: null,
         errorSummary: "Request timed out",
       },
       {
         model: "z-ai/glm-5.3-flash",
         outcome: "accepted",
         ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
@@ -864,6 +1206,7 @@ describe("requestReview", () => {
               promptTokens: null,
               completionTokens: null,
               costUsd: null,
+              durationMs: null,
               errorSummary: "no response within 45s",
             },
             {
@@ -872,6 +1215,7 @@ describe("requestReview", () => {
               promptTokens: null,
               completionTokens: null,
               costUsd: null,
+              durationMs: null,
               errorSummary: "no response within 45s",
             },
           ],
@@ -931,6 +1275,7 @@ describe("requestReview", () => {
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
+          durationMs: null,
           errorSummary: "no response within 45s",
         },
         {
@@ -939,6 +1284,7 @@ describe("requestReview", () => {
           promptTokens: 54,
           completionTokens: 102,
           costUsd: 0.000021036,
+          durationMs: STUB_CALL_DURATION_MS,
           errorSummary: null,
         },
       ])
@@ -1162,6 +1508,7 @@ describe("requestReview", () => {
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
+          durationMs: null,
           errorSummary: "no response within 45s",
         },
         {
@@ -1170,6 +1517,7 @@ describe("requestReview", () => {
           promptTokens: 54,
           completionTokens: 102,
           costUsd: 0.000021036,
+          durationMs: STUB_CALL_DURATION_MS,
           errorSummary: null,
         },
       ])
@@ -1216,6 +1564,7 @@ describe("requestReview", () => {
               promptTokens: null,
               completionTokens: null,
               costUsd: null,
+              durationMs: null,
               errorSummary: "no response within 45s",
             },
             {
@@ -1224,6 +1573,7 @@ describe("requestReview", () => {
               promptTokens: null,
               completionTokens: null,
               costUsd: null,
+              durationMs: null,
               errorSummary: "no response within 45s",
             },
             {
@@ -1232,6 +1582,7 @@ describe("requestReview", () => {
               promptTokens: null,
               completionTokens: null,
               costUsd: null,
+              durationMs: null,
               errorSummary: "no response within 45s",
             },
           ],
@@ -1323,6 +1674,7 @@ describe("requestReview", () => {
               promptTokens: null,
               completionTokens: null,
               costUsd: null,
+              durationMs: null,
               errorSummary: "HTTP 429: HTTP 429",
             },
             {
@@ -1331,6 +1683,7 @@ describe("requestReview", () => {
               promptTokens: null,
               completionTokens: null,
               costUsd: null,
+              durationMs: null,
               errorSummary: "HTTP 429: HTTP 429",
             },
           ],
@@ -1364,12 +1717,14 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: null,
         errorSummary: `HTTP 429: ${"x".repeat(200)}…`,
       },
       {
         model: "z-ai/glm-5.3-flash",
         outcome: "accepted",
         ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
@@ -1394,6 +1749,7 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: null,
         errorSummary: "HTTP 404: HTTP 404",
       },
       {
@@ -1402,6 +1758,7 @@ describe("requestReview", () => {
         promptTokens: 54,
         completionTokens: 102,
         costUsd: 0.000021036,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
@@ -1433,6 +1790,7 @@ describe("requestReview", () => {
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
+          durationMs: null,
           errorSummary:
             "HTTP 400: This endpoint's maximum context length is 262144 tokens. However, you requested about 263762 tokens (135762 of text input, 128000 in the output). Please reduce the length of either one, or use the con…",
         },
@@ -1442,6 +1800,7 @@ describe("requestReview", () => {
           promptTokens: 54,
           completionTokens: 102,
           costUsd: 0.000021036,
+          durationMs: STUB_CALL_DURATION_MS,
           errorSummary: null,
         },
       ],
@@ -1618,6 +1977,7 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: null,
         errorSummary:
           "HTTP 400: This endpoint's maximum context length is 8192 tokens. However, you requested about 11593 tokens (4593 of text input, 7000 in the output). Please reduce the length of either one, or use the context-co…",
       },
@@ -1625,6 +1985,7 @@ describe("requestReview", () => {
         model: "deepseek/deepseek-v4.1-flash",
         outcome: "accepted",
         ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
@@ -1649,6 +2010,7 @@ describe("requestReview", () => {
             promptTokens: null,
             completionTokens: null,
             costUsd: null,
+            durationMs: null,
             errorSummary: "HTTP 401: User not found.",
           },
         ],
@@ -1676,6 +2038,7 @@ describe("requestReview", () => {
               promptTokens: null,
               completionTokens: null,
               costUsd: null,
+              durationMs: null,
               errorSummary: `HTTP ${statusCode}: HTTP ${statusCode}`,
             },
           ],
@@ -1705,6 +2068,7 @@ describe("requestReview", () => {
             promptTokens: null,
             completionTokens: null,
             costUsd: null,
+            durationMs: null,
             errorSummary: "HTTP 500: HTTP 500",
           },
           {
@@ -1713,6 +2077,7 @@ describe("requestReview", () => {
             promptTokens: null,
             completionTokens: null,
             costUsd: null,
+            durationMs: null,
             errorSummary: "HTTP 503: HTTP 503",
           },
         ],
@@ -1743,6 +2108,7 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: null,
         errorSummary: "HTTP 500: HTTP 500",
       },
       {
@@ -1751,6 +2117,7 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: null,
         errorSummary: "HTTP 503: HTTP 503",
       },
     ])
@@ -1775,6 +2142,7 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: null,
         errorSummary: "HTTP 402: HTTP 402",
       },
     ])
@@ -1802,6 +2170,7 @@ describe("requestReview", () => {
             promptTokens: 54,
             completionTokens: 102,
             costUsd: 0.000021036,
+            durationMs: STUB_CALL_DURATION_MS,
             errorSummary: "response content is not valid JSON",
           },
           {
@@ -1810,6 +2179,7 @@ describe("requestReview", () => {
             promptTokens: 54,
             completionTokens: 102,
             costUsd: 0.000021036,
+            durationMs: STUB_CALL_DURATION_MS,
             errorSummary: "response content is not valid JSON",
           },
           {
@@ -1818,6 +2188,7 @@ describe("requestReview", () => {
             promptTokens: 54,
             completionTokens: 102,
             costUsd: 0.000021036,
+            durationMs: STUB_CALL_DURATION_MS,
             errorSummary: "response content is not valid JSON",
           },
           {
@@ -1826,6 +2197,7 @@ describe("requestReview", () => {
             promptTokens: 54,
             completionTokens: 102,
             costUsd: 0.000021036,
+            durationMs: STUB_CALL_DURATION_MS,
             errorSummary: "response content is not valid JSON",
           },
         ],
@@ -1850,6 +2222,7 @@ describe("requestReview", () => {
         promptTokens: null,
         completionTokens: null,
         costUsd: null,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
@@ -1867,8 +2240,183 @@ describe("requestReview", () => {
         outcome: "accepted",
         ...ACCEPTED_USAGE,
         costUsd: null,
+        durationMs: STUB_CALL_DURATION_MS,
         errorSummary: null,
       },
     ])
+  })
+})
+
+/** A streamed Responses body as OpenRouter sends it: a created event with no
+ *  output yet, then the completed event carrying the whole payload. */
+const makeStreamedWireResponse = (payload: z.infer<typeof wirePayloadSchema>): Response => {
+  const createdEvent = {
+    type: "response.created",
+    sequence_number: 0,
+    response: { ...payload, status: "in_progress", output: [] },
+  }
+  const completedEvent = { type: "response.completed", sequence_number: 1, response: payload }
+  const body = [createdEvent, completedEvent]
+    .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+    .join("")
+
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })
+}
+
+const makeJsonErrorWireResponse = (statusCode: number, body: unknown): Response => {
+  return new Response(JSON.stringify(body), {
+    status: statusCode,
+    headers: { "content-type": "application/json" },
+  })
+}
+
+/** The one request-body field the real-SDK tests read back. */
+const sentRequestBodySchema = z.looseObject({ model: z.string() })
+
+/** The real Agent SDK client, whose HTTP client answers each request with the
+ *  next wire response in order. `sentModels` records each request's model. */
+const makeRealSdkAgent = (
+  wireResponses: Response[],
+): { agent: AgentLike; sentModels: string[] } => {
+  const sentModels: string[] = []
+
+  const fetcher: Fetcher = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    sentModels.push(sentRequestBodySchema.parse(await request.json()).model)
+    const wireResponse = wireResponses.at(sentModels.length - 1)
+
+    if (!wireResponse) throw new Error(`fetcher: unexpected request #${sentModels.length}`)
+    return wireResponse
+  }
+
+  const agent = new OpenRouter({ apiKey: "sk-or-test", httpClient: new HTTPClient({ fetcher }) })
+  return { agent, sentModels }
+}
+
+/** A real call's duration varies from run to run, so these tests check only
+ *  that the SDK measured one. */
+const measuredDuration = expect.toSatisfy((durationMs: unknown) => {
+  return typeof durationMs === "number" && durationMs >= 0
+}, "a measured, non-negative duration")
+
+describe("requestReview through the real Agent SDK", () => {
+  it("accepts the captured stream with its usage and a measured duration", async () => {
+    const realSdk = makeRealSdkAgent([makeStreamedWireResponse(parseAcceptedPayload())])
+    const { client, logger } = makeClient(realSdk)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result).toEqual({
+      review: acceptedReview,
+      modelUsed: "z-ai/glm-5.3-flash",
+      attempts: [
+        {
+          model: "z-ai/glm-5.3-flash",
+          outcome: "accepted",
+          ...ACCEPTED_USAGE,
+          durationMs: measuredDuration,
+          errorSummary: null,
+        },
+      ],
+    })
+    expect(realSdk.sentModels).toEqual(["z-ai/glm-5.3-flash"])
+  })
+
+  it("records the captured stream with an empty output as a billed empty_content attempt, then retries", async () => {
+    const realSdk = makeRealSdkAgent([
+      makeStreamedWireResponse(makeEmptyOutputPayload()),
+      makeStreamedWireResponse(parseAcceptedPayload()),
+    ])
+    const { client, logger } = makeClient(realSdk)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "empty_content",
+        ...ACCEPTED_USAGE,
+        durationMs: measuredDuration,
+        errorSummary: EMPTY_OUTPUT_REJECTION_SUMMARY,
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        durationMs: measuredDuration,
+        errorSummary: null,
+      },
+    ])
+    expect(logsWithMessage(logger, "review attempt failed")).toEqual([
+      {
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          model: "z-ai/glm-5.3-flash",
+          modelAttemptNumber: 1,
+          outcome: "empty_content",
+          errorSummary: EMPTY_OUTPUT_REJECTION_SUMMARY,
+          generationId: ACCEPTED_GENERATION_ID,
+        },
+      },
+    ])
+    expect(realSdk.sentModels).toEqual(["z-ai/glm-5.3-flash", "z-ai/glm-5.3-flash"])
+  })
+
+  it("stops the ladder as key-rejected after one call on the captured bad-key body", async () => {
+    const realSdk = makeRealSdkAgent([makeJsonErrorWireResponse(401, badKeyErrorBody)])
+    const { client, logger } = makeClient(realSdk)
+
+    await expect(client.requestReview(requestParams, logger)).rejects.toThrow(
+      new ReviewRequestError({
+        message:
+          "OpenRouter auth/credit error — aborting without fallback: z-ai/glm-5.3-flash: api_error (HTTP 401: User not found.)",
+        attempts: [
+          {
+            model: "z-ai/glm-5.3-flash",
+            outcome: "api_error",
+            promptTokens: null,
+            completionTokens: null,
+            costUsd: null,
+            durationMs: null,
+            errorSummary: "HTTP 401: User not found.",
+          },
+        ],
+        keyRejected: true,
+      }),
+    )
+    expect(realSdk.sentModels).toEqual(["z-ai/glm-5.3-flash"])
+  })
+
+  it("advances to the fallback with no fitted retry on the captured overflow body", async () => {
+    const realSdk = makeRealSdkAgent([
+      makeJsonErrorWireResponse(400, overflowErrorBody),
+      makeStreamedWireResponse(parseAcceptedPayload()),
+    ])
+    const { client, logger } = makeClient(realSdk)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        durationMs: null,
+        errorSummary:
+          "HTTP 400: This endpoint's maximum context length is 8192 tokens. However, you requested about 11593 tokens (4593 of text input, 7000 in the output). Please reduce the length of either one, or use the context-co…",
+      },
+      {
+        model: "deepseek/deepseek-v4.1-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        durationMs: measuredDuration,
+        errorSummary: null,
+      },
+    ])
+    expect(realSdk.sentModels).toEqual(["z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash"])
+    expect(logsWithMessage(logger, CEILING_RETRY_LOG)).toEqual([])
   })
 })

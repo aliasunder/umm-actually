@@ -8,12 +8,13 @@ const acceptedAttempt: PhaseAttempt = {
   promptTokens: 12000,
   completionTokens: 800,
   costUsd: 0.0421,
+  durationMs: 12_300,
   errorSummary: null,
 }
 
 const tableHeader = [
-  "| attempt | phase | model | outcome | prompt tokens | completion tokens | cost |",
-  "| --- | --- | --- | --- | --- | --- | --- |",
+  "| attempt | phase | model | outcome | duration | prompt tokens | completion tokens | cost |",
+  "| --- | --- | --- | --- | --- | --- | --- | --- |",
 ]
 
 describe("renderCostSummary", () => {
@@ -36,7 +37,7 @@ describe("renderCostSummary", () => {
     )
   })
 
-  it("renders a timeout attempt row verbatim with n/a cells", () => {
+  it("renders a timeout row with n/a cells beside an accepted row's duration in seconds", () => {
     const timeoutAttempt: PhaseAttempt = {
       phase: "combined",
       model: "openai/gpt-5-mini",
@@ -44,6 +45,7 @@ describe("renderCostSummary", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "no response within 600s",
     }
     const summary = renderCostSummary({
@@ -58,8 +60,8 @@ describe("renderCostSummary", () => {
         "Model used: openai/gpt-5-mini",
         "",
         ...tableHeader,
-        "| 1 | combined | openai/gpt-5-mini | timeout | n/a | n/a | n/a |",
-        "| 2 | combined | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
+        "| 1 | combined | openai/gpt-5-mini | timeout | n/a | n/a | n/a | n/a |",
+        "| 2 | combined | openai/gpt-5-mini | accepted | 12.3s | 12000 | 800 | $0.042100 |",
         "",
         "Total cost: $0.042100 (some attempts unpriced)",
       ].join("\n"),
@@ -79,7 +81,7 @@ describe("renderCostSummary", () => {
         "Model used: openai/gpt-5-mini",
         "",
         ...tableHeader,
-        "| 1 | combined | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
+        "| 1 | combined | openai/gpt-5-mini | accepted | 12.3s | 12000 | 800 | $0.042100 |",
         "",
         "Total cost: $0.042100",
       ].join("\n"),
@@ -94,6 +96,7 @@ describe("renderCostSummary", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "HTTP 500: boom",
     }
 
@@ -109,8 +112,8 @@ describe("renderCostSummary", () => {
         "Model used: openai/gpt-5-mini",
         "",
         ...tableHeader,
-        "| 1 | combined | openai/gpt-5-mini | api_error | n/a | n/a | n/a |",
-        "| 2 | combined | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
+        "| 1 | combined | openai/gpt-5-mini | api_error | n/a | n/a | n/a | n/a |",
+        "| 2 | combined | openai/gpt-5-mini | accepted | 12.3s | 12000 | 800 | $0.042100 |",
         "",
         "Total cost: $0.042100 (some attempts unpriced)",
       ].join("\n"),
@@ -125,6 +128,7 @@ describe("renderCostSummary", () => {
       promptTokens: 11000,
       completionTokens: 600,
       costUsd: 0.01,
+      durationMs: 8_000,
       errorSummary: null,
     }
 
@@ -140,8 +144,8 @@ describe("renderCostSummary", () => {
         "Model used: anthropic/claude-haiku-4.5",
         "",
         ...tableHeader,
-        "| 1 | combined | openai/gpt-5-mini | schema_mismatch | 12000 | 800 | $0.042100 |",
-        "| 2 | combined | anthropic/claude-haiku-4.5 | accepted | 11000 | 600 | $0.010000 |",
+        "| 1 | combined | openai/gpt-5-mini | schema_mismatch | 12.3s | 12000 | 800 | $0.042100 |",
+        "| 2 | combined | anthropic/claude-haiku-4.5 | accepted | 8.0s | 11000 | 600 | $0.010000 |",
         "",
         "Total cost: $0.052100",
       ].join("\n"),
@@ -172,9 +176,9 @@ describe("renderCostSummary", () => {
         "Model used: openai/gpt-5-mini, anthropic/claude-haiku-4.5",
         "",
         ...tableHeader,
-        "| 1 | correctness-security | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
-        "| 2 | conventions-tests | anthropic/claude-haiku-4.5 | accepted | 11000 | 600 | $0.010000 |",
-        "| 3 | subtle-bugs | openai/gpt-5-mini | accepted | 12000 | 800 | $0.042100 |",
+        "| 1 | correctness-security | openai/gpt-5-mini | accepted | 12.3s | 12000 | 800 | $0.042100 |",
+        "| 2 | conventions-tests | anthropic/claude-haiku-4.5 | accepted | 12.3s | 11000 | 600 | $0.010000 |",
+        "| 3 | subtle-bugs | openai/gpt-5-mini | accepted | 12.3s | 12000 | 800 | $0.042100 |",
         "",
         "Total cost: $0.094200",
       ].join("\n"),
@@ -199,7 +203,7 @@ describe("renderCostSummary", () => {
         "Model used: openai/gpt-5-mini",
         "",
         ...tableHeader,
-        "| 1 | combined | openai/gpt-5-mini | accepted | 12000 | 800 | n/a |",
+        "| 1 | combined | openai/gpt-5-mini | accepted | 12.3s | 12000 | 800 | n/a |",
         "",
         "Total cost: n/a",
       ].join("\n"),

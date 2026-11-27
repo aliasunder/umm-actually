@@ -100,6 +100,7 @@ const fixtureAttempt: ModelAttempt = {
   promptTokens: 1000,
   completionTokens: 500,
   costUsd: 0.01,
+  durationMs: 12_300,
   errorSummary: null,
 }
 
@@ -4767,6 +4768,7 @@ describe("staged phases", () => {
       const response = {
         id: "completed",
         model: "test/model",
+        status: "completed",
         usage: { inputTokens: 10, outputTokens: 20, cost: 0.01 },
       }
       const callModel = vi
@@ -4861,6 +4863,7 @@ describe("staged phases", () => {
     const response = {
       id: "completed",
       model: "test/model",
+      status: "completed",
       usage: { inputTokens: 10, outputTokens: 20, cost: 0.01 },
     }
 
@@ -4948,6 +4951,7 @@ describe("staged phases", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "no response within 900s",
     }
     const stubs = makeOrchestrateDeps({
@@ -5114,6 +5118,7 @@ describe("staged phases", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "HTTP 402: HTTP 402",
     }
     const stubs = makeOrchestrateDeps({
@@ -5184,6 +5189,7 @@ describe("staged phases", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "no response within 900s",
     }
     const stubs = makeOrchestrateDeps({
@@ -5240,6 +5246,7 @@ describe("staged phases", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "no response within 900s",
     }
     const stubs = makeOrchestrateDeps({
@@ -5293,6 +5300,7 @@ describe("staged phases", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "no response within 900s",
     }
     const fallbackTimeout: ModelAttempt = { ...primaryTimeout, model: "fallback/model" }
