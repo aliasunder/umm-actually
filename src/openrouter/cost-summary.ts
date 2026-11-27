@@ -3,10 +3,15 @@ import type { ModelAttempt } from "./client.js"
 /** An attempt tagged with the review phase that made it. */
 export type PhaseAttempt = ModelAttempt & { phase: string }
 
-const formatCost = (costUsd: number | null): string =>
-  costUsd === null ? "n/a" : `$${costUsd.toFixed(6)}`
+const formatCost = (costUsd: number | null): string => {
+  return costUsd === null ? "n/a" : `$${costUsd.toFixed(6)}`
+}
 
 const formatTokens = (tokens: number | null): string => (tokens === null ? "n/a" : String(tokens))
+
+const formatDuration = (durationMs: number | null): string => {
+  return durationMs === null ? "n/a" : `${(durationMs / 1000).toFixed(1)}s`
+}
 
 /** Markdown table for the workflow job summary — one row per attempt across
  *  every phase, failed ones included (any attempt that reached the provider
@@ -18,14 +23,13 @@ export const renderCostSummary = ({
   attempts: PhaseAttempt[]
   modelUsed: string
 }): string => {
-  const rows = attempts.map(
-    (attempt, attemptIndex) =>
-      `| ${attemptIndex + 1} | ${attempt.phase} | ${attempt.model} | ${attempt.outcome} | ${formatTokens(attempt.promptTokens)} | ${formatTokens(attempt.completionTokens)} | ${formatCost(attempt.costUsd)} |`,
-  )
+  const rows = attempts.map((attempt, attemptIndex) => {
+    return `| ${attemptIndex + 1} | ${attempt.phase} | ${attempt.model} | ${attempt.outcome} | ${formatDuration(attempt.durationMs)} | ${formatTokens(attempt.promptTokens)} | ${formatTokens(attempt.completionTokens)} | ${formatCost(attempt.costUsd)} |`
+  })
 
-  const knownCosts = attempts.flatMap((attempt) =>
-    attempt.costUsd === null ? [] : [attempt.costUsd],
-  )
+  const knownCosts = attempts.flatMap((attempt) => {
+    return attempt.costUsd === null ? [] : [attempt.costUsd]
+  })
   const totalCost = knownCosts.reduce((sum, costUsd) => sum + costUsd, 0)
   const unpricedSuffix = knownCosts.length < attempts.length ? " (some attempts unpriced)" : ""
   const totalLine =
@@ -38,8 +42,8 @@ export const renderCostSummary = ({
     "",
     `Model used: ${modelUsed}`,
     "",
-    "| attempt | phase | model | outcome | prompt tokens | completion tokens | cost |",
-    "| --- | --- | --- | --- | --- | --- | --- |",
+    "| attempt | phase | model | outcome | duration | prompt tokens | completion tokens | cost |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ...rows,
     "",
     totalLine,

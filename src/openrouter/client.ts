@@ -1,3 +1,4 @@
+import type { PostModelCallPayload } from "@openrouter/agent"
 import { DateTime } from "luxon"
 import type { Logger } from "../logger.js"
 import {
@@ -7,7 +8,13 @@ import {
 } from "../review/finding.js"
 
 export type AttemptOutcome =
-  "accepted" | "api_error" | "timeout" | "empty_content" | "invalid_json" | "schema_mismatch"
+  | "accepted"
+  | "api_error"
+  | "timeout"
+  | "empty_content"
+  | "response_incomplete"
+  | "invalid_json"
+  | "schema_mismatch"
 
 export type ModelAttempt = {
   /** The model this attempt requested from the model ladder, which tries the
@@ -19,6 +26,9 @@ export type ModelAttempt = {
   promptTokens: number | null
   completionTokens: number | null
   costUsd: number | null
+  /** How long the model call took, as the SDK reports a completed call; null
+   *  when no call completed, such as a timeout or an HTTP error. */
+  durationMs: number | null
   /** Short human summary — never the raw response body. */
   errorSummary: string | null
 }
@@ -50,13 +60,17 @@ export type ReviewRequest = {
 }
 
 /** The fields read from the Responses result the Agent SDK takes from the
- *  stream's completion event. The SDK's own schema validates the result
- *  before it resolves, so the client reads it through this structural type
- *  rather than parsing it again; the SDK types `usage` as both nullable and
- *  optional. */
+ *  stream's completion event.
+ *  - The SDK's own schema validates the result before it resolves, so the
+ *    client reads it through this structural type rather than parsing it again.
+ *  - `status` and `incompleteDetails.reason` are open enums in the SDK, so a
+ *    value it does not name still arrives as a string.
+ *  - The SDK types `usage` as both nullable and optional. */
 export type ResponsesResult = {
   id: string
   model: string
+  status: string
+  incompleteDetails?: { reason?: string | undefined } | null | undefined
   usage?:
     | {
         inputTokens: number
@@ -74,12 +88,21 @@ export type ResponsesResult = {
  * - `getText` is the SDK's own extraction of the message text.
  * - The abort signal goes in the request, where the SDK takes the signal that
  *   cancels the whole call and aborts its in-flight stream.
+ * - The hooks go in the request too; the SDK strips them before the wire and
+ *   runs each handler before the call settles.
  */
 export type AgentLike = {
   callModel(
-    request: ReviewRequest & { signal: AbortSignal },
+    request: ReviewRequest & { signal: AbortSignal; hooks: ModelCallHooks },
     options?: { retries?: { strategy: "backoff" | "none" } },
   ): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> }
+}
+
+/** The one SDK lifecycle hook the client registers: the SDK's report of each
+ *  completed model call, which arrives even when the SDK then rejects the
+ *  call's final response. */
+export type ModelCallHooks = {
+  PostModelCall: { handler: (report: PostModelCallPayload) => void }[]
 }
 
 export type OpenRouterClient = {
@@ -336,6 +359,8 @@ type SingleAttempt =
       retryable: boolean
       /** An auth or credit status. The key fails for every model, so the ladder stops. */
       keyRejected: boolean
+      /** The generation the attempt billed, when a model call completed. */
+      generationId: string | null
     }
   | {
       kind: "context_overflow"
@@ -382,27 +407,69 @@ const summarizeAttempts = (attempts: ModelAttempt[]): string => {
   return attempts.map(describeAttempt).join("; ")
 }
 
+/** The start of the error the SDK throws when a final response holds no
+ *  output items. The SDK keeps this prefix stable for callers to match on
+ *  (`validateFinalResponse` in `@openrouter/agent`). */
+const EMPTY_OUTPUT_REJECTION_PREFIX = "Invalid final response: empty or invalid output"
+
+/** The usage and duration the SDK reported for a completed model call, or
+ *  nulls when no call completed. */
+const getReportedCallUsage = (
+  completedCall: PostModelCallPayload | undefined,
+): Pick<ModelAttempt, "promptTokens" | "completionTokens" | "costUsd" | "durationMs"> => ({
+  promptTokens: completedCall?.usage?.inputTokens ?? null,
+  completionTokens: completedCall?.usage?.outputTokens ?? null,
+  costUsd: completedCall?.usage?.cost ?? null,
+  durationMs: completedCall?.durationMs ?? null,
+})
+
 /** The attempt a rejected SDK call records: an HTTP status, a status-less
- *  network or stream error, or a context overflow a smaller ceiling can fit. */
+ *  network or stream error, a final response the SDK rejected, or a context
+ *  overflow a smaller ceiling can fit. */
 const attemptFromRejection = ({
   model,
   error,
   rejectedMaxOutputTokens,
+  completedCall,
 }: {
   model: string
   error: unknown
   rejectedMaxOutputTokens: number
+  completedCall: PostModelCallPayload | undefined
 }): SingleAttempt => {
   const statusCode = errorStatusCode(error)
+
+  // A call the SDK reported as completed was billed, even when the SDK then
+  // rejected its final response
+  const reportedUsage = getReportedCallUsage(completedCall)
+  const generationId = completedCall?.responseId ?? null
+
+  // An empty final turn is the reply the chat path recorded as empty_content,
+  // so it keeps that outcome and retries like any status-less failure
+  const isEmptyOutputRejection =
+    error instanceof Error && error.message.startsWith(EMPTY_OUTPUT_REJECTION_PREFIX)
+
+  if (isEmptyOutputRejection) {
+    return {
+      kind: "failed",
+      attempt: {
+        model,
+        outcome: "empty_content",
+        ...reportedUsage,
+        errorSummary: summarizeError(error),
+      },
+      retryable: true,
+      keyRejected: false,
+      generationId,
+    }
+  }
 
   // A context overflow is still recorded as api_error because the attempt
   // did fail with an HTTP error; the context_overflow kind only steers the retry
   const attempt: ModelAttempt = {
     model,
     outcome: "api_error",
-    promptTokens: null,
-    completionTokens: null,
-    costUsd: null,
+    ...reportedUsage,
     errorSummary: statusCode
       ? `HTTP ${statusCode}: ${summarizeError(error)}`
       : summarizeError(error),
@@ -424,7 +491,13 @@ const attemptFromRejection = ({
     ? statusCode >= 400 && statusCode < 500 && !RETRYABLE_4XX_STATUSES.has(statusCode)
     : false
 
-  return { kind: "failed", attempt, retryable: !isStructuralClientError, keyRejected }
+  return {
+    kind: "failed",
+    attempt,
+    retryable: !isStructuralClientError,
+    keyRejected,
+    generationId,
+  }
 }
 
 /** The attempt a resolved SDK call records: accepted, or failed with the
@@ -433,23 +506,47 @@ const attemptFromResponse = ({
   model,
   response,
   text,
+  completedCall,
 }: {
   model: string
   response: ResponsesResult
   text: string
+  completedCall: PostModelCallPayload | undefined
 }): SingleAttempt => {
   // Failed-validation attempts still carry usage — they were billed too
   const usage = {
     promptTokens: response.usage?.inputTokens ?? null,
     completionTokens: response.usage?.outputTokens ?? null,
     costUsd: response.usage?.cost ?? null,
+    durationMs: completedCall?.durationMs ?? null,
   }
-  const failedValidation = (outcome: AttemptOutcome, errorSummary: string): SingleAttempt => ({
+  const failedAttempt = ({
+    outcome,
+    errorSummary,
+  }: {
+    outcome: AttemptOutcome
+    errorSummary: string
+  }): SingleAttempt => ({
     kind: "failed",
     attempt: { model, outcome, ...usage, errorSummary },
     retryable: true,
     keyRejected: false,
+    generationId: response.id,
   })
+  const failedValidation = (outcome: AttemptOutcome, errorSummary: string): SingleAttempt => {
+    // The provider stopped the response early, at the output ceiling or a
+    // content filter, so the attempt names that stop rather than the cut-off
+    // text it left. A complete review never reaches here, whatever its status
+    if (response.status === "incomplete") {
+      const reason = response.incompleteDetails?.reason ?? "unknown reason"
+      return failedAttempt({
+        outcome: "response_incomplete",
+        errorSummary: `response incomplete: ${reason}`,
+      })
+    }
+
+    return failedAttempt({ outcome, errorSummary })
+  }
 
   // The SDK extracts "" when the output holds no message item, such as a
   // reasoning-only response
@@ -532,6 +629,20 @@ export const createOpenRouterClient = ({
     // before every attempt, so some review time is always left
     const callTimeout = getCallTimeout(remainingReviewMs())
 
+    // The SDK runs the PostModelCall handler during the request, once per
+    // completed model call, so the handler appends to this array and the
+    // attempt reads the last report once the call settles
+    const completedCalls: PostModelCallPayload[] = []
+    const hooks: ModelCallHooks = {
+      PostModelCall: [
+        {
+          handler: (report) => {
+            completedCalls.push(report)
+          },
+        },
+      ],
+    }
+
     // The Agent SDK starts the request's stream on the first read and takes
     // the Responses result from the stream's completion event.
     // - A stream that closes without a completion event rejects with "Stream
@@ -544,7 +655,7 @@ export const createOpenRouterClient = ({
       {
         start: async (signal) => {
           const modelResult = agent.callModel(
-            { ...reviewRequest, signal },
+            { ...reviewRequest, signal, hooks },
             { retries: { strategy: "none" } },
           )
           const response = await modelResult.getResponse()
@@ -570,17 +681,23 @@ export const createOpenRouterClient = ({
           promptTokens: null,
           completionTokens: null,
           costUsd: null,
+          durationMs: null,
           errorSummary: callTimeout.timeoutSummary,
         },
         retryable: true,
         keyRejected: false,
+        generationId: null,
       }
     }
+
+    const completedCall = completedCalls.at(-1)
+
     if (sendResult.status === "rejected") {
       return attemptFromRejection({
         model,
         error: sendResult.error,
         rejectedMaxOutputTokens: reviewRequest.maxOutputTokens,
+        completedCall,
       })
     }
 
@@ -588,6 +705,7 @@ export const createOpenRouterClient = ({
       model,
       response: sendResult.value.response,
       text: sendResult.value.text,
+      completedCall,
     })
   }
 
@@ -646,11 +764,18 @@ export const createOpenRouterClient = ({
         }
 
         attempts.push(attemptResult.attempt)
+
+        // The generation id lets an operator look up a billed failed attempt
+        // on OpenRouter; an attempt with no completed call has none
+        const billedGenerationId =
+          attemptResult.kind === "failed" ? attemptResult.generationId : null
+
         logger.warn("review attempt failed", {
           model: ladderModel,
           modelAttemptNumber,
           outcome: attemptResult.attempt.outcome,
           errorSummary: attemptResult.attempt.errorSummary,
+          ...(billedGenerationId ? { generationId: billedGenerationId } : {}),
         })
 
         if (attemptResult.kind === "failed" && attemptResult.keyRejected) {

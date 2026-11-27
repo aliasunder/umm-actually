@@ -79,6 +79,6 @@ export type Finding = z.infer<typeof findingSchema>
 export type AttributedFinding = Finding & { modelUsed: string }
 export type ReviewResponse = z.infer<typeof reviewResponseSchema>
 
-/** JSON schema handed to OpenRouter as response_format.json_schema.schema. */
+/** JSON schema handed to OpenRouter as the request's `text.format.schema`. */
 export const reviewResponseJsonSchema: Record<string, unknown> =
   z.toJSONSchema(reviewResponseSchema)

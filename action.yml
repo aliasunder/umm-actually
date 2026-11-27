@@ -130,7 +130,7 @@ inputs:
     required: false
     default: "true"
   cost_summary:
-    description: Write a per-run cost report (model, prompt/completion tokens, USD) to the workflow job summary and the check run's details page
+    description: Write a per-run cost report (model, outcome, duration in seconds, prompt/completion tokens, USD) to the workflow job summary and the check run's details page
     required: false
     default: "true"
   pr_number:
