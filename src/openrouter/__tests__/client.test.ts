@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs"
 import { openResponsesResultFromJSON } from "@openrouter/sdk/models"
 import {
-  BadRequestResponseError,
   OpenRouterError,
+  ResponsesBadRequestResponseError,
   ResponseValidationError,
   UnauthorizedResponseError,
 } from "@openrouter/sdk/models/errors"
@@ -73,9 +73,9 @@ const extractMessageText = (payload: unknown): string => {
 }
 
 /** What the Agent SDK hands the client for a wire payload: the payload run
- *  through the SDK's own transform. The repo's @openrouter/sdk copy runs it
- *  here as a drift guard on hand-edited fixtures; the Agent SDK's bundled
- *  copy parses every field the client reads identically. */
+ *  through the SDK's own transform. The repo's @openrouter/sdk, which the
+ *  Agent SDK also resolves, runs it here as a drift guard on hand-edited
+ *  fixtures. */
 const transformWirePayload = (payload: unknown): ResponsesResult => {
   const transformed = openResponsesResultFromJSON(JSON.stringify(payload))
 
@@ -181,11 +181,9 @@ const makeHttpMeta = (
   body,
 })
 
-/** An SDK error of the given status, as the SDK's base class carries it. The
- *  repo's @openrouter/sdk copy stands in for the copy bundled inside
- *  @openrouter/agent, which throws the production errors; both set
- *  `statusCode` from the HTTP response. An error without `statusCode` takes
- *  the status-less path the network-error test pins. */
+/** An SDK error of the given status, as the SDK's base class carries it, with
+ *  `statusCode` set from the HTTP response. An error without `statusCode`
+ *  takes the status-less path the network-error test pins. */
 const makeStatusError = (statusCode: number, message = `HTTP ${statusCode}`): OpenRouterError => {
   return new OpenRouterError(message, makeHttpMeta(statusCode, ""))
 }
@@ -207,9 +205,9 @@ const makeResponseValidationError = (): ResponseValidationError => {
 /** The `{ error: { code, message } }` body OpenRouter sends on a rejected request. */
 const errorBodySchema = z.object({ error: z.object({ code: z.number(), message: z.string() }) })
 
-/** The SDK's 400 error built from a captured error body. */
-const makeBadRequestError = (body: unknown): BadRequestResponseError => {
-  return new BadRequestResponseError(
+/** The 400 error the SDK's Responses call throws, built from a captured error body. */
+const makeBadRequestError = (body: unknown): ResponsesBadRequestResponseError => {
+  return new ResponsesBadRequestResponseError(
     errorBodySchema.parse(body),
     makeHttpMeta(400, JSON.stringify(body)),
   )
@@ -230,7 +228,7 @@ const makeContextOverflowError = ({
 }: {
   contextLength: number
   inputTokens: number
-}): BadRequestResponseError => {
+}): ResponsesBadRequestResponseError => {
   const capturedMessage = errorBodySchema.parse(overflowErrorBody).error.message
 
   if (!OVERFLOW_NUMBERS_PATTERN.test(capturedMessage)) {

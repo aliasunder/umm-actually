@@ -143,10 +143,11 @@ const CONTEXT_FIT_MARGIN_TOKENS = 8_192
  *  400 fails like any other structural 4xx. */
 const MIN_FITTED_MAX_OUTPUT_TOKENS = 32_768
 
-/** HTTP errors from both SDKs carry the response's numeric `statusCode`.
- *  `@openrouter/agent` throws them from its own bundled copy of
- *  `@openrouter/sdk`, whose error classes differ from the repo's copy, so the
- *  check is duck-typed rather than an instanceof. */
+/** HTTP errors carry the response's numeric `statusCode`.
+ *  - The check is duck-typed rather than an instanceof, because
+ *    `@openrouter/agent` throws from its own `@openrouter/sdk` dependency.
+ *  - npm installs that dependency as a second copy, with its own error
+ *    classes, whenever the agent's version range excludes the repo's pin. */
 const errorStatusCode = (error: unknown): number | undefined => {
   if (typeof error !== "object" || error === null) return undefined
   if (!("statusCode" in error) || typeof error.statusCode !== "number") {
@@ -434,9 +435,9 @@ export const createOpenRouterClient = ({
     // - A stream that closes without a completion event rejects with "Stream
     //   ended without completion event", a status-less error that retries
     //   like a network error.
-    // - When every model fails that way, the `@openrouter/sdk` copy bundled
-    //   inside `@openrouter/agent` rejected a changed wire field or ignored a
-    //   stream error event; only the raw stream tells those apart.
+    // - When every model fails that way, the `@openrouter/sdk` that
+    //   `@openrouter/agent` depends on rejected a changed wire field or ignored
+    //   a stream error event; only the raw stream tells those apart.
     const sendResult = await withDeadline(
       {
         start: async (signal) => {
