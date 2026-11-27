@@ -382,6 +382,110 @@ const summarizeAttempts = (attempts: ModelAttempt[]): string => {
   return attempts.map(describeAttempt).join("; ")
 }
 
+/** The attempt a rejected SDK call records: an HTTP status, a status-less
+ *  network or stream error, or a context overflow a smaller ceiling can fit. */
+const attemptFromRejection = ({
+  model,
+  error,
+  rejectedMaxOutputTokens,
+}: {
+  model: string
+  error: unknown
+  rejectedMaxOutputTokens: number
+}): SingleAttempt => {
+  const statusCode = errorStatusCode(error)
+
+  // A context overflow is still recorded as api_error because the attempt
+  // did fail with an HTTP error; the context_overflow kind only steers the retry
+  const attempt: ModelAttempt = {
+    model,
+    outcome: "api_error",
+    promptTokens: null,
+    completionTokens: null,
+    costUsd: null,
+    errorSummary: statusCode
+      ? `HTTP ${statusCode}: ${summarizeError(error)}`
+      : summarizeError(error),
+  }
+  const fittedCeiling = fittedMaxOutputTokens({ error, rejectedMaxOutputTokens })
+
+  if (fittedCeiling) {
+    return { kind: "context_overflow", attempt, fittedMaxOutputTokens: fittedCeiling }
+  }
+
+  const keyRejected = statusCode ? KEY_REJECTED_STATUSES.has(statusCode) : false
+
+  // A 4xx other than a 408 or a 429, such as a 400 bad request or a
+  // 401/402/403 auth or credit status, is structural and does not retry.
+  // Every other failure retries. That includes the status-200 error the SDK
+  // throws when a non-streamed body fails its result schema, because a
+  // second call can come back well-formed
+  const isStructuralClientError = statusCode
+    ? statusCode >= 400 && statusCode < 500 && !RETRYABLE_4XX_STATUSES.has(statusCode)
+    : false
+
+  return { kind: "failed", attempt, retryable: !isStructuralClientError, keyRejected }
+}
+
+/** The attempt a resolved SDK call records: accepted, or failed with the
+ *  outcome that names why its text is not a review. */
+const attemptFromResponse = ({
+  model,
+  response,
+  text,
+}: {
+  model: string
+  response: ResponsesResult
+  text: string
+}): SingleAttempt => {
+  // Failed-validation attempts still carry usage — they were billed too
+  const usage = {
+    promptTokens: response.usage?.inputTokens ?? null,
+    completionTokens: response.usage?.outputTokens ?? null,
+    costUsd: response.usage?.cost ?? null,
+  }
+  const failedValidation = (outcome: AttemptOutcome, errorSummary: string): SingleAttempt => ({
+    kind: "failed",
+    attempt: { model, outcome, ...usage, errorSummary },
+    retryable: true,
+    keyRejected: false,
+  })
+
+  // The SDK extracts "" when the output holds no message item, such as a
+  // reasoning-only response
+  if (text === "") {
+    return failedValidation("empty_content", "response had no text content")
+  }
+
+  const parsedContent = parseJsonOrNull(text)
+
+  if (parsedContent === null) {
+    return failedValidation("invalid_json", "response content is not valid JSON")
+  }
+
+  const parsedReview = reviewResponseSchema.safeParse(parsedContent.parsed)
+
+  if (!parsedReview.success) {
+    const firstIssue = parsedReview.error.issues[0]
+    return failedValidation(
+      "schema_mismatch",
+      firstIssue
+        ? `schema mismatch at ${firstIssue.path.join(".")}: ${firstIssue.message}`
+        : "response JSON does not match the review schema",
+    )
+  }
+
+  return {
+    kind: "accepted",
+    review: parsedReview.data,
+    routedModel: response.model,
+
+    // A Responses result's `id` is its generation id (`gen-…`)
+    generationId: response.id,
+    attempt: { model, outcome: "accepted", ...usage, errorSummary: null },
+  }
+}
+
 /** The client holds no logger. Each requestReview call passes its own, so
  *  concurrent callers can tag their requests' lines with their own props. */
 export const createOpenRouterClient = ({
@@ -473,93 +577,18 @@ export const createOpenRouterClient = ({
       }
     }
     if (sendResult.status === "rejected") {
-      const statusCode = errorStatusCode(sendResult.error)
-
-      // A context overflow is still recorded as api_error because the attempt
-      // did fail with an HTTP error; the context_overflow kind only steers the retry
-      const attempt: ModelAttempt = {
+      return attemptFromRejection({
         model,
-        outcome: "api_error",
-        promptTokens: null,
-        completionTokens: null,
-        costUsd: null,
-        errorSummary: statusCode
-          ? `HTTP ${statusCode}: ${summarizeError(sendResult.error)}`
-          : summarizeError(sendResult.error),
-      }
-      const fittedCeiling = fittedMaxOutputTokens({
         error: sendResult.error,
         rejectedMaxOutputTokens: reviewRequest.maxOutputTokens,
       })
-
-      if (fittedCeiling) {
-        return { kind: "context_overflow", attempt, fittedMaxOutputTokens: fittedCeiling }
-      }
-
-      const keyRejected = statusCode ? KEY_REJECTED_STATUSES.has(statusCode) : false
-
-      // A 4xx other than a 408 or a 429, such as a 400 bad request or a
-      // 401/402/403 auth or credit status, is structural and does not retry.
-      // Every other failure retries. That includes the status-200 error the SDK
-      // throws when a non-streamed body fails its result schema, because a
-      // second call can come back well-formed
-      const isStructuralClientError = statusCode
-        ? statusCode >= 400 && statusCode < 500 && !RETRYABLE_4XX_STATUSES.has(statusCode)
-        : false
-
-      return { kind: "failed", attempt, retryable: !isStructuralClientError, keyRejected }
     }
 
-    const responsesResult = sendResult.value.response
-
-    // Failed-validation attempts still carry usage — they were billed too
-    const usage = {
-      promptTokens: responsesResult.usage?.inputTokens ?? null,
-      completionTokens: responsesResult.usage?.outputTokens ?? null,
-      costUsd: responsesResult.usage?.cost ?? null,
-    }
-    const failedValidation = (outcome: AttemptOutcome, errorSummary: string): SingleAttempt => ({
-      kind: "failed",
-      attempt: { model, outcome, ...usage, errorSummary },
-      retryable: true,
-      keyRejected: false,
+    return attemptFromResponse({
+      model,
+      response: sendResult.value.response,
+      text: sendResult.value.text,
     })
-
-    // The SDK extracts "" when the output holds no message item, such as a
-    // reasoning-only response
-    const content = sendResult.value.text
-
-    if (content === "") {
-      return failedValidation("empty_content", "response had no text content")
-    }
-
-    const parsedContent = parseJsonOrNull(content)
-
-    if (parsedContent === null) {
-      return failedValidation("invalid_json", "response content is not valid JSON")
-    }
-
-    const parsedReview = reviewResponseSchema.safeParse(parsedContent.parsed)
-
-    if (!parsedReview.success) {
-      const firstIssue = parsedReview.error.issues[0]
-      return failedValidation(
-        "schema_mismatch",
-        firstIssue
-          ? `schema mismatch at ${firstIssue.path.join(".")}: ${firstIssue.message}`
-          : "response JSON does not match the review schema",
-      )
-    }
-
-    return {
-      kind: "accepted",
-      review: parsedReview.data,
-      routedModel: responsesResult.model,
-
-      // A Responses result's `id` is its generation id (`gen-…`)
-      generationId: responsesResult.id,
-      attempt: { model, outcome: "accepted", ...usage, errorSummary: null },
-    }
   }
 
   const requestReview: OpenRouterClient["requestReview"] = async (
