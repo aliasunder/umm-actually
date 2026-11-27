@@ -13,6 +13,23 @@
 
 
 
+
+## [0.5.0] — 2026-11-27
+
+### Features
+
+- **openrouter:** Review requests through the Agent SDK, with each attempt's duration in the cost report (#143)
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.13
+
+### Maintenance
+
+- **deps-dev:** Bump the development group with 3 updates (#156)
+- **deps:** Bump the production group with 2 updates (#155)
+- **deps:** Bump actions/create-github-app-token from 3.3.0 to 3.4.0 (#154)
+
 ## [0.4.13] — 2026-11-20
 
 ### Documentation
