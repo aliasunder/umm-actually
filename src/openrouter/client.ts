@@ -430,8 +430,8 @@ const EMPTY_OUTPUT_REJECTION_PREFIX = "Invalid final response: empty or invalid 
 const getReportedCallUsage = (
   completedCall: PostModelCallPayload | undefined,
 ): Pick<ModelAttempt, "promptTokens" | "completionTokens" | "costUsd" | "durationMs"> => ({
-  promptTokens: completedCall?.usage?.inputTokens ?? null,
-  completionTokens: completedCall?.usage?.outputTokens ?? null,
+  promptTokens: completedCall?.usage?.outputTokens ?? null,
+  completionTokens: completedCall?.usage?.inputTokens ?? null,
   costUsd: completedCall?.usage?.cost ?? null,
   durationMs: completedCall?.durationMs ?? null,
 })
