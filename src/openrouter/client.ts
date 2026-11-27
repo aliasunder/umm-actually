@@ -127,7 +127,7 @@ const KEY_REJECTED_STATUSES = new Set([401, 402, 403])
 /** The transient 4xx statuses — HTTP request timeout (408) and rate limit
  *  (429). Any other 4xx is structural and skips the retry, except a
  *  context-overflow 400, which retries with a smaller output ceiling;
- *  attemptOnce retries every failure outside the 4xx range. */
+ *  attemptFromRejection marks every failure outside the 4xx range retryable. */
 const RETRYABLE_4XX_STATUSES = new Set([408, 429])
 
 /** Cap on same-model attempts for failures that settle quickly (HTTP errors,
@@ -398,6 +398,19 @@ export class ReviewRequestError extends Error {
   }
 }
 
+/** The generation a failed attempt billed. A context overflow is an HTTP 400,
+ *  so its call never completed. */
+const getBilledGenerationId = (
+  attemptResult: Exclude<SingleAttempt, { kind: "accepted" }>,
+): string | null => {
+  switch (attemptResult.kind) {
+    case "failed":
+      return attemptResult.generationId
+    case "context_overflow":
+      return null
+  }
+}
+
 const describeAttempt = (attempt: ModelAttempt): string => {
   const errorSuffix = attempt.errorSummary === null ? "" : ` (${attempt.errorSummary})`
   return `${attempt.model}: ${attempt.outcome}${errorSuffix}`
@@ -444,8 +457,9 @@ const attemptFromRejection = ({
   const reportedUsage = getReportedCallUsage(completedCall)
   const generationId = completedCall?.responseId ?? null
 
-  // An empty final turn is the reply the chat path recorded as empty_content,
-  // so it keeps that outcome and retries like any status-less failure
+  // attemptFromResponse records a response with no text as empty_content, so
+  // an empty final turn takes the same outcome and retries like any
+  // status-less failure
   const isEmptyOutputRejection =
     error instanceof Error && error.message.startsWith(EMPTY_OUTPUT_REJECTION_PREFIX)
 
@@ -767,8 +781,7 @@ export const createOpenRouterClient = ({
 
         // The generation id lets an operator look up a billed failed attempt
         // on OpenRouter; an attempt with no completed call has none
-        const billedGenerationId =
-          attemptResult.kind === "failed" ? attemptResult.generationId : null
+        const billedGenerationId = getBilledGenerationId(attemptResult)
 
         logger.warn("review attempt failed", {
           model: ladderModel,

@@ -13,9 +13,9 @@ const formatDuration = (durationMs: number | null): string => {
   return durationMs === null ? "n/a" : `${(durationMs / 1000).toFixed(1)}s`
 }
 
-/** Markdown table for the workflow job summary — one row per attempt across
- *  every phase, failed ones included (any attempt that reached the provider
- *  was billed). */
+/** Markdown table for the workflow job summary and the check run's details
+ *  page — one row per attempt across every phase, failed ones included (any
+ *  attempt that reached the provider was billed). */
 export const renderCostSummary = ({
   attempts,
   modelUsed,

@@ -48,8 +48,8 @@ the outermost layer, so only tests import from a `__tests__/` folder.
 
 Use the official SDKs — don't hand-roll what `@actions/core`,
 `@actions/github` (octokit), `@openrouter/agent`, `@openrouter/sdk` (installed
-by `@openrouter/agent`; the tests take Responses result and error shapes from
-it), or `parse-diff` already do.
+by `@openrouter/agent`; the tests take Responses result and error shapes and
+the `HTTPClient` fetcher from it), or `parse-diff` already do.
 Before writing any parsing or validation helper, check the SDK's utility
 surface first: `@actions/core` ships `getBooleanInput` (strict YAML 1.2
 booleans), which replaced a hand-rolled boolean-string Zod transform here.

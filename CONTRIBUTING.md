@@ -44,8 +44,8 @@ points:
   reads `LOG_LEVEL`
 - Use the official SDKs (`@actions/core`, `@actions/github`,
   `@openrouter/agent`, `@openrouter/sdk` (installed by `@openrouter/agent`) for
-  Responses result and error shapes in tests, `parse-diff`) — don't hand-roll
-  what they already do
+  Responses result and error shapes and the `HTTPClient` fetcher in tests,
+  `parse-diff`) — don't hand-roll what they already do
 - Relative imports carry explicit `.js` extensions (ESM runtime requirement)
 - Tests are behavioral specs: one focused `it()` per behavior, exact
   assertions, `const` per test
