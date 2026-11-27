@@ -92,7 +92,7 @@ const enumUnion = (values: readonly string[]): string => {
   return values.map((value) => `"${value}"`).join("|")
 }
 
-/** The wire schema also travels as response_format json_schema, but providers
+/** The wire schema also travels as the request's `text.format` json_schema, but providers
  *  without structured-output support silently drop that parameter — this prose
  *  copy is the only shape statement those attempts ever see. Keep it in
  *  lockstep with reviewResponseSchema. */

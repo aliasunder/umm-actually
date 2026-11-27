@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs"
+import type { PostModelCallPayload } from "@openrouter/agent"
 import parseDiff from "parse-diff"
 import { describe, expect, it, vi } from "vitest"
 import type { ActionConfig } from "../config.js"
@@ -8,9 +9,10 @@ import type { ContextReader } from "../context/workspace.js"
 import {
   ReviewRequestError,
   createOpenRouterClient,
-  type ChatRequestSubset,
+  type AgentLike,
   type ModelAttempt,
   type OpenRouterClient,
+  type ResponsesResult,
   type StructuredReviewResult,
 } from "../openrouter/client.js"
 import { buildUserPrompt, estimateTokens, type PromptFile } from "../review/prompt.js"
@@ -61,6 +63,78 @@ const fixtureReviewResponse: ReviewResponse = JSON.parse(
   readFileSync(new URL("../../fixtures/openrouter.response.json", import.meta.url), "utf8"),
 )
 
+/** The pair a `callModel` stub hands back once its request settles: the
+ *  materialized response the client reads and the text the SDK extracts. */
+type ModelCallResult = { response: ResponsesResult; text: string }
+
+/** A `callModel` result that settles with the given promise. Both reads await
+ *  the one promise, the way the SDK's reads share one materialized stream. */
+const makePendingModelResultStub = (
+  settled: Promise<ModelCallResult>,
+): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> } => ({
+  getResponse: async () => (await settled).response,
+  getText: async () => (await settled).text,
+})
+
+type ModelCallRequest = Parameters<AgentLike["callModel"]>[0]
+
+/** The duration the stubbed SDK reports for every completed call; no test
+ *  here measures one. */
+const STUB_CALL_DURATION_MS = 1234
+
+/** A response the stubbed SDK completed, with the priced usage it reports. */
+type CompletedResponse = ResponsesResult & {
+  usage: { inputTokens: number; outputTokens: number; cost: number }
+}
+
+/** A completed, priced response from the stubbed SDK. */
+const completedResponse: CompletedResponse = {
+  id: "completed",
+  model: "test/model",
+  status: "completed",
+  incompleteDetails: null,
+  usage: {
+    inputTokens: 10,
+    inputTokensDetails: { cachedTokens: 0 },
+    outputTokens: 20,
+    outputTokensDetails: { reasoningTokens: 0 },
+    totalTokens: 30,
+    cost: 0.01,
+  },
+}
+
+/** A `callModel` result that resolves at once with the response and the
+ *  fixture review as its text. Like the Agent SDK, the stub first sends the
+ *  request's PostModelCall report, so an accepted attempt carries a duration
+ *  as it does in production. */
+const makeCompletedModelResultStub = (
+  request: ModelCallRequest,
+  response: CompletedResponse,
+): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> } => {
+  const { inputTokens, outputTokens, cost } = response.usage
+  const report: PostModelCallPayload = {
+    sessionId: "",
+    responseId: response.id,
+    model: response.model,
+    durationMs: STUB_CALL_DURATION_MS,
+    turnType: "initial",
+    turnNumber: 0,
+    usage: {
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      cachedTokens: 0,
+      reasoningTokens: 0,
+      cost,
+    },
+  }
+
+  for (const { handler } of request.hooks.PostModelCall) handler(report)
+  return makePendingModelResultStub(
+    Promise.resolve({ response, text: JSON.stringify(fixtureReviewResponse) }),
+  )
+}
+
 const fixturePrContext: PrContext = {
   prNumber: 7,
   title: "feat: trim names before greeting",
@@ -76,6 +150,7 @@ const fixtureAttempt: ModelAttempt = {
   promptTokens: 1000,
   completionTokens: 500,
   costUsd: 0.01,
+  durationMs: 12_300,
   errorSummary: null,
 }
 
@@ -4684,91 +4759,54 @@ describe("staged phases", () => {
     ])
   })
 
-  it("publishes full coverage without a deadline warning when only accepted-response cost lookup expires", async () => {
-    vi.useFakeTimers()
-    try {
-      const deadline = Date.now() + 1000
-      const remainingReviewMs = () => deadline - Date.now()
-      const costResponse = Promise.withResolvers<unknown>()
-      const getGeneration = vi.fn(() => costResponse.promise)
-      const send = vi.fn(async () => ({
-        id: "accepted-before-deadline",
-        model: "test/model",
-        choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
-        usage: { promptTokens: 10, completionTokens: 20 },
-      }))
-      const client = createOpenRouterClient({
-        sdk: { chat: { send }, generations: { getGeneration } },
-        requestTimeoutMs: 900_000,
-        remainingReviewMs,
-      })
-      const stubs = makeOrchestrateDeps({
-        remainingReviewMs,
-        generateFindings: createPromptedGenerateFindings(
-          {
-            openrouterClient: client,
-            model: "test/model",
-            fallbackModel: "fallback/model",
-          },
-          createTestLogger(),
-        ),
-      })
-      const pending = orchestrate(stubs.deps, createTestLogger())
-      await vi.advanceTimersByTimeAsync(1000)
-      const result = await pending
-      const expectedCost = renderCostSummary({
-        attempts: [
-          {
-            phase: "combined",
-            model: "test/model",
-            outcome: "accepted",
-            promptTokens: 10,
-            completionTokens: 20,
-            costUsd: null,
-            errorSummary: null,
-          },
-        ],
-        modelUsed: "test/model",
-      })
-      expect(remainingReviewMs()).toBe(0)
-      expect(send).toHaveBeenCalledTimes(1)
-      expect(getGeneration).toHaveBeenCalledExactlyOnceWith(
-        { id: "accepted-before-deadline" },
-        { retries: { strategy: "none" }, signal: expect.any(AbortSignal) },
-      )
-      expect(result).toEqual({
-        findingsCount: expectedSelection.selected.length,
-        reviewUrl: "https://github.com/test/review/1",
-        modelUsed: "test/model",
-        skippedReason: "",
-        phases: [{ phase: "combined", status: "completed" }],
-        reviewSummaryMarkdown: expectedReviewSummary(),
-        costSummaryMarkdown: expectedCost,
-        conventionsNote: null,
-      })
-      expect(stubs.upsertSummaryCommentCalls).toEqual([
-        expectedStatus({
-          isFirstRun: true,
-          postedCount: expectedSelection.selected.length,
-          totalCount: expectedSelection.selected.length,
-        }),
-      ])
-      expect(stubs.postFindingsReviewCalls).toEqual([
-        expectedFindingsReview(expectedSelection.selected),
-      ])
-      expect(stubs.updateCheckRunCalls).toEqual([
-        {
-          checkRunId: 555,
-          conclusion: "success",
-          output: {
-            title: `${expectedSelection.selected.length} findings`,
-            summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.\n\n${expectedCost}`,
-          },
+  it("publishes full coverage without a deadline warning when the review deadline runs out after every phase completed", async () => {
+    // The only phase's response spends the rest of this test's controllable deadline
+    const deadline = { remainingMs: 1 }
+    const stubs = makeOrchestrateDeps({
+      remainingReviewMs: () => deadline.remainingMs,
+      generateFindings: async (reviewContext) => {
+        stubs.generateFindingsCalls.push(reviewContext)
+        deadline.remainingMs = 0
+        return {
+          review: fixtureReviewResponse,
+          modelUsed: "test/model",
+          attempts: [fixtureAttempt],
+        }
+      },
+    })
+
+    const result = await orchestrate(stubs.deps, createTestLogger())
+
+    expect(result).toEqual({
+      findingsCount: expectedSelection.selected.length,
+      reviewUrl: "https://github.com/test/review/1",
+      modelUsed: "test/model",
+      skippedReason: "",
+      phases: [{ phase: "combined", status: "completed" }],
+      reviewSummaryMarkdown: expectedReviewSummary(),
+      costSummaryMarkdown: expectedCostSummary,
+      conventionsNote: null,
+    })
+    expect(stubs.upsertSummaryCommentCalls).toEqual([
+      expectedStatus({
+        isFirstRun: true,
+        postedCount: expectedSelection.selected.length,
+        totalCount: expectedSelection.selected.length,
+      }),
+    ])
+    expect(stubs.postFindingsReviewCalls).toEqual([
+      expectedFindingsReview(expectedSelection.selected),
+    ])
+    expect(stubs.updateCheckRunCalls).toEqual([
+      {
+        checkRunId: 555,
+        conclusion: "success",
+        output: {
+          title: `${expectedSelection.selected.length} findings`,
+          summary: `Reviewed with \`test/model\` — ${expectedSelection.selected.length} findings posted.\n\n${expectedCostSummary}`,
         },
-      ])
-    } finally {
-      vi.useRealTimers()
-    }
+      },
+    ])
   })
 
   it("publishes completed parallel phases once when a provider ignores the review deadline abort", async () => {
@@ -4776,20 +4814,18 @@ describe("staged phases", () => {
     try {
       const deadline = Date.now() + 1000
       const remainingReviewMs = () => deadline - Date.now()
-      const lateResponse = Promise.withResolvers<unknown>()
-      const response = {
-        id: "completed",
-        model: "test/model",
-        choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
-        usage: { promptTokens: 10, completionTokens: 20, cost: 0.01 },
-      }
-      const send = vi
-        .fn()
-        .mockResolvedValueOnce(response)
-        .mockResolvedValueOnce(response)
-        .mockImplementation(() => lateResponse.promise)
+      const lateResponse = Promise.withResolvers<ModelCallResult>()
+      const callModel = vi
+        .fn<AgentLike["callModel"]>()
+        .mockImplementationOnce((request) => {
+          return makeCompletedModelResultStub(request, completedResponse)
+        })
+        .mockImplementationOnce((request) => {
+          return makeCompletedModelResultStub(request, completedResponse)
+        })
+        .mockImplementation(() => makePendingModelResultStub(lateResponse.promise))
       const client = createOpenRouterClient({
-        sdk: { chat: { send }, generations: { getGeneration: vi.fn() } },
+        agent: { callModel },
         requestTimeoutMs: 900_000,
         remainingReviewMs,
       })
@@ -4808,7 +4844,7 @@ describe("staged phases", () => {
       const pending = orchestrate(stubs.deps, createTestLogger())
       await vi.advanceTimersByTimeAsync(1000)
       const result = await pending
-      expect(send).toHaveBeenCalledTimes(3)
+      expect(callModel).toHaveBeenCalledTimes(3)
       expect(result.phases).toEqual([
         { phase: "correctness-security", status: "completed" },
         { phase: "conventions-tests", status: "completed" },
@@ -4858,7 +4894,10 @@ describe("staged phases", () => {
         reviews: stubs.postFindingsReviewCalls,
         result,
       })
-      lateResponse.resolve(response)
+      lateResponse.resolve({
+        response: completedResponse,
+        text: JSON.stringify(fixtureReviewResponse),
+      })
       await vi.runAllTimersAsync()
       expect({
         checks: stubs.updateCheckRunCalls,
@@ -4872,31 +4911,26 @@ describe("staged phases", () => {
   })
 
   it("tags each parallel phase's client log lines with that phase", async () => {
-    const response = {
-      id: "completed",
-      model: "test/model",
-      choices: [{ message: { content: JSON.stringify(fixtureReviewResponse) } }],
-      usage: { promptTokens: 10, completionTokens: 20, cost: 0.01 },
-    }
-
     // correctness-security is dispatched first, so a logger shared across the
     // concurrent calls would already carry a later phase when its failure logs.
     // The failure is keyed on that phase's prompt text, not on call order
     const correctnessSecurityPassScope = "this pass covers correctness & security"
     const failedPrompts = new Set<string>()
-    const send = vi.fn(async ({ chatRequest }: { chatRequest: ChatRequestSubset }) => {
-      const systemPrompt = first(chatRequest.messages).content
+    const callModel = vi.fn((request: ModelCallRequest) => {
+      const { instructions } = request
       const isFirstCorrectnessSecurityRequest =
-        systemPrompt.includes(correctnessSecurityPassScope) && !failedPrompts.has(systemPrompt)
+        instructions.includes(correctnessSecurityPassScope) && !failedPrompts.has(instructions)
 
       if (isFirstCorrectnessSecurityRequest) {
-        failedPrompts.add(systemPrompt)
-        throw Object.assign(new Error("HTTP 500"), { statusCode: 500 })
+        failedPrompts.add(instructions)
+        return makePendingModelResultStub(
+          Promise.reject(Object.assign(new Error("HTTP 500"), { statusCode: 500 })),
+        )
       }
-      return response
+      return makeCompletedModelResultStub(request, completedResponse)
     })
     const client = createOpenRouterClient({
-      sdk: { chat: { send }, generations: { getGeneration: vi.fn() } },
+      agent: { callModel },
       requestTimeoutMs: 900_000,
       remainingReviewMs: () => Infinity,
       retryDelayMs: 0,
@@ -4934,7 +4968,7 @@ describe("staged phases", () => {
       { phase: "conventions-tests", status: "completed" },
       { phase: "subtle-bugs", status: "completed" },
     ])
-    expect(send).toHaveBeenCalledTimes(4)
+    expect(callModel).toHaveBeenCalledTimes(4)
     expect(logsWithMessage(generateLogger, "review attempt failed")).toEqual([
       {
         level: "warn",
@@ -4962,6 +4996,7 @@ describe("staged phases", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "no response within 900s",
     }
     const stubs = makeOrchestrateDeps({
@@ -5128,6 +5163,7 @@ describe("staged phases", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "HTTP 402: HTTP 402",
     }
     const stubs = makeOrchestrateDeps({
@@ -5198,6 +5234,7 @@ describe("staged phases", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "no response within 900s",
     }
     const stubs = makeOrchestrateDeps({
@@ -5254,6 +5291,7 @@ describe("staged phases", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "no response within 900s",
     }
     const stubs = makeOrchestrateDeps({
@@ -5307,6 +5345,7 @@ describe("staged phases", () => {
       promptTokens: null,
       completionTokens: null,
       costUsd: null,
+      durationMs: null,
       errorSummary: "no response within 900s",
     }
     const fallbackTimeout: ModelAttempt = { ...primaryTimeout, model: "fallback/model" }

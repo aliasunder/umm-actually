@@ -343,6 +343,7 @@ describe("runStages", () => {
               promptTokens: 1,
               completionTokens: 1,
               costUsd: null,
+              durationMs: 1,
               errorSummary: null,
             },
           ],

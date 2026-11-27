@@ -30,6 +30,22 @@ export default defineConfig(
     },
   },
   {
+    // AGENTS.md → Code style: a function stays small enough for a reviewer
+    // to hold.
+    // - The recommended configs leave both rules off, and these limits are
+    //   ESLint's own defaults.
+    // - A function over the complexity limit carries
+    //   `eslint-disable-next-line complexity` until a change splits it.
+    // - ESLint reports an arrow function at its `=>`, and a method or a
+    //   function-valued property at its key. The directive sits on the line
+    //   above the reported line, inside the signature when the signature
+    //   spans lines.
+    rules: {
+      complexity: ["error", { max: 20 }],
+      "max-depth": ["error", 4],
+    },
+  },
+  {
     files: ["**/__tests__/**/*.ts", "**/*.test.ts"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": ["warn", { assertionStyle: "never" }],

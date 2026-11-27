@@ -576,6 +576,7 @@ const runReviewPipeline = async (
     stages: ReviewStage[]
   },
   logger: Logger,
+  // eslint-disable-next-line complexity -- this function is over the limit; split it before adding a branch
 ): Promise<OrchestrateResult> => {
   const { config, githubClient, contextReader, generateFindings } = deps
 
@@ -1054,8 +1055,7 @@ const runReviewPipeline = async (
   const completedPhases = phaseOutcomes.filter((outcome) => outcome.status === "completed")
   const phases = phaseOutcomes.map(describePhaseOutcome)
 
-  // Only a phase that failed on the deadline lost coverage. A completed phase
-  // whose cost lookup the deadline skipped still delivered its findings.
+  // Only a phase that failed on the deadline lost coverage
   const coverageLostToReviewDeadline = phaseOutcomes.some(
     (outcome) => outcome.status === "failed" && outcome.deadlineExceeded,
   )
