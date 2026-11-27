@@ -1,4 +1,8 @@
 import { readFileSync } from "node:fs"
+
+// @openrouter/sdk is not a declared dependency. These imports read the copy
+// @openrouter/agent installs, so the tests build the same result and error
+// classes production receives
 import { openResponsesResultFromJSON } from "@openrouter/sdk/models"
 import {
   OpenRouterError,
@@ -73,8 +77,7 @@ const extractMessageText = (payload: unknown): string => {
 }
 
 /** What the Agent SDK hands the client for a wire payload: the payload run
- *  through the SDK's own transform. The repo's @openrouter/sdk, which the
- *  Agent SDK also resolves, runs it here as a drift guard on hand-edited
+ *  through the SDK's own transform, here also a drift guard on hand-edited
  *  fixtures. */
 const transformWirePayload = (payload: unknown): ResponsesResult => {
   const transformed = openResponsesResultFromJSON(JSON.stringify(payload))

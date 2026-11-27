@@ -143,11 +143,9 @@ const CONTEXT_FIT_MARGIN_TOKENS = 8_192
  *  400 fails like any other structural 4xx. */
 const MIN_FITTED_MAX_OUTPUT_TOKENS = 32_768
 
-/** HTTP errors carry the response's numeric `statusCode`.
- *  - The check is duck-typed rather than an instanceof, because
- *    `@openrouter/agent` throws from its own `@openrouter/sdk` dependency.
- *  - npm installs that dependency as a second copy, with its own error
- *    classes, whenever the agent's version range excludes the repo's pin. */
+/** HTTP errors carry the response's numeric `statusCode`. The check is
+ *  duck-typed because the errors are `@openrouter/sdk` classes, a package the
+ *  action gets only through `@openrouter/agent` and never imports itself. */
 const errorStatusCode = (error: unknown): number | undefined => {
   if (typeof error !== "object" || error === null) return undefined
   if (!("statusCode" in error) || typeof error.statusCode !== "number") {
