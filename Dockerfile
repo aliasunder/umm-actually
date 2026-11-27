@@ -4,14 +4,14 @@
 # Dependabot (docker ecosystem) keeps the digest current.
 
 # Production dependencies — cached independently of source changes
-FROM node:24-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS prod-deps
+FROM node:24-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 # --ignore-scripts: the prepare script runs husky, a devDependency absent here
 RUN npm ci --omit=dev --ignore-scripts
 
 # Build stage: dev dependencies + TypeScript compile
-FROM node:24-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS build
+FROM node:24-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 # --ignore-scripts: skip husky's git-hook install — no .git in the image
@@ -21,7 +21,7 @@ COPY src ./src
 RUN npx tsc
 
 # Runtime stage: dist + production node_modules, nothing else
-FROM node:24-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
+FROM node:24-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
 WORKDIR /app
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

@@ -12,6 +12,22 @@
 
 
 
+
+## [0.4.13] — 2026-11-20
+
+### Documentation
+
+- Update CHANGELOG.md for v0.4.12
+
+### Maintenance
+
+- **deps-dev:** Bump the development group with 5 updates (#153)
+- **deps:** Bump node from `c86ecea` to `dc26ae9` (#152)
+- **deps:** Bump @openrouter/sdk (#151)
+- **deps:** Bump docker/login-action from 4.7.0 to 4.8.0 (#148)
+- **deps:** Bump @openrouter/sdk (#149)
+- **deps-dev:** Bump vitest (#150)
+
 ## [0.4.12] — 2026-11-07
 
 ### Documentation
