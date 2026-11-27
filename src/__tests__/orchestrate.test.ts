@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs"
+import type { PostModelCallPayload } from "@openrouter/agent"
 import parseDiff from "parse-diff"
 import { describe, expect, it, vi } from "vitest"
 import type { ActionConfig } from "../config.js"
@@ -8,10 +9,10 @@ import type { ContextReader } from "../context/workspace.js"
 import {
   ReviewRequestError,
   createOpenRouterClient,
+  type AgentLike,
   type ModelAttempt,
   type OpenRouterClient,
   type ResponsesResult,
-  type ReviewRequest,
   type StructuredReviewResult,
 } from "../openrouter/client.js"
 import { buildUserPrompt, estimateTokens, type PromptFile } from "../review/prompt.js"
@@ -75,11 +76,44 @@ const makePendingModelResultStub = (
   getText: async () => (await settled).text,
 })
 
-/** A `callModel` result that resolves at once with an accepted-shaped response
- *  carrying the fixture review as its text. */
-const makeModelResultStub = (
-  response: ResponsesResult,
+type ModelCallRequest = Parameters<AgentLike["callModel"]>[0]
+
+/** The duration the stubbed SDK reports for every completed call; no test
+ *  here measures one. */
+const STUB_CALL_DURATION_MS = 1234
+
+/** A response the stubbed SDK completed, with the priced usage it reports. */
+type CompletedResponse = ResponsesResult & {
+  usage: { inputTokens: number; outputTokens: number; cost: number }
+}
+
+/** A `callModel` result that resolves at once with the response and the
+ *  fixture review as its text. Like the Agent SDK, the stub first sends the
+ *  request's PostModelCall report, so an accepted attempt carries a duration
+ *  as it does in production. */
+const makeCompletedModelResultStub = (
+  request: ModelCallRequest,
+  response: CompletedResponse,
 ): { getResponse(): Promise<ResponsesResult>; getText(): Promise<string> } => {
+  const { inputTokens, outputTokens, cost } = response.usage
+  const report: PostModelCallPayload = {
+    sessionId: "",
+    responseId: response.id,
+    model: response.model,
+    durationMs: STUB_CALL_DURATION_MS,
+    turnType: "initial",
+    turnNumber: 0,
+    usage: {
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      cachedTokens: 0,
+      reasoningTokens: 0,
+      cost,
+    },
+  }
+
+  for (const { handler } of request.hooks.PostModelCall) handler(report)
   return makePendingModelResultStub(
     Promise.resolve({ response, text: JSON.stringify(fixtureReviewResponse) }),
   )
@@ -4772,9 +4806,9 @@ describe("staged phases", () => {
         usage: { inputTokens: 10, outputTokens: 20, cost: 0.01 },
       }
       const callModel = vi
-        .fn()
-        .mockReturnValueOnce(makeModelResultStub(response))
-        .mockReturnValueOnce(makeModelResultStub(response))
+        .fn<AgentLike["callModel"]>()
+        .mockImplementationOnce((request) => makeCompletedModelResultStub(request, response))
+        .mockImplementationOnce((request) => makeCompletedModelResultStub(request, response))
         .mockImplementation(() => makePendingModelResultStub(lateResponse.promise))
       const client = createOpenRouterClient({
         agent: { callModel },
@@ -4872,7 +4906,8 @@ describe("staged phases", () => {
     // The failure is keyed on that phase's prompt text, not on call order
     const correctnessSecurityPassScope = "this pass covers correctness & security"
     const failedPrompts = new Set<string>()
-    const callModel = vi.fn(({ instructions }: ReviewRequest) => {
+    const callModel = vi.fn((request: ModelCallRequest) => {
+      const { instructions } = request
       const isFirstCorrectnessSecurityRequest =
         instructions.includes(correctnessSecurityPassScope) && !failedPrompts.has(instructions)
 
@@ -4882,7 +4917,7 @@ describe("staged phases", () => {
           Promise.reject(Object.assign(new Error("HTTP 500"), { statusCode: 500 })),
         )
       }
-      return makeModelResultStub(response)
+      return makeCompletedModelResultStub(request, response)
     })
     const client = createOpenRouterClient({
       agent: { callModel },

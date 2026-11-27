@@ -753,6 +753,49 @@ describe("requestReview", () => {
     ])
   })
 
+  it("records an unreported empty-output rejection as empty_content with no usage, duration or generation id", async () => {
+    const stub = makeClientStubs({
+      modelResults: [
+        { error: new Error(EMPTY_OUTPUT_REJECTION_MESSAGE) },
+        { value: acceptedResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "empty_content",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        durationMs: null,
+        errorSummary: EMPTY_OUTPUT_REJECTION_SUMMARY,
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: null,
+      },
+    ])
+    expect(logsWithMessage(logger, "review attempt failed")).toEqual([
+      {
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          model: "z-ai/glm-5.3-flash",
+          modelAttemptNumber: 1,
+          outcome: "empty_content",
+          errorSummary: EMPTY_OUTPUT_REJECTION_SUMMARY,
+        },
+      },
+    ])
+  })
+
   it("keeps api_error for a missing-fields rejection while recording the reported call's usage and duration", async () => {
     const stub = makeClientStubs({
       modelResults: [
@@ -793,6 +836,68 @@ describe("requestReview", () => {
           outcome: "api_error",
           errorSummary: "Invalid final response: missing required fields: output",
           generationId: ACCEPTED_GENERATION_ID,
+        },
+      },
+    ])
+  })
+
+  it("records no usage, duration or generation id for an unreported failure that follows a billed attempt", async () => {
+    const stub = makeClientStubs({
+      modelResults: [
+        { value: invalidJsonResult },
+        { error: new Error("socket hang up") },
+        { value: acceptedResult },
+      ],
+    })
+    const { client, logger } = makeClient(stub)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "invalid_json",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: "response content is not valid JSON",
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "api_error",
+        promptTokens: null,
+        completionTokens: null,
+        costUsd: null,
+        durationMs: null,
+        errorSummary: "socket hang up",
+      },
+      {
+        model: "deepseek/deepseek-v4.1-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        durationMs: STUB_CALL_DURATION_MS,
+        errorSummary: null,
+      },
+    ])
+    expect(logsWithMessage(logger, "review attempt failed")).toEqual([
+      {
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          model: "z-ai/glm-5.3-flash",
+          modelAttemptNumber: 1,
+          outcome: "invalid_json",
+          errorSummary: "response content is not valid JSON",
+          generationId: ACCEPTED_GENERATION_ID,
+        },
+      },
+      {
+        level: "warn",
+        message: "review attempt failed",
+        data: {
+          model: "z-ai/glm-5.3-flash",
+          modelAttemptNumber: 2,
+          outcome: "api_error",
+          errorSummary: "socket hang up",
         },
       },
     ])
@@ -2248,15 +2353,20 @@ describe("requestReview", () => {
 })
 
 /** A streamed Responses body as OpenRouter sends it: a created event with no
- *  output yet, then the completed event carrying the whole payload. */
-const makeStreamedWireResponse = (payload: z.infer<typeof wirePayloadSchema>): Response => {
+ *  output yet, then the terminal event carrying the whole payload. A response
+ *  the provider stopped early ends with `response.incomplete` instead of
+ *  `response.completed`. */
+const makeStreamedWireResponse = (
+  payload: z.infer<typeof wirePayloadSchema>,
+  terminalEventType: "response.completed" | "response.incomplete" = "response.completed",
+): Response => {
   const createdEvent = {
     type: "response.created",
     sequence_number: 0,
-    response: { ...payload, status: "in_progress", output: [] },
+    response: { ...payload, status: "in_progress", incomplete_details: null, output: [] },
   }
-  const completedEvent = { type: "response.completed", sequence_number: 1, response: payload }
-  const body = [createdEvent, completedEvent]
+  const terminalEvent = { type: terminalEventType, sequence_number: 1, response: payload }
+  const body = [createdEvent, terminalEvent]
     .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
     .join("")
 
@@ -2274,15 +2384,19 @@ const makeJsonErrorWireResponse = (statusCode: number, body: unknown): Response 
 const sentRequestBodySchema = z.looseObject({ model: z.string() })
 
 /** The real Agent SDK client, whose HTTP client answers each request with the
- *  next wire response in order. `sentModels` records each request's model. */
+ *  next wire response in order. `sentBodies` records each request's JSON
+ *  body, and `sentModels` its model. */
 const makeRealSdkAgent = (
   wireResponses: Response[],
-): { agent: AgentLike; sentModels: string[] } => {
+): { agent: AgentLike; sentBodies: unknown[]; sentModels: string[] } => {
+  const sentBodies: unknown[] = []
   const sentModels: string[] = []
 
   const fetcher: Fetcher = async (input, init) => {
     const request = input instanceof Request ? input : new Request(input, init)
-    sentModels.push(sentRequestBodySchema.parse(await request.json()).model)
+    const sentBody: unknown = await request.json()
+    sentBodies.push(sentBody)
+    sentModels.push(sentRequestBodySchema.parse(sentBody).model)
     const wireResponse = wireResponses.at(sentModels.length - 1)
 
     if (!wireResponse) throw new Error(`fetcher: unexpected request #${sentModels.length}`)
@@ -2290,7 +2404,7 @@ const makeRealSdkAgent = (
   }
 
   const agent = new OpenRouter({ apiKey: "sk-or-test", httpClient: new HTTPClient({ fetcher }) })
-  return { agent, sentModels }
+  return { agent, sentBodies, sentModels }
 }
 
 /** A real call's duration varies from run to run, so these tests check only
@@ -2320,6 +2434,33 @@ describe("requestReview through the real Agent SDK", () => {
       ],
     })
     expect(realSdk.sentModels).toEqual(["z-ai/glm-5.3-flash"])
+  })
+
+  it("sends a streamed Responses body that carries neither the call-report hook nor the abort signal", async () => {
+    const realSdk = makeRealSdkAgent([makeStreamedWireResponse(parseAcceptedPayload())])
+    const { client, logger } = makeClient(realSdk)
+
+    await client.requestReview(requestParams, logger)
+
+    expect(realSdk.sentBodies).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        instructions: "system prompt",
+        input: "user prompt",
+        max_output_tokens: 128_000,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "review_response",
+            strict: true,
+            schema: reviewResponseJsonSchema,
+          },
+        },
+        service_tier: "auto",
+        store: false,
+        stream: true,
+      },
+    ])
   })
 
   it("records the captured stream with an empty output as a billed empty_content attempt, then retries", async () => {
@@ -2358,6 +2499,39 @@ describe("requestReview through the real Agent SDK", () => {
           errorSummary: EMPTY_OUTPUT_REJECTION_SUMMARY,
           generationId: ACCEPTED_GENERATION_ID,
         },
+      },
+    ])
+    expect(realSdk.sentModels).toEqual(["z-ai/glm-5.3-flash", "z-ai/glm-5.3-flash"])
+  })
+
+  it("records response_incomplete with the provider's reason for a stream that ends incomplete with invalid JSON, then retries", async () => {
+    const incompletePayload = {
+      ...wirePayloadSchema.parse(invalidJsonWirePayload),
+      status: "incomplete",
+      incomplete_details: { reason: "max_output_tokens" },
+    }
+    const realSdk = makeRealSdkAgent([
+      makeStreamedWireResponse(incompletePayload, "response.incomplete"),
+      makeStreamedWireResponse(parseAcceptedPayload()),
+    ])
+    const { client, logger } = makeClient(realSdk)
+
+    const result = await client.requestReview(requestParams, logger)
+
+    expect(result.attempts).toEqual([
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "response_incomplete",
+        ...ACCEPTED_USAGE,
+        durationMs: measuredDuration,
+        errorSummary: "response incomplete: max_output_tokens",
+      },
+      {
+        model: "z-ai/glm-5.3-flash",
+        outcome: "accepted",
+        ...ACCEPTED_USAGE,
+        durationMs: measuredDuration,
+        errorSummary: null,
       },
     ])
     expect(realSdk.sentModels).toEqual(["z-ai/glm-5.3-flash", "z-ai/glm-5.3-flash"])
